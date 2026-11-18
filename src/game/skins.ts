@@ -829,8 +829,8 @@ export const SKINS: SkinConfig[] = [
     particleShape: 'ink',
     palette: {
       skyTop: '#26384f',
-      skyMid: '#bec7cf',
-      skyBottom: '#95a0ab',
+      skyMid: '#405d78',
+      skyBottom: '#91aeb2',
       horizonMist: '#c6d9d8',
       architectureLight: '#d9eee8',
       architectureMid: '#527e83',
