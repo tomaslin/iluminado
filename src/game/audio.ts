@@ -92,6 +92,7 @@ const TRACK_TRIM_GAINS: Record<string, number> = {
   'music/world5.mp3': 0.8,
   'music/world6.mp3': 1.42,
   'music/world7.mp3': 0.68,
+  'music/world8.mp3': 0.68,
   'music/world9.mp3': 0.65,
   'music/world10.mp3': 1.62,
   'music/world11.mp3': 0.94,

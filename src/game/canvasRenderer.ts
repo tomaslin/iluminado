@@ -5,7 +5,7 @@ import {
   canPlacePiece,
   getPieceLandingColumns,
 } from './engine';
-import { isHexColorDark } from './skins';
+import { getHexLuminance, isHexColorDark } from './skins';
 import { BlockStyle, BoardOrientation, BoardState, Cell, Piece, SkinConfig } from './types';
 
 interface Particle {
@@ -3209,6 +3209,9 @@ export class IluminadoCanvasRenderer {
     }
 
     // Keep tiles clean: draw center glyph ONLY for Chain enhancement blocks
+    const useDarkChainGlyph =
+      getHexLuminance(style.fill) > 0.78 &&
+      getHexLuminance(style.emblemColor) < 0.45;
     if (isChain) {
       const cx = left + bw * 0.5;
       const cy = top + bh * 0.5;
@@ -3218,17 +3221,17 @@ export class IluminadoCanvasRenderer {
       ctx.scale(pulse, pulse);
       const arm = size * 0.28;
       const thick = size * 0.1;
-      ctx.fillStyle = '#faf6ee';
+      ctx.fillStyle = useDarkChainGlyph ? style.emblemColor : '#faf6ee';
       ctx.fillRect(-arm, -thick / 2, arm * 2, thick);
       ctx.fillRect(-thick / 2, -arm, thick, arm * 2);
-      ctx.strokeStyle = style.border;
+      ctx.strokeStyle = useDarkChainGlyph ? style.highlight : style.border;
       ctx.lineWidth = 1;
       ctx.strokeRect(-arm, -thick / 2, arm * 2, thick);
       ctx.restore();
     }
 
     if (fx.chainMarked) {
-      ctx.strokeStyle = '#faf6ee';
+      ctx.strokeStyle = useDarkChainGlyph ? style.emblemColor : '#faf6ee';
       ctx.lineWidth = 2;
       ctx.strokeRect(left + 2, top + 2, bw - 4, bh - 4);
     }

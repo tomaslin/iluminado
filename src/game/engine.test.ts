@@ -442,19 +442,15 @@ test('getPieceLandingColumns predicts per-column split landing heights and hardD
   assert.ok((state.grid[9][4]?.fallOffset ?? 0) >= 5);
 });
 
-test('All 29 soundtrack worlds (1-7 and 9-30) configure root-relative MP3 paths in music/ with no public folder and .nojekyll present', () => {
-  assert.equal(fs.existsSync(path.resolve(process.cwd(), 'public')), false);
+test('All 30 soundtrack worlds (1-30) configure root-relative MP3 paths in music/ with no public/music folder and .nojekyll present', () => {
+  assert.equal(fs.existsSync(path.resolve(process.cwd(), 'public/music')), false);
   assert.equal(fs.existsSync(path.resolve(process.cwd(), '.nojekyll')), true);
   assert.equal(
     fs.existsSync(path.resolve(process.cwd(), 'music/wolrd30.mp3')),
     false,
     'Typo music/wolrd30.mp3 should remain renamed to music/world30.mp3'
   );
-  const mp3Indices = [
-    0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
-    20, 21, 22, 23, 24, 25, 26, 27, 28, 29,
-  ];
-  for (const i of mp3Indices) {
+  for (let i = 0; i < 30; i++) {
     const expectedUrl = `music/world${i + 1}.mp3`;
     assert.equal(SKINS[i].music.audioTrackUrl, expectedUrl);
     const filePath = path.resolve(process.cwd(), expectedUrl);
@@ -659,12 +655,8 @@ test('INITIAL_UNLOCKED_SKIN_IDS unlocks all 30 worlds including all 29 studio MP
   }
 });
 
-test('getTrackTrimGain normalizes loudness across all 29 MP3 tracks and getSpectrumSnapshot is safe in Node', () => {
-  const mp3Indices = [
-    0, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19,
-    20, 21, 22, 23, 24, 25, 26, 27, 28, 29,
-  ];
-  for (const i of mp3Indices) {
+test('getTrackTrimGain normalizes loudness across all 30 MP3 tracks and getSpectrumSnapshot is safe in Node', () => {
+  for (let i = 0; i < 30; i++) {
     const url = SKINS[i].music.audioTrackUrl;
     const gain = getTrackTrimGain(url);
     assert.ok(gain >= 0.5 && gain <= 3.0, `Unexpected trim gain ${gain} for ${url}`);
@@ -672,6 +664,7 @@ test('getTrackTrimGain normalizes loudness across all 29 MP3 tracks and getSpect
   // Quiet world3 track receives strong positive trim vs hot world9 / world14 tracks
   assert.ok(getTrackTrimGain('music/world3.mp3') > 2.0);
   assert.ok(getTrackTrimGain('/music/world3.mp3') > 2.0);
+  assert.ok(getTrackTrimGain('music/world8.mp3') < 1.0);
   assert.ok(getTrackTrimGain('music/world9.mp3') < 1.0);
   assert.ok(getTrackTrimGain('music/world14.mp3') < 0.8);
   assert.equal(getTrackTrimGain(undefined), 1);
@@ -970,6 +963,15 @@ test('All 30 skins avoid pure black/white, preserve readable sky luminance, and 
     assert.ok(pal.blockB.fillVariant);
     assert.ok(pal.blockB.strokeVariant);
   }
+
+  // Monochrome World 11 (limbo-mist) maintains crisp luminance contrast between board, blockA, and blockB
+  const limbo = SKINS.find((s) => s.id === 'limbo-mist')!;
+  const m = limbo.palette.boardSurface.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/)!;
+  const boardLum = (0.2126 * +m[1] + 0.7152 * +m[2] + 0.0722 * +m[3]) / 255;
+  const aLum = getHexLuminance(limbo.palette.blockA.fill);
+  const bLum = getHexLuminance(limbo.palette.blockB.fill);
+  assert.ok(aLum - boardLum >= 0.25, `Expected limbo-mist blockA (${aLum.toFixed(2)}) clearly brighter than board (${boardLum.toFixed(2)})`);
+  assert.ok(boardLum - bLum >= 0.35, `Expected limbo-mist blockB (${bLum.toFixed(2)}) clearly darker than board (${boardLum.toFixed(2)})`);
 });
 
 test('pickRandomSkinIndex and shuffled skin deck avoid back-to-back repeats and cover all 30 worlds', () => {

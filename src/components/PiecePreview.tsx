@@ -1,4 +1,5 @@
 import React from 'react';
+import { getHexLuminance } from '../game/skins';
 import { Piece, SkinConfig } from '../game/types';
 
 interface PiecePreviewProps {
@@ -153,24 +154,31 @@ export const PiecePreview: React.FC<PiecePreviewProps> = ({
                   strokeWidth={strokeWidth}
                 />
               )}
-              {pCell.isChain && (
-                <g>
-                  <rect
-                    x={cx - cellSize * 0.25}
-                    y={cy - cellSize * 0.08}
-                    width={cellSize * 0.5}
-                    height={cellSize * 0.16}
-                    fill="#faf6ee"
-                  />
-                  <rect
-                    x={cx - cellSize * 0.08}
-                    y={cy - cellSize * 0.25}
-                    width={cellSize * 0.16}
-                    height={cellSize * 0.5}
-                    fill="#faf6ee"
-                  />
-                </g>
-              )}
+              {pCell.isChain && (() => {
+                const chainFill =
+                  getHexLuminance(style.fill) > 0.78 &&
+                  getHexLuminance(style.emblemColor) < 0.45
+                    ? style.emblemColor
+                    : '#faf6ee';
+                return (
+                  <g>
+                    <rect
+                      x={cx - cellSize * 0.25}
+                      y={cy - cellSize * 0.08}
+                      width={cellSize * 0.5}
+                      height={cellSize * 0.16}
+                      fill={chainFill}
+                    />
+                    <rect
+                      x={cx - cellSize * 0.08}
+                      y={cy - cellSize * 0.25}
+                      width={cellSize * 0.16}
+                      height={cellSize * 0.5}
+                      fill={chainFill}
+                    />
+                  </g>
+                );
+              })()}
             </g>
           );
         })
