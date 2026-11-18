@@ -206,6 +206,8 @@ export interface SkinConfig {
     squareHighlight: string;
   };
   music: {
+    /** False disables procedural stems when no external track is assigned. */
+    enabled?: boolean;
     styleId: MusicStyleId;
     genreLabel: string;
     audioTrackUrl?: string;
