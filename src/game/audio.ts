@@ -920,8 +920,6 @@ export class IluminadoAudioEngine {
     this.stemVocalGain?.gain.setTargetAtTime(stems.vocal, now, 0.35);
 
     const { music } = skin;
-    // A deliberately silent world must not fall back to generated synth music.
-    if (music.enabled === false) return;
     const style = music.styleId;
     const eighthDur = 30 / skin.bpm;
     const sixteenthDur = eighthDur * 0.5;
