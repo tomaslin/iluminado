@@ -628,9 +628,9 @@ export const SKINS: SkinConfig[] = [
       squareHighlight: '#fff3c4',
     },
     music: {
-      styleId: 'ambient',
-      enabled: false, // World 8 has no generated soundtrack; user will add music later.
-      genreLabel: 'Silent',
+      styleId: 'synthwave',
+      genreLabel: 'Synthwave',
+      audioTrackUrl: 'music/world8.mp3',
       rootMidi: 57,
       scale: [0, 2, 3, 5, 7, 8, 10],
       chords: [
