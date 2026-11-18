@@ -1,0 +1,126 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-display: 'Fraunces', Georgia, serif;
+    --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    font-family: var(--font-sans);
+    background-color: #f4ece6;
+    color: #2b2738;
+    -webkit-font-smoothing: antialiased;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    user-select: none;
+  }
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+.font-mono-tabular {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+@keyframes modalIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes tempoPulse {
+  0%, 100% {
+    transform: scale(0.92);
+    opacity: 0.45;
+  }
+  20% {
+    transform: scale(1.28);
+    opacity: 1;
+  }
+}
+
+@keyframes eqDance {
+  0%, 100% {
+    transform: scaleY(0.28);
+  }
+  35% {
+    transform: scaleY(0.95);
+  }
+  70% {
+    transform: scaleY(0.45);
+  }
+}
+
+.animate-modal-in {
+  animation: modalIn 190ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.animate-tempo-pulse {
+  animation: tempoPulse var(--beat-dur, 0.75s) ease-out infinite;
+}
+
+.animate-eq-bar {
+  transform-origin: bottom center;
+  animation: eqDance var(--beat-dur, 0.75s) ease-in-out infinite;
+}
+
+@media (min-width: 1024px) {
+  .title-diagonal-wing {
+    clip-path: polygon(0 0, 100% 0, 84% 100%, 0 100%);
+  }
+}
+
+.touch-controls-bar {
+  display: grid;
+}
+
+.touch-landscape-wings {
+  display: flex;
+}
+
+.kbd-hint-bar {
+  display: none;
+}
+
+@media (min-width: 768px) and (min-height: 561px) and (pointer: fine) {
+  .touch-controls-bar {
+    display: none;
+  }
+
+  .touch-landscape-wings {
+    display: none;
+  }
+
+  .kbd-hint-bar {
+    display: block;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-modal-in,
+  .animate-tempo-pulse,
+  .animate-eq-bar {
+    animation: none !important;
+  }
+}
