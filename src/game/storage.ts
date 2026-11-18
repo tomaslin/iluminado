@@ -1,9 +1,9 @@
 import { getPreviousDateKey } from './daily';
+import { ALL_SHIFT_TYPES, VALID_SHIFT_SET } from './shifts';
 import { INITIAL_UNLOCKED_SKIN_IDS, SKINS } from './skins';
-import { DailyCompletionRecord, SavedProgress } from './types';
+import { DailyCompletionRecord, SavedProgress, ShiftType } from './types';
 
 const STORAGE_KEY = 'iluminado_progress_v2';
-const LEGACY_STORAGE_KEY = 'monument_lumines_progress_v2';
 const VALID_SKIN_IDS = new Set(SKINS.map((s) => s.id));
 
 function createDefaultProgress(): SavedProgress {
@@ -16,19 +16,115 @@ function createDefaultProgress(): SavedProgress {
     dailyHistory: {},
     dailyStreak: 0,
     lastDailyCompletedDate: null,
+    timeAttackSplits: {},
+    enabledShifts: [...ALL_SHIFT_TYPES],
   };
+}
+
+export function sanitizeTimeAttackSplits(
+  raw: unknown
+): Record<string, number[]> {
+  if (!raw || typeof raw !== 'object') return {};
+  const result: Record<string, number[]> = {};
+  for (const [key, arr] of Object.entries(raw as Record<string, unknown>)) {
+    if (!Array.isArray(arr)) continue;
+    const cleaned = arr
+      .filter((v): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0)
+      .map((v) => Math.round(v));
+    if (cleaned.length > 0) {
+      result[key] = cleaned;
+    }
+  }
+  return result;
+}
+
+const NEW_V2_SHIFTS: ShiftType[] = [
+  'corner_edge_block',
+  'bottom_edge_block',
+  'side_edge_ledge',
+  'brick_2x1',
+  'brick_3x2',
+  'brick_tetromino',
+  'three_color_mode',
+];
+
+const NEW_V3_SHIFTS: ShiftType[] = [
+  'brick_3x1',
+  'brick_blocked',
+];
+
+const NEW_V4_SHIFTS: ShiftType[] = [
+  'flow_direction',
+  'brick_peggle',
+];
+
+export const NEW_V5_SHIFTS: ShiftType[] = [
+  'cyclotron_flow',
+  'portal_wrap',
+  'reverse_sweep',
+  'staircase_terraces',
+  'center_spire',
+  'dome_pedestal',
+  'spring_bounce',
+  'conveyor_floor',
+  'twin_sweep',
+  'crumble_blocks',
+  'brick_l_trio',
+  'chameleon_rotate',
+  'prism_wild_bricks',
+  'mirror_flip',
+  'vortex_swirl',
+];
+
+function migrateEnabledShifts(
+  parsed: Partial<SavedProgress> & { shiftCatalogVersion?: number }
+): ShiftType[] {
+  if (!Array.isArray(parsed.enabledShifts)) {
+    return [...ALL_SHIFT_TYPES];
+  }
+  const filtered = Array.from(
+    new Set(
+      parsed.enabledShifts.filter((s): s is ShiftType =>
+        VALID_SHIFT_SET.has(s as ShiftType)
+      )
+    )
+  );
+  const ver = parsed.shiftCatalogVersion ?? 1;
+  if (ver >= 5 || filtered.length === 0) {
+    return filtered;
+  }
+  const merged = new Set<ShiftType>(filtered);
+  if (ver < 2) {
+    for (const s of NEW_V2_SHIFTS) {
+      merged.add(s);
+    }
+  }
+  if (ver < 3) {
+    for (const s of NEW_V3_SHIFTS) {
+      merged.add(s);
+    }
+  }
+  if (ver < 4) {
+    for (const s of NEW_V4_SHIFTS) {
+      merged.add(s);
+    }
+  }
+  for (const s of NEW_V5_SHIFTS) {
+    merged.add(s);
+  }
+  return Array.from(merged);
 }
 
 export function loadProgress(): SavedProgress {
   const defaults = createDefaultProgress();
   try {
-    const raw =
-      localStorage.getItem(STORAGE_KEY) ??
-      localStorage.getItem(LEGACY_STORAGE_KEY);
+    const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) {
       return defaults;
     }
-    const parsed = JSON.parse(raw) as Partial<SavedProgress>;
+    const parsed = JSON.parse(raw) as Partial<SavedProgress> & {
+      shiftCatalogVersion?: number;
+    };
     const unlockedSet = new Set<string>(INITIAL_UNLOCKED_SKIN_IDS);
     if (Array.isArray(parsed.unlockedSkins)) {
       for (const id of parsed.unlockedSkins) {
@@ -60,6 +156,8 @@ export function loadProgress(): SavedProgress {
         typeof parsed.lastDailyCompletedDate === 'string'
           ? parsed.lastDailyCompletedDate
           : null,
+      timeAttackSplits: sanitizeTimeAttackSplits(parsed.timeAttackSplits),
+      enabledShifts: migrateEnabledShifts(parsed),
     };
   } catch {
     return defaults;
@@ -68,7 +166,10 @@ export function loadProgress(): SavedProgress {
 
 export function saveProgress(progress: SavedProgress): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(progress));
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ ...progress, shiftCatalogVersion: 5 })
+    );
   } catch {
     // Ignore storage quota errors in private browsing
   }
@@ -162,5 +263,33 @@ export function applyDailyResultToProgress(
     dailyHistory: nextHistory,
     dailyStreak: nextStreak,
     lastDailyCompletedDate: nextLastDate,
+  };
+}
+
+export function applyTimeAttackSplitsToProgress(
+  prev: SavedProgress,
+  durationSec: 60 | 180 | 300,
+  finalScore: number,
+  splits: number[]
+): SavedProgress {
+  const modeKey = `time_attack_${durationSec}`;
+  const prevBest = prev.highScores[modeKey] ?? 0;
+  const roundedScore = Math.max(0, Math.round(finalScore));
+  const existingSplits = prev.timeAttackSplits?.[String(durationSec)];
+  const shouldUpdateSplits =
+    splits.length > 0 && (roundedScore >= prevBest || !existingSplits || existingSplits.length === 0);
+
+  return {
+    ...prev,
+    highScores: {
+      ...prev.highScores,
+      [modeKey]: Math.max(prevBest, roundedScore),
+    },
+    timeAttackSplits: shouldUpdateSplits
+      ? {
+          ...(prev.timeAttackSplits ?? {}),
+          [String(durationSec)]: splits.map((v) => Math.max(0, Math.round(v))),
+        }
+      : prev.timeAttackSplits ?? {},
   };
 }

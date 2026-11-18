@@ -1,27 +1,148 @@
-export type CellColor = 0 | 1;
+export type CellColor = 0 | 1 | 2;
 export type BoardOrientation = 'landscape' | 'portrait';
+
+export type GravityDirection = 'down' | 'left' | 'right' | 'up';
+
+export type PieceShapeMode =
+  | 'standard_2x2'
+  | 'domino_2x1'
+  | 'trio_3x1'
+  | 'l_trio_2x2'
+  | 'rect_3x2'
+  | 'tetromino'
+  | 'blocked_2x2'
+  | 'prism_wild_2x2'
+  | 'peggle_1x1';
+
+export type TetrominoKind = 'I' | 'O' | 'T' | 'S' | 'Z' | 'J' | 'L';
+
+export type ShiftType =
+  | 'rotate_90'
+  | 'flow_direction'
+  | 'cyclotron_flow'
+  | 'portal_wrap'
+  | 'reverse_sweep'
+  | 'board_resize'
+  | 'line_color_shift'
+  | 'split_canyon'
+  | 'hourglass_funnel'
+  | 'twin_elevators'
+  | 'rolling_wave_floor'
+  | 'octagon_cutoffs'
+  | 'staircase_terraces'
+  | 'center_spire'
+  | 'dome_pedestal'
+  | 'floating_shelf'
+  | 'castle_battlements'
+  | 'patrolling_bumper'
+  | 'corner_edge_block'
+  | 'bottom_edge_block'
+  | 'side_edge_ledge'
+  | 'spring_bounce'
+  | 'conveyor_floor'
+  | 'twin_sweep'
+  | 'crumble_blocks'
+  | 'brick_2x1'
+  | 'brick_3x1'
+  | 'brick_l_trio'
+  | 'brick_3x2'
+  | 'brick_tetromino'
+  | 'brick_blocked'
+  | 'brick_peggle'
+  | 'chameleon_rotate'
+  | 'prism_wild_bricks'
+  | 'three_color_mode'
+  | 'inside_out_swap'
+  | 'sawtooth_shear'
+  | 'horizon_shear'
+  | 'zipper_merge'
+  | 'mirror_flip'
+  | 'vortex_swirl';
+
+export type ObstacleVisualStyle =
+  | 'stone'
+  | 'girder'
+  | 'bumper'
+  | 'chasm'
+  | 'sawtooth'
+  | 'blocked'
+  | 'spring'
+  | 'crumble';
+
+export interface PatrollingBumperState {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  minX: number;
+  maxX: number;
+  dir: -1 | 1;
+  beatAccum: number;
+}
+
+export interface ShiftVisualEffect {
+  type: ShiftType;
+  life: number;
+  maxLife: number;
+  faultRow?: number;
+  lineCells?: Array<{ r: number; c: number }>;
+  lineColor?: CellColor;
+  mirrorCol?: number;
+  swirlDir?: -1 | 1;
+}
 
 export interface Cell {
   id: number;
   color: CellColor;
   isChain: boolean;
+  isPeggle?: boolean;
+  isWild?: boolean;
+  isObstacle?: boolean;
+  obstacleFixed?: boolean;
+  obstacleStyle?: ObstacleVisualStyle;
+  crumbleHp?: number;
   chainMarked: boolean;
   inSquare: boolean;
   pendingClear: boolean;
   sweptCol: boolean;
   fallOffset: number; // visual interpolation in rows (>0 means animating downward)
   landFlash: number; // 0..1 impact pulse
-  animOffsetX?: number; // temporary column translation offset for orientation pivot
+  animOffsetX?: number; // temporary column translation offset for orientation pivot / flow slide
   animOffsetY?: number; // temporary row translation offset (>0 = raised upward)
 }
 
+export interface PieceCellData {
+  color: CellColor;
+  isChain: boolean;
+  isBlocked?: boolean;
+  isPeggle?: boolean;
+  isWild?: boolean;
+}
+
+export type PieceCell = PieceCellData | null;
+
 export interface Piece {
-  x: number; // column of top-left cell (0..14)
-  y: number; // row of top-left cell (can start at -2 above board)
-  cells: [
-    [ { color: CellColor; isChain: boolean }, { color: CellColor; isChain: boolean } ],
-    [ { color: CellColor; isChain: boolean }, { color: CellColor; isChain: boolean } ]
-  ];
+  x: number; // column of top-left cell
+  y: number; // row of top-left cell (can start at -2..-4 above board)
+  cells: PieceCell[][]; // rows x cols bounding grid, null for empty tetromino slots
+  shapeMode?: PieceShapeMode;
+  tetrominoKind?: TetrominoKind;
+  isPeggle?: boolean;
+  peggleVel?: -1 | 1;
+  peggleBounces?: number;
+  peggleTrail?: Array<{ x: number; y: number }>;
+  springBounced?: boolean;
+}
+
+export interface ShiftSchedulerState {
+  shiftTurnCount: number;
+  stageTurnIndex: number;
+  obstaclesInCurrentTurn: number;
+  tileShiftsInCurrentTurn: number;
+  usedTileTypesInCurrentTurn: ShiftType[];
+  usedOneTimeShifts: ShiftType[];
+  turnsSinceRotation: number;
+  turnsSinceTileShift: number;
 }
 
 export interface SquareCoord {
@@ -40,7 +161,7 @@ export type GameMode =
   | 'vs_cpu'
   | 'battle_2p';
 
-export type ChallengeVariant = 'basic' | 'endless' | 'shuffle';
+export type ChallengeVariant = 'basic' | 'endless' | 'shuffle' | 'zen';
 
 export type GameStatus = 'title' | 'playing' | 'paused' | 'gameover';
 
@@ -178,7 +299,7 @@ export interface SkinConfig {
   spawnDelay: number; // seconds before gravity starts
   chainFrequency: number; // probability 0..0.18 of a cell in a piece being a Chain Block
   squaresPerLevel: number; // hidden squares required per level-up (excess overflow discarded)
-  levelsPerSkin: number; // 4-5 levels inside this skin before transitioning
+  levelsPerSkin: number; // 3 levels inside this skin before transitioning
   squaresToAdvance: number; // nominal stage square target (squaresPerLevel * levelsPerSkin)
   finalStageTimerSec?: number; // final stage transitions by flat timer instead of square quota
   theme: SkinVisualTheme;
@@ -203,6 +324,7 @@ export interface SkinConfig {
     hudAccent: string;
     blockA: BlockStyle;
     blockB: BlockStyle;
+    blockC: BlockStyle;
     squareHighlight: string;
   };
   music: {
@@ -245,8 +367,18 @@ export interface BoardState {
   grid: (Cell | null)[][]; // [row][col], 10x16 landscape or 14x10 portrait
   cols: number;
   rows: number;
+  baseCols: number;
+  baseRows: number;
   orientation: BoardOrientation;
+  gravityDirection?: GravityDirection;
   orientationGraceTimer: number; // brief gravity pause after orientation switch
+  activeShift: ShiftType | null;
+  pieceShapeMode: PieceShapeMode;
+  colorCount: 2 | 3;
+  conveyorDir?: -1 | 1;
+  shiftScheduler: ShiftSchedulerState;
+  patrollingBumper: PatrollingBumperState | null;
+  shiftEffect: ShiftVisualEffect | null;
   activePiece: Piece | null;
   spawnTimer: number;
   gravityAccum: number;
@@ -263,6 +395,11 @@ export interface BoardState {
   isGameOver: boolean;
   lockedColumnsLeft: number; // for VS battle pressure
   lockedColumnsRight: number;
+  pendingGarbage: number;
+  biggestSweep: number;
+  chainClearsTotal: number;
+  singleColorCount: number;
+  allClearCount: number;
 }
 
 export interface PuzzleLevel {
@@ -306,8 +443,14 @@ export interface HudSnapshot {
   status: GameStatus;
   mode: GameMode;
   orientation: BoardOrientation;
+  gravityDirection?: GravityDirection;
   boardCols: number;
   boardRows: number;
+  activeShift: ShiftType | null;
+  activeShiftLabel: string | null;
+  pieceShapeMode?: PieceShapeMode;
+  colorCount?: 2 | 3;
+  enabledShiftCount: number;
   challengeVariant: ChallengeVariant;
   score: number;
   highScore: number;
@@ -338,6 +481,18 @@ export interface HudSnapshot {
   p2Squares?: number;
   p2Combo?: number;
   winnerLabel?: string;
+  worldsCleared: number;
+  biggestSweep: number;
+  chainClears: number;
+  singleColorBonuses: number;
+  allClearBonuses: number;
+  pendingGarbage: number;
+  p2PendingGarbage: number;
+  encoreBonusBpm: number;
+  timeAttackPaceDelta: number | null;
+  timeAttackPbFraction: number | null;
+  timeAttackCurrentFraction: number | null;
+  hasNextStage: boolean;
 }
 
 export interface SavedProgress {
@@ -349,4 +504,6 @@ export interface SavedProgress {
   dailyHistory: Record<string, DailyCompletionRecord>;
   dailyStreak: number;
   lastDailyCompletedDate: string | null;
+  timeAttackSplits?: Record<string, number[]>;
+  enabledShifts: ShiftType[];
 }

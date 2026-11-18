@@ -1,5 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import {
+  ChevronLeft,
+  ChevronRight,
+  SlidersHorizontal,
+  Volume2,
+  VolumeX,
+} from 'lucide-react';
+import {
   formatCountdownHMS,
   getMsUntilNextDaily,
 } from '../game/daily';
@@ -10,7 +17,6 @@ import {
   isDailyCompletedForDate,
 } from '../game/storage';
 import {
-  BoardOrientation,
   ChallengeVariant,
   DailyChallengeSpec,
   GameMode,
@@ -21,7 +27,6 @@ import {
 interface TitleScreenProps {
   selectedMode: GameMode;
   onSelectMode: (mode: GameMode) => void;
-  orientation: BoardOrientation;
   isCompactLandscape: boolean;
   challengeVariant: ChallengeVariant;
   onSelectChallengeVariant: (v: ChallengeVariant) => void;
@@ -35,50 +40,55 @@ interface TitleScreenProps {
   muted: boolean;
   onToggleMute: () => void;
   previewSkin: SkinConfig;
+  onStepPreviewSkin: (delta: -1 | 1) => void;
   getSpectrumSnapshot?: () => { bands: number[]; hasLiveAudio: boolean };
   dailySpec: DailyChallengeSpec;
   onStart: () => void;
+  onOpenShiftSettings: () => void;
 }
 
-const MODE_LIST: Array<{ id: GameMode; label: string; summary: string }> = [
+const MODE_LIST: Array<{ id: GameMode; label: string; shortLabel: string; summary: string }> = [
   {
     id: 'challenge',
     label: 'Challenge',
-    summary:
-      'Clear squares smoothly as atmosphere, tempo, and soundtrack gently evolve.',
+    shortLabel: 'Challenge',
+    summary: 'Match 2×2 squares to the beat as worlds and music evolve.',
   },
   {
     id: 'daily',
     label: 'Daily Challenge',
-    summary:
-      'A fresh deterministic courtyard and mission objective generated once every 24 hours.',
+    shortLabel: 'Daily',
+    summary: 'A fresh courtyard and goal shared every day.',
   },
   {
     id: 'time_attack',
     label: 'Time Attack',
-    summary:
-      'Clear as many monochromatic squares as possible before the clock runs out.',
+    shortLabel: 'Time Attack',
+    summary: 'Score as many clears as you can before time runs out.',
   },
   {
     id: 'puzzle',
     label: 'Puzzle',
-    summary: 'Sculpt a target silhouette framed in contrasting tiles.',
+    shortLabel: 'Puzzle',
+    summary: 'Shape each target silhouette with contrasting tiles.',
   },
   {
     id: 'mission',
     label: 'Mission',
-    summary: 'Complete tactical clearing trials under strict time limits.',
+    shortLabel: 'Mission',
+    summary: 'Take on focused clearing goals against the clock.',
   },
   {
     id: 'vs_cpu',
     label: 'VS CPU',
-    summary: 'Duel an adaptive strategist on twin playfields.',
+    shortLabel: 'VS CPU',
+    summary: 'Go head-to-head against a clever rival board.',
   },
   {
     id: 'battle_2p',
     label: '2P Battle',
-    summary:
-      'Shared-screen two-player contest: big sweeps send pressure to your rival.',
+    shortLabel: '2P Battle',
+    summary: 'Shared-screen two-player showdown with sweep attacks.',
   },
 ];
 
@@ -301,7 +311,6 @@ const ModeArtworkSvg: React.FC<{
 export const TitleScreen: React.FC<TitleScreenProps> = ({
   selectedMode,
   onSelectMode,
-  orientation,
   isCompactLandscape,
   challengeVariant,
   onSelectChallengeVariant,
@@ -315,9 +324,11 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
   muted,
   onToggleMute,
   previewSkin,
+  onStepPreviewSkin,
   getSpectrumSnapshot,
   dailySpec,
   onStart,
+  onOpenShiftSettings,
 }) => {
   const [countdownText, setCountdownText] = useState(() =>
     formatCountdownHMS(getMsUntilNextDaily())
@@ -383,545 +394,472 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
   const dailySkin = SKINS[dailySpec.skinIndex] ?? previewSkin;
   const startBlocked = selectedMode === 'daily' && dailyCompletedToday;
 
+  const heroInk = darkSky ? '#faf6ee' : palette.hudInk;
+  const heroMuted = darkSky ? 'rgba(250, 246, 238, 0.8)' : palette.hudMuted;
+  const topChipBg = darkSky
+    ? 'rgba(22, 24, 40, 0.54)'
+    : 'rgba(250, 246, 238, 0.72)';
+  const topChipBorder = darkSky
+    ? '1px solid rgba(250, 246, 238, 0.16)'
+    : '1px solid rgba(32, 28, 44, 0.1)';
+
   return (
     <div className="fixed inset-0 z-20 flex flex-col justify-between pointer-events-none overflow-y-auto lg:overflow-hidden">
-      {/* Main Split Architectural Layout */}
-      <div
-        className={`flex-1 flex ${
-          isCompactLandscape ? 'flex-row' : 'flex-col lg:flex-row'
-        } items-stretch w-full min-h-0`}
+      {/* Top Minimal Perimeter Strip: Brand Lockup & World / Sound / Shifts */}
+      <header
+        className={`w-full flex items-center justify-between gap-3 ${
+          isCompactLandscape ? 'px-4 pt-2.5' : 'px-4 sm:px-8 pt-4 sm:pt-6'
+        } shrink-0`}
       >
-        {/* Left Diagonal Blueprint Wing */}
-        <aside
-          className={`${
-            isCompactLandscape
-              ? 'w-[205px] shrink-0 px-3 py-3 gap-3'
-              : 'lg:w-[25%] lg:min-w-[248px] lg:max-w-[320px] shrink-0 px-4 py-2.5 sm:px-5 sm:py-3.5 lg:py-8 lg:pl-8 lg:pr-14 gap-2 sm:gap-4 lg:gap-6'
-          } flex flex-col justify-between pointer-events-auto title-diagonal-wing transition-colors duration-700`}
-          style={{
-            backgroundColor: darkSky
-              ? 'rgba(18, 24, 38, 0.84)'
-              : 'rgba(40, 36, 56, 0.82)',
-            backgroundImage:
-              'radial-gradient(rgba(250, 246, 238, 0.14) 1px, transparent 1px)',
-            backgroundSize: '18px 18px',
-            color: '#faf6ee',
-          }}
-        >
-          {/* Brand Crest Lockup */}
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2.5">
-              <svg
-                width="40"
-                height="40"
-                viewBox="0 0 48 48"
-                aria-hidden="true"
-                className={`shrink-0 transition-transform duration-300 hover:rotate-90 ${
-                  isCompactLandscape ? 'w-8 h-8' : 'sm:w-11 sm:h-11'
-                }`}
-              >
-                <rect
-                  x="4"
-                  y="4"
-                  width="19"
-                  height="19"
-                  rx="6"
-                  fill={palette.blockA.fill}
-                  stroke="#faf6ee"
-                  strokeOpacity="0.65"
-                  strokeWidth="1.2"
-                />
-                <rect
-                  x="25"
-                  y="4"
-                  width="19"
-                  height="19"
-                  rx="2"
-                  fill={palette.blockB.fill}
-                  stroke="#faf6ee"
-                  strokeOpacity="0.65"
-                  strokeWidth="1.2"
-                />
-                <rect
-                  x="4"
-                  y="25"
-                  width="19"
-                  height="19"
-                  rx="2"
-                  fill={palette.blockB.fill}
-                  stroke="#faf6ee"
-                  strokeOpacity="0.65"
-                  strokeWidth="1.2"
-                />
-                <rect
-                  x="25"
-                  y="25"
-                  width="19"
-                  height="19"
-                  rx="6"
-                  fill={palette.blockA.fill}
-                  stroke="#faf6ee"
-                  strokeOpacity="0.65"
-                  strokeWidth="1.2"
-                />
-              </svg>
-              <div>
-                <h1
-                  className={`font-display ${
-                    isCompactLandscape ? 'text-lg' : 'text-xl sm:text-2xl lg:text-3xl'
-                  } font-semibold tracking-tight leading-none text-[#faf6ee]`}
-                >
-                  Iluminado
-                </h1>
-                <p className="text-[11px] text-[#faf6ee]/75 mt-0.5 sm:mt-1 font-mono-tabular">
-                  {orientation === 'portrait' ? '10×14' : '16×10'} · Zen Puzzle
-                </p>
-              </div>
-            </div>
+        {/* Brand Emblem */}
+        <div className="flex items-center gap-2.5 pointer-events-auto">
+          <svg
+            width="38"
+            height="38"
+            viewBox="0 0 48 48"
+            aria-hidden="true"
+            className="shrink-0 transition-transform duration-300 hover:rotate-90 drop-shadow-sm"
+          >
+            <rect
+              x="4"
+              y="4"
+              width="19"
+              height="19"
+              rx="6"
+              fill={palette.blockA.fill}
+              stroke="#faf6ee"
+              strokeOpacity="0.7"
+              strokeWidth="1.2"
+            />
+            <rect
+              x="25"
+              y="4"
+              width="19"
+              height="19"
+              rx="2"
+              fill={palette.blockB.fill}
+              stroke="#faf6ee"
+              strokeOpacity="0.7"
+              strokeWidth="1.2"
+            />
+            <rect
+              x="4"
+              y="25"
+              width="19"
+              height="19"
+              rx="2"
+              fill={palette.blockB.fill}
+              stroke="#faf6ee"
+              strokeOpacity="0.7"
+              strokeWidth="1.2"
+            />
+            <rect
+              x="25"
+              y="25"
+              width="19"
+              height="19"
+              rx="6"
+              fill={palette.blockA.fill}
+              stroke="#faf6ee"
+              strokeOpacity="0.7"
+              strokeWidth="1.2"
+            />
+          </svg>
+          <h1
+            className={`font-display ${
+              isCompactLandscape ? 'text-xl' : 'text-2xl sm:text-3xl'
+            } font-semibold tracking-tight leading-none`}
+            style={{
+              color: heroInk,
+              textShadow: darkSky ? '0 2px 8px rgba(20, 18, 32, 0.4)' : 'none',
+            }}
+          >
+            Iluminado
+          </h1>
+        </div>
 
-            {!isCompactLandscape && (
-              <button
-                type="button"
-                onClick={onToggleMute}
-                aria-label={muted ? 'Unmute audio (M)' : 'Mute audio (M)'}
-                className="lg:hidden px-3 py-1.5 rounded-lg text-[11px] font-semibold bg-[#faf6ee]/14 hover:bg-[#faf6ee]/24 text-[#faf6ee] transition-colors cursor-pointer whitespace-nowrap min-h-[34px]"
-              >
-                {muted ? 'Muted' : 'Sound On'}
-              </button>
-            )}
-          </div>
-
-          {/* Quiet Architectural Pond Study (pure ambient artwork, no world chrome) */}
-          <div className="hidden lg:flex flex-col gap-3 lg:pr-6 my-auto">
-            <div className="w-full max-w-[190px] rounded-xl p-4 border border-[#faf6ee]/15 bg-[#faf6ee]/6">
-              <svg viewBox="0 0 120 76" className="w-full h-auto" aria-hidden="true">
-                <line x1="8" y1="54" x2="112" y2="54" stroke="#faf6ee" strokeOpacity="0.28" strokeWidth="1" />
-                <ellipse cx="60" cy="54" rx="44" ry="8" fill="none" stroke="#faf6ee" strokeOpacity="0.22" strokeWidth="1" />
-                <rect x="26" y="18" width="22" height="22" rx="7" fill={palette.blockA.fill} stroke="#faf6ee" strokeOpacity="0.6" strokeWidth="1.4" />
-                <polygon points="78,16 96,29 78,42 60,29" fill={palette.blockB.fill} stroke="#faf6ee" strokeOpacity="0.6" strokeWidth="1.4" />
-              </svg>
-              <p className="text-[11px] leading-relaxed text-[#faf6ee]/75 mt-2">
-                Place falling blocks to shape monochromatic 2×2 squares before each sweep dissolves them into still water.
-              </p>
-            </div>
-          </div>
-
-          {/* Left Footer Actions */}
-          <div className={`${isCompactLandscape ? 'flex' : 'hidden lg:flex'} items-center justify-between gap-2 pt-0.5 lg:pr-6`}>
+        {/* Right Controls: Soundtrack Browser + Shifts + Sound */}
+        <div className="flex items-center gap-2 pointer-events-auto">
+          {/* Compact World & Music Selector */}
+          <div
+            className="hidden sm:flex items-center gap-1.5 rounded-xl px-2 py-1 transition-colors duration-300"
+            style={{
+              backgroundColor: topChipBg,
+              color: heroInk,
+              border: topChipBorder,
+            }}
+          >
             <button
               type="button"
-              onClick={onToggleMute}
-              aria-label={muted ? 'Unmute audio (M)' : 'Mute audio (M)'}
-              className="px-3 py-1.5 rounded-lg text-[11px] font-semibold bg-[#faf6ee]/12 hover:bg-[#faf6ee]/22 text-[#faf6ee] transition-colors cursor-pointer whitespace-nowrap min-h-[34px]"
+              onClick={() => onStepPreviewSkin(-1)}
+              aria-label="Previous world soundtrack"
+              className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-[#201c2c]/10 transition-colors cursor-pointer"
             >
-              {muted ? 'Audio Muted' : 'Sound Active'}
+              <ChevronLeft className="w-4 h-4" />
             </button>
-            {modeBest > 0 && (
-              <div className="text-right font-mono-tabular text-[11px] text-[#faf6ee]/80 whitespace-nowrap">
-                Best {modeBest.toLocaleString()}
-              </div>
-            )}
-          </div>
-        </aside>
 
-        {/* Center-Right Scenic Stage: Diagonal Mode Rail + Tilted Hero Emblem + Mode Details */}
-        <div
-          className={`flex-1 flex flex-col justify-start ${
-            isCompactLandscape
-              ? 'justify-center px-3 py-2 overflow-y-auto'
-              : 'sm:justify-center px-4 py-2.5 sm:px-5 sm:py-4 lg:px-8 lg:py-6'
-          } min-w-0`}
-        >
-          <div
-            className={`max-w-5xl w-full mx-auto grid ${
-              isCompactLandscape
-                ? 'grid-cols-12 gap-2.5 items-stretch'
-                : 'grid-cols-1 lg:grid-cols-12 gap-3 sm:gap-6 lg:gap-8 items-center'
-            }`}
-          >
-            {/* Column 1: Diagonal Active Header + Equalizer + Mode Stack */}
-            <div
-              className={`${
-                isCompactLandscape ? 'col-span-5' : 'lg:col-span-4'
-              } flex flex-col pointer-events-auto`}
-            >
-              {/* Slanted Active Mode Bar with Equalizer */}
-              <div className="mb-1.5 sm:mb-3 lg:-rotate-3 origin-left">
-                <div className="flex items-end justify-between gap-2 pb-1 sm:pb-1.5 border-b-2" style={{
-                  borderColor: darkSky ? 'rgba(250, 247, 242, 0.85)' : palette.hudInk,
-                }}>
+            <div className="flex items-center gap-2 px-1">
+              <div
+                className="flex items-end gap-[2px] h-3.5 shrink-0"
+                aria-hidden="true"
+              >
+                {EQ_HEIGHTS.slice(0, 5).map((h, i) => (
                   <span
-                    className={`font-display ${
-                      isCompactLandscape ? 'text-lg' : 'text-xl sm:text-2xl lg:text-3xl'
-                    } font-semibold tracking-tight leading-none`}
+                    key={i}
+                    ref={(el) => {
+                      eqBarRefs.current[i] = el;
+                    }}
+                    className="w-[2.5px] h-3.5 rounded-t-xs origin-bottom"
                     style={{
-                      color: darkSky ? '#faf6ee' : palette.hudInk,
-                      textShadow: darkSky ? '0 1px 4px rgba(32, 28, 44, 0.35)' : 'none',
+                      transform: `scaleY(${(h / 100).toFixed(2)})`,
+                      backgroundColor: darkSky ? '#faf6ee' : palette.hudAccent,
+                    }}
+                  />
+                ))}
+              </div>
+              <span className="text-xs font-semibold whitespace-nowrap">
+                {previewSkin.name}
+              </span>
+              <span
+                className="text-[11px] font-mono-tabular whitespace-nowrap hidden md:inline"
+                style={{ color: heroMuted }}
+              >
+                · {previewSkin.music.genreLabel}
+              </span>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => onStepPreviewSkin(1)}
+              aria-label="Next world soundtrack"
+              className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-[#201c2c]/10 transition-colors cursor-pointer"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Shift Settings */}
+          <button
+            type="button"
+            data-testid="open-shift-settings-title"
+            onClick={onOpenShiftSettings}
+            aria-label="Board Shifts"
+            className="h-9 px-3 rounded-xl flex items-center gap-1.5 text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap"
+            style={{
+              backgroundColor: topChipBg,
+              color: heroInk,
+              border: topChipBorder,
+            }}
+          >
+            <SlidersHorizontal className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+            <span>Shifts</span>
+          </button>
+
+          {/* Audio Mute Toggle */}
+          <button
+            type="button"
+            onClick={onToggleMute}
+            aria-label={muted ? 'Unmute audio (M)' : 'Mute audio (M)'}
+            className="h-9 px-3 rounded-xl flex items-center gap-1.5 text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap"
+            style={{
+              backgroundColor: topChipBg,
+              color: heroInk,
+              border: topChipBorder,
+            }}
+          >
+            {muted ? (
+              <VolumeX className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+            ) : (
+              <Volume2 className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+            )}
+            <span className="hidden sm:inline">{muted ? 'Muted' : 'Sound'}</span>
+          </button>
+        </div>
+      </header>
+
+      {/* Center Welcoming Game Stage */}
+      <main
+        className={`flex-1 flex flex-col items-center justify-center ${
+          isCompactLandscape ? 'px-4 py-1 gap-2' : 'px-4 sm:px-8 py-4 gap-4 sm:gap-5'
+        } min-h-0`}
+      >
+        {/* Interactive Mode Emblem + Title + Concise Options + Play Button */}
+        <div className="flex flex-col items-center text-center max-w-xl w-full pointer-events-auto">
+          <button
+            type="button"
+            disabled={startBlocked}
+            onClick={onStart}
+            aria-label={`Launch ${activeModeObj.label}`}
+            className={`group relative ${
+              isCompactLandscape ? 'w-24 h-24' : 'w-32 h-32 sm:w-40 sm:h-40'
+            } rounded-3xl shadow-2xl overflow-hidden -rotate-3 hover:rotate-0 transition-transform duration-300 cursor-pointer disabled:cursor-default disabled:hover:-rotate-3 focus-visible:outline-2 focus-visible:outline-offset-4 mb-3 sm:mb-4`}
+            style={{
+              backgroundColor: palette.boardSurface,
+              border: `3px solid ${
+                darkSky ? 'rgba(250, 246, 238, 0.85)' : palette.hudInk
+              }`,
+            }}
+          >
+            <div className="w-full h-full flex items-center justify-center p-2.5">
+              <ModeArtworkSvg mode={selectedMode} skin={previewSkin} />
+            </div>
+          </button>
+
+          <h2
+            className={`font-display ${
+              isCompactLandscape ? 'text-2xl' : 'text-3xl sm:text-4xl'
+            } font-semibold tracking-tight leading-none`}
+            style={{
+              color: heroInk,
+              textShadow: darkSky ? '0 2px 10px rgba(20, 18, 32, 0.38)' : 'none',
+            }}
+          >
+            {activeModeObj.label}
+          </h2>
+
+          <p
+            className={`${
+              isCompactLandscape ? 'text-xs mt-1' : 'text-sm sm:text-base mt-2'
+            } max-w-md leading-snug`}
+            style={{
+              color: heroMuted,
+              textShadow: darkSky ? '0 1px 4px rgba(20, 18, 32, 0.35)' : 'none',
+            }}
+          >
+            {selectedMode === 'challenge' && challengeVariant === 'zen'
+              ? 'Relaxed no-loss flow where overflowing stacks gently clear away.'
+              : activeModeObj.summary}
+          </p>
+
+          {/* Compact Mode Sub-Options (only shown for modes that have choices) */}
+          {selectedMode === 'challenge' && (
+            <div
+              className="flex flex-wrap items-center justify-center gap-1.5 mt-3 sm:mt-4 p-1 rounded-xl"
+              style={{ backgroundColor: topChipBg, border: topChipBorder }}
+            >
+              {(['basic', 'endless', 'shuffle', 'zen'] as ChallengeVariant[]).map((v) => {
+                const active = challengeVariant === v;
+                return (
+                  <button
+                    key={v}
+                    type="button"
+                    onClick={() => onSelectChallengeVariant(v)}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold capitalize cursor-pointer whitespace-nowrap transition-colors"
+                    style={{
+                      backgroundColor: active ? palette.hudInk : 'transparent',
+                      color: active ? '#faf6ee' : heroInk,
                     }}
                   >
-                    {activeModeObj.label}
-                  </span>
-                  <div
-                    className="flex items-end gap-[3px] h-5 sm:h-7 shrink-0 pb-0.5"
-                    aria-hidden="true"
-                  >
-                    {EQ_HEIGHTS.map((h, i) => (
-                      <span
-                        key={i}
-                        ref={(el) => {
-                          eqBarRefs.current[i] = el;
-                        }}
-                        className="w-1 h-4 sm:h-6 rounded-t-xs origin-bottom transition-colors duration-200"
-                        style={{
-                          transform: `scaleY(${(h / 100).toFixed(2)})`,
-                          backgroundColor: darkSky
-                            ? '#faf7f2'
-                            : palette.hudAccent,
-                        }}
-                      />
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* Mode Selector Stack */}
-              <div
-                className={`grid ${
-                  isCompactLandscape ? 'grid-cols-2 gap-1' : 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-1 gap-1 lg:pl-2'
-                }`}
-                role="tablist"
-                aria-label="Game Modes"
-              >
-                {MODE_LIST.map((m) => {
-                  const active = m.id === selectedMode;
-                  return (
-                    <button
-                      key={m.id}
-                      type="button"
-                      role="tab"
-                      aria-selected={active}
-                      onClick={() => onSelectMode(m.id)}
-                      className={`text-left ${
-                        isCompactLandscape ? 'px-2.5 py-1 text-[11px] min-h-[30px]' : 'px-3 sm:px-3.5 py-1.5 sm:py-2 text-xs sm:text-sm min-h-[34px] sm:min-h-[40px]'
-                      } rounded-lg font-semibold transition-all duration-150 cursor-pointer whitespace-nowrap truncate flex items-center justify-between`}
-                      style={{
-                        backgroundColor: active
-                          ? palette.hudCardBg
-                          : darkSky
-                          ? 'rgba(28, 30, 48, 0.44)'
-                          : 'rgba(250, 246, 238, 0.56)',
-                        color: active
-                          ? palette.hudAccent
-                          : darkSky
-                          ? '#faf6ee'
-                          : palette.hudInk,
-                        boxShadow: active
-                          ? '0 6px 18px rgba(24, 20, 36, 0.14)'
-                          : 'none',
-                        transform: active ? 'translateX(4px)' : 'none',
-                      }}
-                    >
-                      <span>{m.label}</span>
-                      {active && (
-                        <span
-                          className="text-xs font-mono-tabular"
-                          aria-hidden="true"
-                        >
-                          →
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
+                    {v === 'zen' ? 'Zen Flow' : v}
+                  </button>
+                );
+              })}
             </div>
+          )}
 
-            {/* Column 2: Tilted Hero Mode Emblem Tile */}
-            <div className={`${isCompactLandscape ? 'hidden' : 'lg:col-span-3 hidden sm:flex'} items-center justify-center pointer-events-auto`}>
-              <button
-                type="button"
-                disabled={startBlocked}
-                onClick={onStart}
-                aria-label={`Launch ${activeModeObj.label}`}
-                className="group relative w-44 h-44 lg:w-52 lg:h-52 rounded-2xl shadow-2xl overflow-hidden -rotate-3 hover:rotate-0 transition-transform duration-300 cursor-pointer disabled:cursor-default disabled:hover:-rotate-3 focus-visible:outline-2 focus-visible:outline-offset-4"
-                style={{
-                  backgroundColor: palette.boardSurface,
-                  border: `3px solid ${
-                    darkSky ? 'rgba(250, 246, 238, 0.85)' : palette.hudInk
-                  }`,
-                }}
-              >
-                <div className="w-full h-[78%] flex items-center justify-center p-2">
-                  <ModeArtworkSvg mode={selectedMode} skin={previewSkin} />
-                </div>
-                <div
-                  className="h-[22%] w-full flex items-center justify-center px-2 text-xs font-bold tracking-wide text-[#faf6ee]"
-                  style={{ backgroundColor: palette.hudInk }}
-                >
-                  {activeModeObj.label}
-                </div>
-              </button>
-            </div>
-
-            {/* Column 3: Mode Details, Options, Best Score & Primary Start CTA */}
+          {selectedMode === 'time_attack' && (
             <div
-              className={`${
-                isCompactLandscape ? 'col-span-7 p-3' : 'lg:col-span-5 p-3.5 sm:p-5 lg:p-6'
-              } rounded-2xl shadow-xl pointer-events-auto transition-colors duration-500 animate-modal-in flex flex-col justify-between`}
+              className="flex items-center justify-center gap-1.5 mt-3 sm:mt-4 p-1 rounded-xl"
+              style={{ backgroundColor: topChipBg, border: topChipBorder }}
+            >
+              {([60, 180, 300] as const).map((dur) => {
+                const active = timeAttackDuration === dur;
+                return (
+                  <button
+                    key={dur}
+                    type="button"
+                    onClick={() => onSelectTimeAttackDuration(dur)}
+                    className="px-4 py-1.5 rounded-lg text-xs font-semibold font-mono-tabular cursor-pointer whitespace-nowrap transition-colors"
+                    style={{
+                      backgroundColor: active ? palette.hudInk : 'transparent',
+                      color: active ? '#faf6ee' : heroInk,
+                    }}
+                  >
+                    {dur / 60} min
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {selectedMode === 'puzzle' && (
+            <div className="flex flex-wrap items-center justify-center gap-1.5 mt-3 sm:mt-4 max-w-md">
+              {PUZZLE_LEVELS.map((p, idx) => {
+                const active = idx === selectedPuzzleIdx;
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => onSelectPuzzleIdx(idx)}
+                    className="px-3 py-1.5 rounded-xl text-xs font-semibold cursor-pointer whitespace-nowrap transition-colors"
+                    style={{
+                      backgroundColor: active ? palette.hudInk : topChipBg,
+                      color: active ? '#faf6ee' : heroInk,
+                      border: active ? '1px solid transparent' : topChipBorder,
+                    }}
+                  >
+                    {idx + 1}. {p.title}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {selectedMode === 'mission' && (
+            <div className="flex flex-wrap items-center justify-center gap-1.5 mt-3 sm:mt-4 max-w-md">
+              {MISSION_LEVELS.map((m, idx) => {
+                const active = idx === selectedMissionIdx;
+                return (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => onSelectMissionIdx(idx)}
+                    className="px-3 py-1.5 rounded-xl text-xs font-semibold cursor-pointer whitespace-nowrap transition-colors"
+                    style={{
+                      backgroundColor: active ? palette.hudInk : topChipBg,
+                      color: active ? '#faf6ee' : heroInk,
+                      border: active ? '1px solid transparent' : topChipBorder,
+                    }}
+                  >
+                    {idx + 1}. {m.title}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+          {selectedMode === 'daily' && (
+            <div
+              className="mt-3 sm:mt-4 px-4 py-3 rounded-2xl flex items-center gap-4 text-left max-w-md w-full"
               style={{
                 backgroundColor: palette.hudCardBg,
                 color: palette.hudInk,
                 border: '1px solid rgba(32, 28, 44, 0.08)',
               }}
             >
-              {/* Status Line & Best Score */}
-              <div className="flex items-baseline justify-between gap-2 mb-2">
-                <span
-                  className="text-xs font-semibold font-mono-tabular"
-                  style={{ color: palette.hudMuted }}
-                >
-                  {selectedMode === 'daily'
-                    ? `Daily ${dailySpec.dateKey} · Streak ${dailyStreak}`
-                    : orientation === 'portrait'
-                    ? '10×14 Courtyard'
-                    : '16×10 Courtyard'}
-                </span>
-                {modeBest > 0 && (
-                  <span
-                    className="font-mono-tabular text-xs font-semibold"
-                    style={{ color: palette.hudAccent }}
-                  >
-                    Best {modeBest.toLocaleString()}
-                  </span>
-                )}
-              </div>
-
-              <h2 className="hidden sm:block font-display text-2xl font-semibold tracking-tight pb-2 border-b border-[#201c2c]/10">
-                {activeModeObj.label}
-              </h2>
-              <p
-                className="text-xs lg:text-sm leading-relaxed mt-1 sm:mt-2.5 mb-2.5 sm:mb-3.5"
-                style={{ color: palette.hudMuted }}
+              <svg
+                viewBox="0 0 64 40"
+                width="76"
+                height="48"
+                aria-label="Today's generated board layout preview"
+                className="shrink-0 rounded-lg border border-[#201c2c]/12"
+                style={{ backgroundColor: dailySkin.palette.boardSurface }}
               >
-                {activeModeObj.summary}
-              </p>
-
-              {/* Mode-Specific Options */}
-              {selectedMode === 'daily' && (
-                <div className="mb-4">
-                  <div className="flex items-start justify-between gap-3 mb-2">
-                    <div className="min-w-0">
-                      <div className="text-sm font-semibold leading-snug">
-                        {dailySpec.mission.title}
-                      </div>
-                      <div
-                        className="text-xs leading-snug mt-0.5"
-                        style={{ color: palette.hudMuted }}
-                      >
-                        {dailySpec.mission.description}
-                      </div>
-                    </div>
-
-                    {/* Deterministic Miniature 16x10 Starting Board Preview */}
-                    <svg
-                      viewBox="0 0 64 40"
-                      width="88"
-                      height="55"
-                      aria-label="Today's generated board layout preview"
-                      className="shrink-0 rounded-lg border border-[#201c2c]/12"
-                      style={{ backgroundColor: dailySkin.palette.boardSurface }}
-                    >
-                      {dailySpec.previewRows.map((row, r) =>
-                        row.map((cellColor, c) =>
-                          cellColor !== null ? (
-                            <rect
-                              key={`${r}-${c}`}
-                              x={c * 4 + 0.35}
-                              y={r * 4 + 0.35}
-                              width="3.3"
-                              height="3.3"
-                              rx={cellColor === 0 ? '1.1' : '0.3'}
-                              fill={
-                                cellColor === 0
-                                  ? dailySkin.palette.blockA.fill
-                                  : dailySkin.palette.blockB.fill
-                              }
-                            />
-                          ) : null
-                        )
-                      )}
-                    </svg>
-                  </div>
-
-                  <div
-                    className="text-[11px] font-mono-tabular mb-2 whitespace-nowrap"
-                    style={{ color: palette.hudMuted }}
-                  >
-                    {dailySpec.mission.timeLimit}s limit
-                  </div>
-
-                  {dailyCompletedToday ? (
-                    <div className="flex items-center justify-between gap-2 pt-2 border-t border-[#201c2c]/10 text-xs">
-                      <span
-                        className="font-semibold whitespace-nowrap"
-                        style={{ color: palette.hudAccent }}
-                      >
-                        Cleared · {(dailyRecord?.bestScore ?? 0).toLocaleString()} pts
-                        {dailyRecord?.clearTimeSec
-                          ? ` (${dailyRecord.clearTimeSec}s)`
-                          : ''}
-                      </span>
-                      <span
-                        className="font-mono-tabular whitespace-nowrap"
-                        style={{ color: palette.hudMuted }}
-                      >
-                        Next {countdownText}
-                      </span>
-                    </div>
-                  ) : (
-                    <div
-                      className="flex items-center justify-between gap-2 pt-2 border-t border-[#201c2c]/10 text-[11px] font-mono-tabular"
-                      style={{ color: palette.hudMuted }}
-                    >
-                      <span className="whitespace-nowrap">1 win per 24h cycle</span>
-                      <span className="whitespace-nowrap">Resets {countdownText}</span>
-                    </div>
-                  )}
+                {dailySpec.previewRows.map((row, r) =>
+                  row.map((cellColor, c) =>
+                    cellColor !== null ? (
+                      <rect
+                        key={`${r}-${c}`}
+                        x={c * 4 + 0.35}
+                        y={r * 4 + 0.35}
+                        width="3.3"
+                        height="3.3"
+                        rx={cellColor === 0 ? '1.1' : '0.3'}
+                        fill={
+                          cellColor === 0
+                            ? dailySkin.palette.blockA.fill
+                            : dailySkin.palette.blockB.fill
+                        }
+                      />
+                    ) : null
+                  )
+                )}
+              </svg>
+              <div className="min-w-0 flex-1">
+                <div className="text-sm font-semibold leading-snug truncate">
+                  {dailySpec.mission.title}
                 </div>
-              )}
-
-              {selectedMode === 'challenge' && (
-                <div className="flex items-center gap-2 mb-3 sm:mb-5">
-                  {(['basic', 'endless', 'shuffle'] as ChallengeVariant[]).map(
-                    (v) => {
-                      const active = challengeVariant === v;
-                      return (
-                        <button
-                          key={v}
-                          type="button"
-                          onClick={() => onSelectChallengeVariant(v)}
-                          className="flex-1 py-1.5 sm:py-2 px-3 rounded-lg text-xs font-semibold capitalize cursor-pointer whitespace-nowrap min-h-[36px] sm:min-h-[40px]"
-                          style={{
-                            backgroundColor: active
-                              ? palette.hudInk
-                              : 'rgba(32, 28, 44, 0.055)',
-                            color: active ? '#faf6ee' : palette.hudInk,
-                          }}
-                        >
-                          {v}
-                        </button>
-                      );
-                    }
-                  )}
+                <div className="text-xs mt-0.5 truncate" style={{ color: palette.hudMuted }}>
+                  {dailyCompletedToday
+                    ? `Cleared (${(dailyRecord?.bestScore ?? 0).toLocaleString()} pts) · Next in ${countdownText}`
+                    : `${dailySpec.mission.description} · Streak ${dailyStreak}`}
                 </div>
-              )}
+              </div>
+            </div>
+          )}
 
-              {selectedMode === 'time_attack' && (
-                <div className="flex items-center gap-2 mb-5">
-                  {([60, 180, 300] as const).map((dur) => {
-                    const active = timeAttackDuration === dur;
-                    return (
-                      <button
-                        key={dur}
-                        type="button"
-                        onClick={() => onSelectTimeAttackDuration(dur)}
-                        className="flex-1 py-2 px-3 rounded-lg text-xs font-semibold font-mono-tabular cursor-pointer whitespace-nowrap min-h-[40px]"
-                        style={{
-                          backgroundColor: active
-                            ? palette.hudInk
-                            : 'rgba(32, 28, 44, 0.055)',
-                          color: active ? '#faf6ee' : palette.hudInk,
-                        }}
-                      >
-                        {dur}s
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
+          {/* Primary Play Action */}
+          <div className="flex flex-col items-center gap-2 mt-4 sm:mt-5">
+            <button
+              type="button"
+              data-start="true"
+              disabled={startBlocked}
+              onClick={onStart}
+              className={`${
+                isCompactLandscape ? 'px-8 py-2.5 text-sm' : 'px-10 py-3.5 text-base'
+              } rounded-2xl font-semibold text-[#faf6ee] shadow-lg transition-transform hover:scale-[1.02] active:scale-[0.98] cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:scale-100 whitespace-nowrap min-h-[48px]`}
+              style={{
+                backgroundColor: startBlocked ? palette.hudInk : palette.hudAccent,
+              }}
+            >
+              {startBlocked
+                ? `Completed · Next in ${countdownText}`
+                : selectedMode === 'daily'
+                ? 'Play Daily'
+                : 'Play'}
+            </button>
 
-              {selectedMode === 'puzzle' && (
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 mb-5">
-                  {PUZZLE_LEVELS.map((p, idx) => {
-                    const active = idx === selectedPuzzleIdx;
-                    return (
-                      <button
-                        key={p.id}
-                        type="button"
-                        onClick={() => onSelectPuzzleIdx(idx)}
-                        className="px-2.5 py-2 rounded-lg text-xs font-medium cursor-pointer truncate whitespace-nowrap text-left min-h-[40px]"
-                        style={{
-                          backgroundColor: active
-                            ? palette.hudInk
-                            : 'rgba(32, 28, 44, 0.055)',
-                          color: active ? '#faf6ee' : palette.hudInk,
-                        }}
-                      >
-                        {idx + 1}. {p.title}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-
-              {selectedMode === 'mission' && (
-                <div className="grid grid-cols-2 gap-1.5 mb-5">
-                  {MISSION_LEVELS.map((m, idx) => {
-                    const active = idx === selectedMissionIdx;
-                    return (
-                      <button
-                        key={m.id}
-                        type="button"
-                        onClick={() => onSelectMissionIdx(idx)}
-                        className="px-2.5 py-2 rounded-lg text-xs font-medium cursor-pointer truncate whitespace-nowrap text-left min-h-[40px]"
-                        style={{
-                          backgroundColor: active
-                            ? palette.hudInk
-                            : 'rgba(32, 28, 44, 0.055)',
-                          color: active ? '#faf6ee' : palette.hudInk,
-                        }}
-                      >
-                        {idx + 1}. {m.title}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* Primary Start CTA */}
-              <button
-                type="button"
-                data-start="true"
-                disabled={startBlocked}
-                onClick={onStart}
-                className="w-full py-3.5 px-6 rounded-xl font-semibold text-sm text-[#faf6ee] transition-transform active:scale-[0.99] cursor-pointer disabled:opacity-55 disabled:cursor-not-allowed disabled:active:scale-100 whitespace-nowrap shadow-md min-h-[48px]"
+            {modeBest > 0 && (
+              <div
+                className="text-xs font-mono-tabular font-semibold"
                 style={{
-                  backgroundColor: startBlocked
-                    ? palette.hudInk
-                    : palette.hudAccent,
+                  color: heroMuted,
+                  textShadow: darkSky ? '0 1px 4px rgba(20, 18, 32, 0.35)' : 'none',
                 }}
               >
-                {startBlocked
-                  ? `Completed Today · Next in ${countdownText}`
-                  : selectedMode === 'daily'
-                  ? 'Start Daily Challenge'
-                  : 'Start Game'}
-              </button>
-            </div>
+                Best {modeBest.toLocaleString()}
+              </div>
+            )}
           </div>
         </div>
-      </div>
+      </main>
 
-      {/* Bottom Flat Borderless Control Hint (Desktop Keyboard Only) */}
-      <div
-        className="kbd-hint-bar text-center text-xs font-medium py-2.5 px-4 pointer-events-none transition-colors duration-300 shrink-0"
-        style={{
-          color: darkWater ? 'rgba(250, 246, 238, 0.92)' : palette.hudInk,
-          textShadow: darkWater ? '0 1px 3px rgba(32, 28, 44, 0.45)' : 'none',
-        }}
-      >
-        Arrow Keys / A D Move · Up / W / Space Rotate · Z CCW · C / Shift Slam · Esc Pause · Enter Start
-      </div>
+      {/* Bottom Mode Ribbon & Clean Control Hint */}
+      <footer className="w-full flex flex-col items-center gap-2 pb-2 sm:pb-3 px-4 shrink-0">
+        <div
+          className="flex flex-wrap items-center justify-center gap-1.5 p-1.5 rounded-2xl pointer-events-auto max-w-full"
+          role="tablist"
+          aria-label="Game Modes"
+          style={{
+            backgroundColor: topChipBg,
+            border: topChipBorder,
+          }}
+        >
+          {MODE_LIST.map((m) => {
+            const active = m.id === selectedMode;
+            return (
+              <button
+                key={m.id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => onSelectMode(m.id)}
+                className={`${
+                  isCompactLandscape ? 'px-2.5 py-1 text-xs' : 'px-3.5 py-1.5 text-xs sm:text-sm'
+                } rounded-xl font-semibold transition-all duration-150 cursor-pointer whitespace-nowrap min-h-[36px]`}
+                style={{
+                  backgroundColor: active ? palette.hudCardBg : 'transparent',
+                  color: active ? palette.hudAccent : heroInk,
+                  boxShadow: active ? '0 4px 12px rgba(24, 20, 36, 0.12)' : 'none',
+                }}
+              >
+                {m.shortLabel}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Bottom Flat Borderless Control Hint (Desktop Keyboard Only) */}
+        <div
+          className="kbd-hint-bar text-center text-xs font-medium py-0.5 px-4 pointer-events-none transition-colors duration-300"
+          style={{
+            color: darkWater ? 'rgba(250, 246, 238, 0.92)' : palette.hudInk,
+            textShadow: darkWater ? '0 1px 3px rgba(32, 28, 44, 0.45)' : 'none',
+          }}
+        >
+          ← → Move · ↑ Rotate · ↓ Slam · Esc Pause · Enter Play
+        </div>
+      </footer>
     </div>
   );
 };

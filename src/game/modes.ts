@@ -168,13 +168,13 @@ export function checkPuzzlePatternMatch(
           const ch = puzzle.pattern[pr][pc];
           const cell = grid[startR + pr][startC + pc];
           if (ch === '#') {
-            if (!cell || cell.color !== puzzle.targetColor) {
+            if (!cell || cell.isObstacle || cell.color !== puzzle.targetColor) {
               matches = false;
               break;
             }
           } else {
-            // '.' must NOT be targetColor (either empty or opposite color)
-            if (cell && cell.color === puzzle.targetColor) {
+            // '.' must NOT be targetColor (either empty, obstacle, or opposite color)
+            if (cell && !cell.isObstacle && cell.color === puzzle.targetColor) {
               matches = false;
               break;
             }
@@ -189,12 +189,19 @@ export function checkPuzzlePatternMatch(
           const leftCell = startC > 0 ? grid[startR + pr][startC - 1] : null;
           const rightCell =
             startC + pCols < cols ? grid[startR + pr][startC + pCols] : null;
-          if (puzzle.pattern[pr][0] === '#' && leftCell?.color === puzzle.targetColor) {
+          if (
+            puzzle.pattern[pr][0] === '#' &&
+            leftCell &&
+            !leftCell.isObstacle &&
+            leftCell.color === puzzle.targetColor
+          ) {
             distinct = false;
           }
           if (
             puzzle.pattern[pr][pCols - 1] === '#' &&
-            rightCell?.color === puzzle.targetColor
+            rightCell &&
+            !rightCell.isObstacle &&
+            rightCell.color === puzzle.targetColor
           ) {
             distinct = false;
           }
@@ -203,12 +210,19 @@ export function checkPuzzlePatternMatch(
           const topCell = startR > 0 ? grid[startR - 1][startC + pc] : null;
           const botCell =
             startR + pRows < rows ? grid[startR + pRows][startC + pc] : null;
-          if (puzzle.pattern[0][pc] === '#' && topCell?.color === puzzle.targetColor) {
+          if (
+            puzzle.pattern[0][pc] === '#' &&
+            topCell &&
+            !topCell.isObstacle &&
+            topCell.color === puzzle.targetColor
+          ) {
             distinct = false;
           }
           if (
             puzzle.pattern[pRows - 1][pc] === '#' &&
-            botCell?.color === puzzle.targetColor
+            botCell &&
+            !botCell.isObstacle &&
+            botCell.color === puzzle.targetColor
           ) {
             distinct = false;
           }
@@ -281,104 +295,294 @@ export function buildMissionPresetGrid(
 
 export interface CpuTargetPlan {
   targetX: number;
+  targetY?: number;
   targetRotations: number; // 0..3 CW rotations
 }
 
 /**
- * Computes a smart placement (targetX, targetRotations) for the CPU opponent
- * by simulating drops on a cloned grid and scoring 2x2 squares + color adjacency - height.
+ * Computes a smart placement (targetX, targetY, targetRotations) for the CPU opponent
+ * by simulating drops on a cloned grid across all 4 gravity directions.
  */
 export function computeCpuBestMove(state: BoardState): CpuTargetPlan {
   const rows = state.grid.length;
   const cols = state.grid[0]?.length ?? state.cols ?? BOARD_COLS;
+  const dir = state.gravityDirection ?? 'down';
   const centerX = getSpawnColForWidth(cols);
+  const centerY = Math.max(0, Math.floor((rows - 2) / 2));
   const piece = state.activePiece;
-  if (!piece) return { targetX: centerX, targetRotations: 0 };
+  if (!piece) return { targetX: centerX, targetY: centerY, targetRotations: 0 };
 
   let bestScore = -Infinity;
-  let bestPlan: CpuTargetPlan = { targetX: piece.x, targetRotations: 0 };
+  let bestPlan: CpuTargetPlan = {
+    targetX: piece.x,
+    targetY: piece.y,
+    targetRotations: 0,
+  };
 
   const minCol = state.lockedColumnsLeft;
-  const maxCol = cols - 2 - state.lockedColumnsRight;
+  const toSimCell = (pCell: NonNullable<Piece['cells'][number][number]>): Cell =>
+    pCell.isBlocked
+      ? {
+          id: 0,
+          color: 0,
+          isChain: false,
+          isObstacle: true,
+          obstacleFixed: false,
+          obstacleStyle: 'blocked',
+          chainMarked: false,
+          inSquare: false,
+          pendingClear: false,
+          sweptCol: false,
+          fallOffset: 0,
+          landFlash: 0,
+        }
+      : {
+          id: 0,
+          color: pCell.color,
+          isChain: pCell.isChain,
+          ...(pCell.isPeggle ? { isPeggle: true } : {}),
+          ...(pCell.isWild ? { isWild: true } : {}),
+          chainMarked: false,
+          inSquare: false,
+          pendingClear: false,
+          sweptCol: false,
+          fallOffset: 0,
+          landFlash: 0,
+        };
 
   let testPiece: Piece = {
     ...piece,
-    cells: [
-      [{ ...piece.cells[0][0] }, { ...piece.cells[0][1] }],
-      [{ ...piece.cells[1][0] }, { ...piece.cells[1][1] }],
-    ],
+    cells: piece.cells.map((row) =>
+      row.map((cell) => (cell ? { ...cell } : null))
+    ),
   };
 
   for (let rot = 0; rot < 4; rot++) {
-    for (let col = minCol; col <= maxCol; col++) {
-      const candidate: Piece = { ...testPiece, x: col, y: piece.y };
-      if (!canPlacePiece(state, candidate, 0, 0)) continue;
+    const pieceRows = testPiece.cells.length;
+    const pieceCols = testPiece.cells[0]?.length ?? 2;
 
-      // Simulate placement using Lumines per-column split drop onto a cloned grid
-      const simGrid: (Cell | null)[][] = state.grid.map((row) =>
-        row.map((c) => (c ? { ...c } : null))
-      );
-      settleBoard(simGrid);
+    if (dir === 'down' || dir === 'up') {
+      const maxCol = Math.max(minCol, cols - pieceCols - state.lockedColumnsRight);
+      for (let col = minCol; col <= maxCol; col++) {
+        const candidate: Piece = { ...testPiece, x: col, y: piece.y };
+        if (!canPlacePiece(state, candidate, 0, 0)) continue;
 
-      let overflowed = false;
-      for (let px = 0; px < 2; px++) {
-        const gx = col + px;
-        let writeRow = rows - 1;
-        while (writeRow >= 0 && simGrid[writeRow][gx] !== null) {
-          writeRow--;
-        }
-        for (let py = 1; py >= 0; py--) {
-          if (writeRow < 0) {
-            overflowed = true;
-            continue;
+        const simGrid: (Cell | null)[][] = state.grid.map((row) =>
+          row.map((c) => (c ? { ...c } : null))
+        );
+        let overflowed = false;
+
+        for (let px = 0; px < pieceCols; px++) {
+          const gx = col + px;
+          if (gx < 0 || gx >= cols) continue;
+
+          if (dir === 'down') {
+            let lowestPy = -1;
+            for (let py = pieceRows - 1; py >= 0; py--) {
+              if (candidate.cells[py]?.[px] !== null) {
+                lowestPy = py;
+                break;
+              }
+            }
+            if (lowestPy < 0) continue;
+            const startScan = Math.max(0, candidate.y + lowestPy);
+            let stopRow = rows;
+            for (let scan = startScan; scan < rows; scan++) {
+              if (simGrid[scan][gx] !== null) {
+                stopRow = scan;
+                break;
+              }
+            }
+            let writeRow = stopRow - 1;
+            for (let py = pieceRows - 1; py >= 0; py--) {
+              const pCell = candidate.cells[py]?.[px];
+              if (!pCell) continue;
+              if (writeRow < 0) {
+                overflowed = true;
+                continue;
+              }
+              simGrid[writeRow][gx] = toSimCell(pCell);
+              writeRow--;
+            }
+          } else {
+            let highestPy = -1;
+            for (let py = 0; py < pieceRows; py++) {
+              if (candidate.cells[py]?.[px] !== null) {
+                highestPy = py;
+                break;
+              }
+            }
+            if (highestPy < 0) continue;
+            const startScan = Math.min(rows - 1, candidate.y + highestPy);
+            let stopRow = -1;
+            for (let scan = startScan; scan >= 0; scan--) {
+              if (simGrid[scan][gx] !== null) {
+                stopRow = scan;
+                break;
+              }
+            }
+            let writeRow = stopRow + 1;
+            for (let py = 0; py < pieceRows; py++) {
+              const pCell = candidate.cells[py]?.[px];
+              if (!pCell) continue;
+              if (writeRow >= rows) {
+                overflowed = true;
+                continue;
+              }
+              simGrid[writeRow][gx] = toSimCell(pCell);
+              writeRow++;
+            }
           }
-          simGrid[writeRow][gx] = {
-            id: 0,
-            color: candidate.cells[py][px].color,
-            isChain: candidate.cells[py][px].isChain,
-            chainMarked: false,
-            inSquare: false,
-            pendingClear: false,
-            sweptCol: false,
-            fallOffset: 0,
-            landFlash: 0,
-          };
-          writeRow--;
+        }
+
+        const squares = detectBoardMarks(simGrid);
+        let maxDepth = 0;
+        let chainCount = 0;
+        let sameAdj = 0;
+        for (let r = 0; r < rows; r++) {
+          for (let c = 0; c < cols; c++) {
+            const cell = simGrid[r][c];
+            if (cell && !cell.isObstacle) {
+              maxDepth = Math.max(maxDepth, dir === 'down' ? rows - r : r + 1);
+              if (cell.chainMarked) chainCount++;
+              if (c + 1 < cols && simGrid[r][c + 1] && !simGrid[r][c + 1]!.isObstacle && simGrid[r][c + 1]!.color === cell.color) sameAdj++;
+              if (r + 1 < rows && simGrid[r + 1][c] && !simGrid[r + 1][c]!.isObstacle && simGrid[r + 1][c]!.color === cell.color) sameAdj++;
+            }
+          }
+        }
+
+        const heuristic =
+          (overflowed ? -10000 : 0) +
+          squares.length * 140 +
+          chainCount * 35 +
+          sameAdj * 4 -
+          maxDepth * 12 -
+          Math.abs(col - centerX) * 0.5;
+
+        if (heuristic > bestScore) {
+          bestScore = heuristic;
+          bestPlan = { targetX: col, targetRotations: rot };
         }
       }
+    } else {
+      // Horizontal gravity ('right' or 'left'): steer vertically by row
+      const maxRow = Math.max(0, rows - pieceRows);
+      for (let row = 0; row <= maxRow; row++) {
+        const candidate: Piece = { ...testPiece, x: piece.x, y: row };
+        if (!canPlacePiece(state, candidate, 0, 0)) continue;
 
-      const squares = detectBoardMarks(simGrid);
+        const simGrid: (Cell | null)[][] = state.grid.map((gr) =>
+          gr.map((c) => (c ? { ...c } : null))
+        );
+        let overflowed = false;
 
-      // Evaluate heuristic
-      let maxHeight = 0;
-      let chainCount = 0;
-      let sameAdj = 0;
-      for (let r = 0; r < rows; r++) {
-        for (let c = 0; c < cols; c++) {
-          const cell = simGrid[r][c];
-          if (cell) {
-            maxHeight = Math.max(maxHeight, rows - r);
-            if (cell.chainMarked) chainCount++;
-            if (c + 1 < cols && simGrid[r][c + 1]?.color === cell.color) sameAdj++;
-            if (r + 1 < rows && simGrid[r + 1][c]?.color === cell.color) sameAdj++;
+        for (let py = 0; py < pieceRows; py++) {
+          const gy = row + py;
+          if (gy < 0 || gy >= rows) continue;
+
+          if (dir === 'right') {
+            let rightPx = -1;
+            for (let px = pieceCols - 1; px >= 0; px--) {
+              if (candidate.cells[py]?.[px] !== null) {
+                rightPx = px;
+                break;
+              }
+            }
+            if (rightPx < 0) continue;
+            const startScan = Math.max(0, candidate.x + rightPx);
+            let stopCol = cols;
+            for (let scan = startScan; scan < cols; scan++) {
+              if (simGrid[gy][scan] !== null) {
+                stopCol = scan;
+                break;
+              }
+            }
+            let writeCol = stopCol - 1;
+            for (let px = pieceCols - 1; px >= 0; px--) {
+              const pCell = candidate.cells[py]?.[px];
+              if (!pCell) continue;
+              if (writeCol < 0) {
+                overflowed = true;
+                continue;
+              }
+              simGrid[gy][writeCol] = toSimCell(pCell);
+              writeCol--;
+            }
+          } else {
+            let leftPx = -1;
+            for (let px = 0; px < pieceCols; px++) {
+              if (candidate.cells[py]?.[px] !== null) {
+                leftPx = px;
+                break;
+              }
+            }
+            if (leftPx < 0) continue;
+            const startScan = Math.min(cols - 1, candidate.x + leftPx);
+            let stopCol = -1;
+            for (let scan = startScan; scan >= 0; scan--) {
+              if (simGrid[gy][scan] !== null) {
+                stopCol = scan;
+                break;
+              }
+            }
+            let writeCol = stopCol + 1;
+            for (let px = 0; px < pieceCols; px++) {
+              const pCell = candidate.cells[py]?.[px];
+              if (!pCell) continue;
+              if (writeCol >= cols) {
+                overflowed = true;
+                continue;
+              }
+              simGrid[gy][writeCol] = toSimCell(pCell);
+              writeCol++;
+            }
           }
         }
-      }
 
-      const heuristic =
-        (overflowed ? -10000 : 0) +
-        squares.length * 140 +
-        chainCount * 35 +
-        sameAdj * 4 -
-        maxHeight * 12 -
-        Math.abs(col - centerX) * 0.5;
+        const squares = detectBoardMarks(simGrid);
+        let maxDepth = 0;
+        let chainCount = 0;
+        let sameAdj = 0;
+        for (let r = 0; r < rows; r++) {
+          for (let c = 0; c < cols; c++) {
+            const cell = simGrid[r][c];
+            if (cell && !cell.isObstacle) {
+              maxDepth = Math.max(maxDepth, dir === 'right' ? cols - c : c + 1);
+              if (cell.chainMarked) chainCount++;
+              if (c + 1 < cols && simGrid[r][c + 1] && !simGrid[r][c + 1]!.isObstacle && simGrid[r][c + 1]!.color === cell.color) sameAdj++;
+              if (r + 1 < rows && simGrid[r + 1][c] && !simGrid[r + 1][c]!.isObstacle && simGrid[r + 1][c]!.color === cell.color) sameAdj++;
+            }
+          }
+        }
 
-      if (heuristic > bestScore) {
-        bestScore = heuristic;
-        bestPlan = { targetX: col, targetRotations: rot };
+        const heuristic =
+          (overflowed ? -10000 : 0) +
+          squares.length * 140 +
+          chainCount * 35 +
+          sameAdj * 4 -
+          maxDepth * 12 -
+          Math.abs(row - centerY) * 0.5;
+
+        if (heuristic > bestScore) {
+          bestScore = heuristic;
+          bestPlan = { targetX: piece.x, targetY: row, targetRotations: rot };
+        }
       }
     }
+
     testPiece = rotatePieceCellsCW(testPiece);
+    if (state.activeShift === 'chameleon_rotate') {
+      testPiece = {
+        ...testPiece,
+        cells: testPiece.cells.map((row) =>
+          row.map((c) =>
+            c && !c.isBlocked
+              ? { ...c, color: ((c.color + 1) % state.colorCount) as CellColor }
+              : c
+          )
+        ),
+      };
+    }
   }
 
   return bestPlan;

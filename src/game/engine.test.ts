@@ -12,25 +12,31 @@ import {
   advanceSweepStageProgression,
   advanceTimedStageProgression,
   calculateSweepScore,
+  computeEncoreState,
   computeStageProgressMetrics,
+  computeTimeAttackPaceDelta,
   createInitialBoardState,
   createPieceFromPattern,
   detectBoardMarks,
   finalizeSweep,
+  flushPendingGarbage,
+  generateRandomPiece,
   getPieceLandingColumns,
   hardDropPiece,
   isActivePieceGrounded,
   lockActivePiece,
   movePieceHorizontal,
+  resolveBattleGarbageSwap,
   rotateActivePiece,
   rotateBoard90,
   settleBoard,
   softDropStep,
+  steerPiece,
   stepPassiveGravity,
   stepTimelineColumn,
   transformBoardForOrientation,
 } from './engine';
-import { checkPuzzlePatternMatch, PUZZLE_LEVELS } from './modes';
+import { computeCpuBestMove, checkPuzzlePatternMatch, PUZZLE_LEVELS } from './modes';
 import {
   IluminadoAudioEngine,
   computeStemLevels,
@@ -49,16 +55,31 @@ import {
   SKINS,
   advanceShuffledSkinDeck,
   createShuffledSkinDeck,
+  getBlockStyle,
   getHexLuminance,
   isPureBlackOrWhite,
   pickRandomSkinIndex,
 } from './skins';
 import {
+  NEW_V5_SHIFTS,
   applyDailyResultToProgress,
+  applyTimeAttackSplitsToProgress,
   getEffectiveDailyStreak,
   isDailyCompletedForDate,
+  loadProgress,
+  saveProgress,
 } from './storage';
-import { Cell, CellColor, SavedProgress } from './types';
+import {
+  ALL_SHIFT_TYPES,
+  OBSTACLE_SHIFT_SET,
+  TILE_TYPE_SHIFT_SET,
+  advanceShiftStageTurn,
+  applyBoardShift,
+  pickNextShift,
+  stepConveyorFloor,
+  stepPatrollingBumper,
+} from './shifts';
+import { Cell, CellColor, SavedProgress, ShiftType } from './types';
 
 function makeCell(color: CellColor, isChain = false): Cell {
   return {
@@ -91,14 +112,14 @@ test('2x2 piece rotation rearranges cells clockwise and counter-clockwise', () =
   // CW:
   // [1, 0]
   // [1, 1]
-  assert.equal(state.activePiece.cells[0][0].color, 1);
-  assert.equal(state.activePiece.cells[0][1].color, 0);
-  assert.equal(state.activePiece.cells[1][0].color, 1);
-  assert.equal(state.activePiece.cells[1][1].color, 1);
+  assert.equal(state.activePiece.cells[0][0]?.color, 1);
+  assert.equal(state.activePiece.cells[0][1]?.color, 0);
+  assert.equal(state.activePiece.cells[1][0]?.color, 1);
+  assert.equal(state.activePiece.cells[1][1]?.color, 1);
 
   assert.equal(rotateActivePiece(state, 'ccw'), true);
-  assert.equal(state.activePiece.cells[0][0].color, 0);
-  assert.equal(state.activePiece.cells[0][1].color, 1);
+  assert.equal(state.activePiece.cells[0][0]?.color, 0);
+  assert.equal(state.activePiece.cells[0][1]?.color, 1);
 });
 
 test('movement respects left and right board bounds', () => {
@@ -371,7 +392,7 @@ test('all 30 worlds define valid music configs covering all requested genres', (
   }
 });
 
-test('Lumines passive drop enters lock delay before locking and resumes falling when slid off a ledge', () => {
+test('Passive drop enters lock delay before locking and resumes falling when slid off a ledge', () => {
   const state = createInitialBoardState(0);
   // Build a 2-row ledge at cols 4..5 rows 8..9; cols 6..7 remain empty
   state.grid[8][4] = makeCell(1);
@@ -574,6 +595,7 @@ test('Daily completion enforces once-per-24h completion, tracks consecutive stre
     dailyHistory: {},
     dailyStreak: 0,
     lastDailyCompletedDate: null,
+    enabledShifts: [...ALL_SHIFT_TYPES],
   };
 
   assert.equal(getDailyDateKey(new Date(2026, 10, 16, 10, 5)), '2026-11-16');
@@ -786,14 +808,15 @@ test('transformBoardForOrientation preserves central bricks and prevents instant
   assert.equal(state.grid[13][3]?.color, 0);
 });
 
-test('Classic skin progression levels up per skin threshold, discards massive sweep overflow, and transitions every 4-5 levels', () => {
+test('Classic skin progression levels up per skin threshold, discards massive sweep overflow, and transitions every 3 levels', () => {
   for (const sk of SKINS) {
     assert.ok(sk.squaresPerLevel >= 16 && sk.squaresPerLevel <= 22, `${sk.id} squaresPerLevel out of 16..22`);
-    assert.ok(sk.levelsPerSkin === 4 || sk.levelsPerSkin === 5, `${sk.id} levelsPerSkin must be 4 or 5`);
-    assert.ok(sk.squaresToAdvance >= 64 && sk.squaresToAdvance <= 90, `${sk.id} quota out of range`);
+    assert.equal(sk.levelsPerSkin, 3, `${sk.id} levelsPerSkin must be 3`);
+    assert.equal(sk.squaresToAdvance, sk.squaresPerLevel * 3, `${sk.id} squaresToAdvance must equal squaresPerLevel * 3`);
+    assert.ok(sk.squaresToAdvance >= 48 && sk.squaresToAdvance <= 66, `${sk.id} quota out of range`);
   }
 
-  const skin = SKINS[0]; // 16 squares/level, 4 levels/skin
+  const skin = SKINS[0]; // 16 squares/level, 3 levels/skin
   const prog: StageProgressionState = {
     level: 1,
     levelSquaresCleared: 10,
@@ -809,16 +832,14 @@ test('Classic skin progression levels up per skin threshold, discards massive sw
   assert.equal(prog.levelSquaresCleared, 0);
   assert.equal(prog.skinLevelsCleared, 1);
 
-  // Subsequent sweeps advance level 2 -> 3 -> 4 -> 5, transitioning skin only on the 4th level-up!
+  // Subsequent sweeps advance level 2 -> 3 -> 4, transitioning skin cleanly on the 3rd level-up!
   assert.equal(advanceSweepStageProgression(prog, 16, skin, true).shouldTransitionSkin, false);
   assert.equal(prog.level, 3);
-  assert.equal(advanceSweepStageProgression(prog, 16, skin, true).shouldTransitionSkin, false);
+  const step3 = advanceSweepStageProgression(prog, 16, skin, true);
+  assert.equal(step3.leveledUp, true);
+  assert.equal(step3.shouldTransitionSkin, true);
   assert.equal(prog.level, 4);
-  const step4 = advanceSweepStageProgression(prog, 16, skin, true);
-  assert.equal(step4.leveledUp, true);
-  assert.equal(step4.shouldTransitionSkin, true);
-  assert.equal(prog.level, 5);
-  assert.equal(prog.skinLevelsCleared, 4);
+  assert.equal(prog.skinLevelsCleared, 3);
 });
 
 test('Final stage transitions based on a flat timer instead of square count', () => {
@@ -1005,6 +1026,937 @@ test('pickRandomSkinIndex and shuffled skin deck avoid back-to-back repeats and 
   assert.equal(wrapEndless.nextPos, 0);
   assert.notEqual(wrapEndless.nextIdx, lastBeforeWrap);
 });
+
+test('rotateActivePiece applies 1-column horizontal and upward ledge kicks when obstructed', () => {
+  const state = createInitialBoardState(0);
+  state.activePiece = createPieceFromPattern([0, 1, 0, 0]);
+  state.lockedColumnsLeft = 1;
+  state.activePiece.x = 0; // overlaps locked left column -> kicks +1 right
+  state.activePiece.y = 4;
+  assert.equal(rotateActivePiece(state, 'cw'), true);
+  assert.equal(state.activePiece.x, 1);
+
+  // If horizontal kicks are also blocked at row 7, kicks up 1 row to y = 5
+  state.lockedColumnsLeft = 0;
+  state.activePiece.x = 5;
+  state.activePiece.y = 6;
+  state.grid[7][4] = makeCell(1);
+  state.grid[7][5] = makeCell(1);
+  state.grid[7][7] = makeCell(1);
+  assert.equal(rotateActivePiece(state, 'cw'), true);
+  assert.equal(state.activePiece.y, 5);
+});
+
+test('Zen Flow trims top overflow rows instead of triggering Game Over', () => {
+  const state = createInitialBoardState(0);
+  state.score = 1200;
+  // Fill spawn columns 7..8 completely to row 0
+  for (let r = 0; r < BOARD_ROWS; r++) {
+    state.grid[r][7] = makeCell(r % 2 === 0 ? 0 : 1);
+    state.grid[r][8] = makeCell(r % 2 === 0 ? 1 : 0);
+  }
+  state.activePiece = createPieceFromPattern([0, 1, 1, 0]);
+  state.activePiece.x = 7;
+  state.activePiece.y = -2;
+
+  const res = lockActivePiece(state, 0, Math.random, { zenNoLoss: true });
+  assert.equal(res.landed, true);
+  assert.equal(res.zenTrimmed, true);
+  assert.equal(state.isGameOver, false);
+  assert.ok(state.activePiece !== null);
+  assert.equal(state.score, 1200);
+  // Spawn columns now have top headroom (rows 0..2 cleared)
+  assert.equal(state.grid[0][7], null);
+  assert.equal(state.grid[1][7], null);
+  assert.equal(state.grid[2][7], null);
+});
+
+test('VS battle counter-play cancels incoming garbage before queueing pressure and flushes on sweep', () => {
+  const p1 = createInitialBoardState(0);
+  const p2 = createInitialBoardState(0);
+  p1.pendingGarbage = 5;
+
+  // P1 sends 4 squares while holding 5 incoming -> cancels 4, leaves 1 on P1, sends 0 to P2
+  const swap1 = resolveBattleGarbageSwap(p1, p2, 4);
+  assert.deepEqual(swap1, { countered: 4, netSent: 0 });
+  assert.equal(p1.pendingGarbage, 1);
+  assert.equal(p2.pendingGarbage, 0);
+
+  // P1 sends 6 more -> cancels remaining 1 on P1 and queues 5 onto P2
+  const swap2 = resolveBattleGarbageSwap(p1, p2, 6);
+  assert.deepEqual(swap2, { countered: 1, netSent: 5 });
+  assert.equal(p1.pendingGarbage, 0);
+  assert.equal(p2.pendingGarbage, 5);
+
+  // Flushing P2 deposits 5 garbage cells onto P2 and clears P2 pendingGarbage
+  const flushed = flushPendingGarbage(p2, () => 0.35);
+  assert.equal(flushed, 5);
+  assert.equal(p2.pendingGarbage, 0);
+  assert.equal(p2.grid.flat().filter(Boolean).length, 5);
+});
+
+test('finalizeSweep tracks biggestSweep, chainClearsTotal, singleColorCount, and allClearCount', () => {
+  const state = createInitialBoardState(0);
+  // Create 2 squares at bottom rows 8..9 cols 2..4 -> clearing empties board (allDeletedBonus)
+  for (let r = 8; r <= 9; r++) {
+    for (let c = 2; c <= 4; c++) {
+      state.grid[r][c] = makeCell(0);
+    }
+  }
+  let hadClears = false;
+  for (let col = 0; col < BOARD_COLS; col++) {
+    if (stepTimelineColumn(state, col).cellsRemovedNow > 0) hadClears = true;
+  }
+  finalizeSweep(state, hadClears);
+  assert.equal(state.biggestSweep, 2);
+  assert.equal(state.allClearCount, 1);
+  assert.equal(state.singleColorCount, 0);
+
+  // Now create 4 squares + 1 anchor of color 1 -> singleColorBonus + biggestSweep=4
+  state.grid[9][0] = makeCell(1);
+  for (let r = 8; r <= 9; r++) {
+    for (let c = 2; c <= 6; c++) {
+      state.grid[r][c] = makeCell(0);
+    }
+  }
+  hadClears = false;
+  for (let col = 0; col < BOARD_COLS; col++) {
+    if (stepTimelineColumn(state, col).cellsRemovedNow > 0) hadClears = true;
+  }
+  finalizeSweep(state, hadClears);
+  assert.equal(state.biggestSweep, 4);
+  assert.equal(state.singleColorCount, 1);
+});
+
+test('computeEncoreState activates BPM escalation and aurora intensity only on final stage', () => {
+  assert.deepEqual(computeEncoreState(false, 5), { encoreBonusBpm: 0, encoreIntensity: 0 });
+  assert.deepEqual(computeEncoreState(true, 0), { encoreBonusBpm: 0, encoreIntensity: 0 });
+  assert.deepEqual(computeEncoreState(true, 2), { encoreBonusBpm: 8, encoreIntensity: 0.5 });
+  assert.deepEqual(computeEncoreState(true, 8), { encoreBonusBpm: 20, encoreIntensity: 1 });
+});
+
+test('Time Attack PB splits persist on new bests and compute live interpolated pace deltas', () => {
+  const baseProgress: SavedProgress = {
+    highScores: {},
+    unlockedSkins: [SKINS[0].id],
+    skinEditPlaylist: [SKINS[0].id],
+    muted: false,
+    hapticsEnabled: true,
+    dailyHistory: {},
+    dailyStreak: 0,
+    lastDailyCompletedDate: null,
+    timeAttackSplits: {},
+    enabledShifts: [...ALL_SHIFT_TYPES],
+  };
+
+  const afterFirst = applyTimeAttackSplitsToProgress(baseProgress, 60, 2400, [
+    200, 400, 600, 800, 1000, 1200, 1400, 1600, 1800, 2000, 2200, 2400,
+  ]);
+  assert.equal(afterFirst.highScores.time_attack_60, 2400);
+  assert.equal(afterFirst.timeAttackSplits?.['60']?.length, 12);
+
+  // Lower score does NOT overwrite saved PB splits
+  const afterLower = applyTimeAttackSplitsToProgress(afterFirst, 60, 1200, [
+    100, 200, 300,
+  ]);
+  assert.equal(afterLower.highScores.time_attack_60, 2400);
+  assert.equal(afterLower.timeAttackSplits?.['60']?.[1], 400);
+
+  // At 7.5s, expected PB between 5s (200) and 10s (400) is 300
+  const paceAhead = computeTimeAttackPaceDelta(
+    afterFirst.timeAttackSplits?.['60'],
+    2400,
+    7.5,
+    60,
+    450
+  );
+  assert.equal(paceAhead.delta, 150);
+  assert.ok((paceAhead.pbFraction ?? 0) > 0.1 && (paceAhead.pbFraction ?? 0) < 0.2);
+
+  const paceBehind = computeTimeAttackPaceDelta(
+    afterFirst.timeAttackSplits?.['60'],
+    2400,
+    10,
+    60,
+    250
+  );
+  assert.equal(paceBehind.delta, -150);
+});
+
+test('IluminadoAudioEngine preloadTrack, setPlaybackTempoScale, consumeTimelineBeatDelta, and melodic triggers work safely in Node', () => {
+  const audio = new IluminadoAudioEngine();
+  audio.preloadTrack('music/world1.mp3');
+  audio.setPlaybackTempoScale(1.15);
+  const delta = audio.consumeTimelineBeatDelta(0.02, 120);
+  assert.ok(Math.abs(delta - 0.04) < 1e-6);
+  assert.doesNotThrow(() => {
+    audio.playSweepColumnNote(SKINS[0], 0, 4);
+    audio.playSweepColumnNote(SKINS[0], 6, 2);
+    audio.playShiftChord(SKINS[0]);
+  });
+});
+
+test('board_resize shift never changes board dimensions by more than 2 blocks from base or per step', () => {
+  const state = createInitialBoardState(0);
+  for (let c = 4; c < 12; c++) {
+    state.grid[9][c] = makeCell((c % 2) as CellColor);
+    state.grid[8][c] = makeCell(((c + 1) % 2) as CellColor);
+  }
+  const rng = createSeededRng('resize-bounds-test');
+  for (let i = 0; i < 25; i++) {
+    const prevCols = state.cols;
+    const prevRows = state.rows;
+    applyBoardShift(state, 'board_resize', { animateBricks: false, rng });
+    assert.ok(Math.abs(state.cols - state.baseCols) <= 2);
+    assert.ok(Math.abs(state.rows - state.baseRows) <= 2);
+    assert.ok(Math.abs(state.cols - prevCols) <= 2);
+    assert.ok(Math.abs(state.rows - prevRows) <= 2);
+    assert.equal(state.activeShift, 'board_resize');
+    assert.equal(state.isGameOver, false);
+  }
+});
+
+test('Single-transformation rule: applying a new shift cleans up prior obstacles and incompatible sizes', () => {
+  const state = createInitialBoardState(0);
+  applyBoardShift(state, 'patrolling_bumper', { animateBricks: false });
+  assert.ok(state.patrollingBumper !== null);
+  assert.ok(
+    state.grid.flat().filter((c) => c?.isObstacle).length === 4,
+    'patrolling_bumper should create 4 bumper obstacle cells'
+  );
+
+  // Switch to inside_out_swap -> prior patrolling bumper must disappear cleanly
+  applyBoardShift(state, 'inside_out_swap', { animateBricks: false });
+  assert.equal(state.activeShift, 'inside_out_swap');
+  assert.equal(state.patrollingBumper, null);
+  assert.equal(state.grid.flat().filter((c) => c?.isObstacle).length, 0);
+
+  // Switch to twin_elevators -> rows expand by +1, then switching to floating_shelf restores base height
+  applyBoardShift(state, 'twin_elevators', { animateBricks: false });
+  assert.equal(state.rows, state.baseRows + 1);
+  assert.equal(state.cols, state.baseCols);
+
+  applyBoardShift(state, 'floating_shelf', { animateBricks: false });
+  assert.equal(state.rows, state.baseRows);
+  assert.equal(state.cols, state.baseCols);
+  assert.equal(state.activeShift, 'floating_shelf');
+  const obstacles = state.grid.flat().filter((c) => c?.isObstacle);
+  assert.equal(obstacles.length, 6);
+});
+
+test('floating_shelf catches pieces dropped from above while allowing pieces below to reach the floor', () => {
+  const state = createInitialBoardState(0);
+  applyBoardShift(state, 'floating_shelf', { animateBricks: false });
+
+  // Find shelf row & col
+  let shelfRow = -1;
+  let shelfCol = -1;
+  for (let r = 0; r < state.rows; r++) {
+    for (let c = 0; c < state.cols; c++) {
+      if (state.grid[r][c]?.obstacleStyle === 'girder') {
+        shelfRow = r;
+        shelfCol = c;
+        break;
+      }
+    }
+    if (shelfRow >= 0) break;
+  }
+  assert.ok(shelfRow >= 4 && shelfCol >= 0);
+
+  // Drop piece from above shelf -> should land on shelfRow - 1 (leaving open air below shelf)
+  state.activePiece = createPieceFromPattern([0, 0, 1, 1], -1, shelfCol);
+  state.activePiece.y = -2;
+  const aboveLanding = getPieceLandingColumns(state, state.activePiece);
+  assert.equal(aboveLanding.leftBottomRow, shelfRow - 1);
+  hardDropPiece(state, 0);
+  assert.ok(state.grid[shelfRow - 1][shelfCol] !== null && !state.grid[shelfRow - 1][shelfCol]!.isObstacle);
+  assert.equal(state.grid[state.rows - 1][shelfCol], null);
+
+  // Place piece starting UNDERNEATH shelf -> should land on floor at rows - 1
+  state.activePiece = createPieceFromPattern([1, 1, 0, 0], -1, shelfCol + 2);
+  state.activePiece.y = shelfRow + 1;
+  const belowLanding = getPieceLandingColumns(state, state.activePiece);
+  assert.equal(belowLanding.leftBottomRow, state.rows - 1);
+  hardDropPiece(state, 0);
+  assert.ok(state.grid[state.rows - 1][shelfCol + 2] !== null);
+});
+
+test('patrolling_bumper moves horizontally on beat and drops blocks resting on the vacated column', () => {
+  const state = createInitialBoardState(0);
+  applyBoardShift(state, 'patrolling_bumper', { animateBricks: false });
+  const b = state.patrollingBumper!;
+  assert.ok(b);
+  const startX = b.x;
+  const topY = b.y - 1;
+
+  // Put a block directly resting on the leftmost bumper column
+  state.grid[topY][startX] = makeCell(0);
+  assert.equal(state.grid[state.rows - 1][startX], null);
+
+  // Step bumper 1 column right (dir = 1): startX becomes vacated and block falls to bottom floor!
+  const moved = stepPatrollingBumper(state);
+  assert.equal(moved, true);
+  assert.equal(state.patrollingBumper!.x, startX + 1);
+  assert.equal(state.grid[topY][startX], null);
+  assert.ok(state.grid[state.rows - 1][startX] !== null && !state.grid[state.rows - 1][startX]!.isObstacle);
+});
+
+test('Neutral obstacles never form 2x2 squares or block allDeletedBonus / singleColorBonus', () => {
+  const state = createInitialBoardState(0);
+  applyBoardShift(state, 'split_canyon', { animateBricks: false });
+
+  // Place a 2x2 square of color 0 on left tower (leaving no other player blocks)
+  state.grid[8][2] = makeCell(0);
+  state.grid[8][3] = makeCell(0);
+  state.grid[9][2] = makeCell(0);
+  state.grid[9][3] = makeCell(0);
+  const squares = detectBoardMarks(state.grid);
+  assert.equal(squares.length, 1);
+
+  let hadClears = false;
+  for (let col = 0; col < state.cols; col++) {
+    if (stepTimelineColumn(state, col).cellsRemovedNow > 0) hadClears = true;
+  }
+  const ev = finalizeSweep(state, hadClears);
+  assert.ok(ev !== null);
+  assert.equal(ev!.squaresCleared, 1);
+  assert.equal(ev!.allDeletedBonus, true);
+  assert.ok(
+    state.grid.flat().filter((c) => c?.isObstacle).length > 0,
+    'canyon stone pillars remain intact after all-clear sweep'
+  );
+});
+
+test('line_color_shift converts an entire line to a single uniform color', () => {
+  const state = createInitialBoardState(0);
+  // Fill row 9 with alternating colors
+  for (let c = 0; c < state.cols; c++) {
+    state.grid[9][c] = makeCell((c % 2) as CellColor);
+  }
+  applyBoardShift(state, 'line_color_shift', {
+    animateBricks: false,
+    rng: createSeededRng('line-color-1'),
+  });
+  const rowColors = new Set<CellColor>();
+  for (let c = 0; c < state.cols; c++) {
+    const cell = state.grid[9][c];
+    if (cell) rowColors.add(cell.color);
+  }
+  assert.equal(rowColors.size, 1);
+  assert.equal(state.shiftEffect?.type, 'line_color_shift');
+});
+
+test('Dramatic swaps (inside_out_swap, horizon_shear, zipper_merge) preserve exact block counts & colors', () => {
+  for (const swapType of ['inside_out_swap', 'horizon_shear', 'zipper_merge'] as const) {
+    const state = createInitialBoardState(0);
+    let initial0 = 0;
+    let initial1 = 0;
+    for (let r = 6; r < 10; r++) {
+      for (let c = 2; c < 14; c++) {
+        const color = ((r + c) % 2) as CellColor;
+        state.grid[r][c] = makeCell(color);
+        if (color === 0) initial0++;
+        else initial1++;
+      }
+    }
+    applyBoardShift(state, swapType, { animateBricks: false });
+    let after0 = 0;
+    let after1 = 0;
+    for (const cell of state.grid.flat()) {
+      if (cell && !cell.isObstacle) {
+        if (cell.color === 0) after0++;
+        else after1++;
+      }
+    }
+    assert.equal(after0, initial0, `${swapType} must preserve color 0 count`);
+    assert.equal(after1, initial1, `${swapType} must preserve color 1 count`);
+  }
+});
+
+test('All 41 shift types execute cleanly without crashing or causing premature game over', () => {
+  const rng = createSeededRng('all-shifts-smoke');
+  assert.equal(ALL_SHIFT_TYPES.length, 41);
+  for (const shiftType of ALL_SHIFT_TYPES) {
+    const state = createInitialBoardState(0);
+    for (let c = 3; c < state.cols - 3; c++) {
+      state.grid[state.rows - 1][c] = makeCell((c % 2) as CellColor);
+      state.grid[state.rows - 2][c] = makeCell(((c + 1) % 2) as CellColor);
+    }
+    const res = applyBoardShift(state, shiftType, { animateBricks: false, rng });
+    assert.equal(res.applied, true);
+    assert.equal(state.activeShift, shiftType);
+    assert.equal(state.isGameOver, false);
+  }
+});
+
+test('All 30 skins define harmonious non-pure-black/white blockC styles for 3-color mode', () => {
+  assert.equal(SKINS.length, 30);
+  for (const skin of SKINS) {
+    const blockC = getBlockStyle(skin.palette, 2);
+    assert.ok(blockC, `${skin.id} must define blockC`);
+    for (const hex of [
+      blockC.fill,
+      blockC.fillGradientEnd,
+      blockC.shade,
+      blockC.highlight,
+      blockC.border,
+      blockC.emblemColor,
+    ]) {
+      assert.equal(isPureBlackOrWhite(hex), false, `${skin.id} blockC hex ${hex} must not be pure #000/#fff`);
+    }
+    assert.notEqual(
+      blockC.fill.toLowerCase(),
+      skin.palette.blockA.fill.toLowerCase(),
+      `${skin.id} blockC fill must differ from blockA`
+    );
+    assert.notEqual(
+      blockC.fill.toLowerCase(),
+      skin.palette.blockB.fill.toLowerCase(),
+      `${skin.id} blockC fill must differ from blockB`
+    );
+  }
+});
+
+test('Small edge obstacle shifts stay compact (<=4x4), preserve playability, and are non-cumulative', () => {
+  const rng = createSeededRng('edge-obstacles-test');
+  for (const shift of ['corner_edge_block', 'bottom_edge_block', 'side_edge_ledge'] as const) {
+    const state = createInitialBoardState(0);
+    const res = applyBoardShift(state, shift, { animateBricks: false, rng });
+    assert.equal(res.applied, true);
+    assert.equal(state.isGameOver, false);
+
+    const obstacles = state.grid.flat().filter((c) => c?.isObstacle);
+    assert.ok(obstacles.length > 0 && obstacles.length <= 16, `${shift} obstacle footprint must be <= 4x4 (${obstacles.length})`);
+
+    // Top 4 rows in center spawn columns stay clear so new pieces never auto-lose
+    for (let r = 0; r < 4; r++) {
+      assert.equal(state.grid[r][7], null, `${shift} must keep spawn col 7 row ${r} clear`);
+      assert.equal(state.grid[r][8], null, `${shift} must keep spawn col 8 row ${r} clear`);
+    }
+  }
+
+  // Applying bottom_edge_block after corner_edge_block must strip prior corner obstacles (not cumulative)
+  const seqState = createInitialBoardState(0);
+  applyBoardShift(seqState, 'corner_edge_block', { animateBricks: false, rng: () => 0.1 });
+  const firstCount = seqState.grid.flat().filter((c) => c?.isObstacle).length;
+  assert.equal(firstCount, 16);
+  applyBoardShift(seqState, 'bottom_edge_block', { animateBricks: false, rng: () => 0.9 });
+  const secondCount = seqState.grid.flat().filter((c) => c?.isObstacle).length;
+  assert.equal(secondCount, 12, 'obstacles must not accumulate across turns');
+});
+
+test('Brick shape shifts (2x1, 1x3, 3x2, tetromino) spawn, rotate, compute CPU moves, and lock cleanly', () => {
+  const rng = createSeededRng('brick-shapes-test');
+
+  // 2x1 domino
+  const dominoState = createInitialBoardState(0, rng);
+  applyBoardShift(dominoState, 'brick_2x1', { animateBricks: false, rng });
+  assert.equal(dominoState.pieceShapeMode, 'domino_2x1');
+  assert.equal(dominoState.activePiece?.cells.length, 1);
+  assert.equal(dominoState.activePiece?.cells[0].length, 2);
+  assert.equal(rotateActivePiece(dominoState, 'cw'), true);
+  assert.equal(dominoState.activePiece?.cells.length, 2);
+  assert.equal(dominoState.activePiece?.cells[0].length, 1);
+  hardDropPiece(dominoState, 0, rng);
+  assert.equal(dominoState.isGameOver, false);
+
+  // 1x3 trio
+  const trioState = createInitialBoardState(0, rng);
+  applyBoardShift(trioState, 'brick_3x1', { animateBricks: false, rng });
+  assert.equal(trioState.pieceShapeMode, 'trio_3x1');
+  assert.equal(trioState.activePiece?.cells.length, 1);
+  assert.equal(trioState.activePiece?.cells[0].length, 3);
+  assert.equal(rotateActivePiece(trioState, 'cw'), true);
+  assert.equal(trioState.activePiece?.cells.length, 3);
+  assert.equal(trioState.activePiece?.cells[0].length, 1);
+  const trioPlan = computeCpuBestMove(trioState);
+  assert.ok(trioPlan.targetX >= 0 && trioPlan.targetX < trioState.cols);
+  hardDropPiece(trioState, 0, rng);
+  assert.equal(trioState.grid.flat().filter((c) => c && !c.isObstacle).length, 3);
+  assert.equal(trioState.isGameOver, false);
+
+  // 3x2 slab
+  const slabState = createInitialBoardState(0, rng);
+  applyBoardShift(slabState, 'brick_3x2', { animateBricks: false, rng });
+  assert.equal(slabState.pieceShapeMode, 'rect_3x2');
+  assert.equal(slabState.activePiece?.cells.length, 2);
+  assert.equal(slabState.activePiece?.cells[0].length, 3);
+  assert.equal(rotateActivePiece(slabState, 'cw'), true);
+  assert.equal(slabState.activePiece?.cells.length, 3);
+  assert.equal(slabState.activePiece?.cells[0].length, 2);
+  const cpuPlan = computeCpuBestMove(slabState);
+  assert.ok(cpuPlan.targetX >= 0 && cpuPlan.targetX < slabState.cols);
+  hardDropPiece(slabState, 0, rng);
+  assert.equal(slabState.isGameOver, false);
+
+  // Tetrominoes (T, I, J, L, etc.)
+  const tetState = createInitialBoardState(0, rng);
+  applyBoardShift(tetState, 'brick_tetromino', { animateBricks: false, rng });
+  assert.equal(tetState.pieceShapeMode, 'tetromino');
+  assert.ok(tetState.activePiece !== null);
+  const nonNullCount = tetState.activePiece!.cells.flat().filter(Boolean).length;
+  assert.equal(nonNullCount, 4, 'every tetromino must contain exactly 4 blocks');
+  rotateActivePiece(tetState, 'cw');
+  const landing = getPieceLandingColumns(tetState, tetState.activePiece!);
+  assert.equal(landing.colBottomRows.length, tetState.activePiece!.cells[0].length);
+  const tetPlan = computeCpuBestMove(tetState);
+  assert.ok(tetPlan.targetX >= 0);
+  hardDropPiece(tetState, 0, rng);
+  assert.equal(tetState.grid.flat().filter((c) => c && !c.isObstacle).length, 4);
+  assert.equal(tetState.isGameOver, false);
+
+  // Switching away reverts pieceShapeMode back to standard 2x2
+  applyBoardShift(tetState, 'inside_out_swap', { animateBricks: false, rng });
+  assert.equal(tetState.pieceShapeMode, 'standard_2x2');
+  assert.equal(tetState.activePiece?.cells.length, 2);
+  assert.equal(tetState.activePiece?.cells[0].length, 2);
+});
+
+test('brick_blocked spawns obsidian blocked 2x2 bricks that drop with gravity, shatter beside clears, and strip cleanly on next shift', () => {
+  const rng = createSeededRng('blocked-brick-test');
+  const state = createInitialBoardState(0, rng);
+  applyBoardShift(state, 'brick_blocked', { animateBricks: false, rng });
+  assert.equal(state.pieceShapeMode, 'blocked_2x2');
+
+  // Staging piece guarantees at most 1 blocked cell and never isChain on blocked slot
+  const activeCells = state.activePiece!.cells.flat().filter((c) => c !== null);
+  const blockedInActive = activeCells.filter((c) => c!.isBlocked);
+  assert.equal(blockedInActive.length, 1);
+  assert.equal(blockedInActive[0]!.isChain, false);
+
+  // Sample 20 generated blocked_2x2 pieces: none should have >1 blocked slot, some have 0, some have 1
+  let zeroCount = 0;
+  let oneCount = 0;
+  for (let i = 0; i < 20; i++) {
+    const p = generateRandomPiece(0.1, rng, 7, { shapeMode: 'blocked_2x2' });
+    const bc = p.cells.flat().filter((c) => c?.isBlocked).length;
+    assert.ok(bc === 0 || bc === 1);
+    if (bc === 0) zeroCount++;
+    else oneCount++;
+  }
+  assert.ok(oneCount > 0 && zeroCount > 0, 'blocked_2x2 should only occasionally include a blocked block');
+
+  // Hard dropping blocked activePiece deposits 1 gravity-falling blocked obstacle cell
+  hardDropPiece(state, 0, rng);
+  const blockedOnGrid = state.grid
+    .flat()
+    .filter((c) => c?.isObstacle && c.obstacleStyle === 'blocked');
+  assert.equal(blockedOnGrid.length, 1);
+  assert.equal(blockedOnGrid[0]!.obstacleFixed, false);
+
+  // Place a blocked tile resting atop a 2x2 clearable square -> clearing square shatters adjacent blocked tile
+  const shatterState = createInitialBoardState(0, rng);
+  shatterState.grid[8][4] = makeCell(0);
+  shatterState.grid[8][5] = makeCell(0);
+  shatterState.grid[9][4] = makeCell(0);
+  shatterState.grid[9][5] = makeCell(0);
+  shatterState.grid[7][4] = {
+    id: 9991,
+    color: 0,
+    isChain: false,
+    isObstacle: true,
+    obstacleFixed: false,
+    obstacleStyle: 'blocked',
+    chainMarked: false,
+    inSquare: false,
+    pendingClear: false,
+    sweptCol: false,
+    fallOffset: 0,
+    landFlash: 0,
+  };
+  let hadClears = false;
+  for (let col = 0; col < shatterState.cols; col++) {
+    if (stepTimelineColumn(shatterState, col).cellsRemovedNow > 0) hadClears = true;
+  }
+  finalizeSweep(shatterState, hadClears);
+  assert.equal(
+    shatterState.grid.flat().filter((c) => c?.obstacleStyle === 'blocked').length,
+    0,
+    'adjacent blocked tile must shatter when touching 2x2 square clears'
+  );
+
+  // Shifting away from brick_blocked cleans remaining blocked cells and reverts to standard 2x2
+  applyBoardShift(state, 'line_color_shift', { animateBricks: false, rng });
+  assert.equal(state.pieceShapeMode, 'standard_2x2');
+  assert.equal(
+    state.grid.flat().filter((c) => c?.isObstacle).length,
+    0
+  );
+});
+
+test('three_color_mode introduces 3rd color on board & pieces, forms 2x2 squares of color 2, and reverts cleanly', () => {
+  const rng = createSeededRng('three-color-test');
+  const state = createInitialBoardState(0, rng);
+  for (let c = 2; c < 14; c++) {
+    state.grid[8][c] = makeCell((c % 2) as CellColor);
+    state.grid[9][c] = makeCell(((c + 1) % 2) as CellColor);
+  }
+
+  applyBoardShift(state, 'three_color_mode', { animateBricks: false, rng });
+  assert.equal(state.colorCount, 3);
+  const color2Cells = state.grid.flat().filter((c) => c && !c.isObstacle && c.color === 2);
+  assert.ok(color2Cells.length > 0, '3-color mode should convert some board blocks to color 2');
+
+  // Verify 2x2 square of color 2 clears via timeline sweep
+  state.grid[8][0] = makeCell(2);
+  state.grid[8][1] = makeCell(2);
+  state.grid[9][0] = makeCell(2);
+  state.grid[9][1] = makeCell(2);
+  const marks = detectBoardMarks(state.grid);
+  assert.ok(marks.some((sq) => sq.color === 2 && sq.x === 0 && sq.y === 8));
+
+  // Switching away must revert colorCount to 2 and eliminate orphaned color-2 cells
+  applyBoardShift(state, 'line_color_shift', { animateBricks: false, rng });
+  assert.equal(state.colorCount, 2);
+  assert.equal(
+    state.grid.flat().filter((c) => c && c.color === 2).length,
+    0,
+    'reverting from three_color_mode must leave zero orphaned color-2 blocks'
+  );
+});
+
+test('rotate_90 dimension state persists across subsequent non-resize shifts', () => {
+  const rng = createSeededRng('rotate-persist-test');
+  const state = createInitialBoardState(0, rng);
+  assert.equal(state.cols, 16);
+  assert.equal(state.rows, 10);
+
+  applyBoardShift(state, 'rotate_90', { animateBricks: false, level: 2, rng });
+  assert.equal(state.cols, 10);
+  assert.equal(state.rows, 16);
+
+  // Subsequent obstacle / brick shift keeps rotated 10x16 dimensions!
+  applyBoardShift(state, 'corner_edge_block', { animateBricks: false, rng });
+  assert.equal(state.cols, 10);
+  assert.equal(state.rows, 16);
+
+  applyBoardShift(state, 'brick_2x1', { animateBricks: false, rng });
+  assert.equal(state.cols, 10);
+  assert.equal(state.rows, 16);
+});
+
+test('Shift scheduler enforces 3-level windows, frequent ~2-turn rotations, and ~3-level tile-type shifts while keeping 2x2 dominant', () => {
+  const rng = createSeededRng('scheduler-cadence-test');
+  const state = createInitialBoardState(0, rng);
+  for (let c = 3; c < 13; c++) {
+    state.grid[9][c] = makeCell((c % 2) as CellColor);
+  }
+
+  const history: ShiftType[] = [];
+  const rotIndices: number[] = [];
+  const tileIndices: number[] = [];
+  const oneTimeSeen = new Set<ShiftType>();
+  const oneTimeCandidates = new Set<ShiftType>([
+    'corner_edge_block',
+    'bottom_edge_block',
+    'side_edge_ledge',
+    'split_canyon',
+    'octagon_cutoffs',
+  ]);
+  const obstacleSet = OBSTACLE_SHIFT_SET;
+  const tileSet = TILE_TYPE_SHIFT_SET;
+
+  for (let turn = 0; turn < 18; turn++) {
+    if (turn > 0 && turn % 3 === 0) {
+      advanceShiftStageTurn(state);
+    }
+    const picked = pickNextShift(ALL_SHIFT_TYPES, state.activeShift, rng, state);
+    assert.ok(picked !== null);
+    history.push(picked!);
+    if (picked === 'rotate_90') {
+      rotIndices.push(turn);
+    }
+    if (tileSet.has(picked!)) {
+      tileIndices.push(turn);
+    }
+    if (oneTimeCandidates.has(picked!)) {
+      assert.equal(
+        oneTimeSeen.has(picked!),
+        false,
+        `One-time shift ${picked} should not repeat while alternatives remain`
+      );
+      oneTimeSeen.add(picked!);
+    }
+    applyBoardShift(state, picked!, { animateBricks: false, level: turn + 2, rng });
+    assert.equal(state.isGameOver, false);
+  }
+
+  // Rotation happens frequently (every 2-3 turns, mostly 2 turns)
+  assert.ok(rotIndices.length >= 6, `rotate_90 should recur frequently (got ${rotIndices.length})`);
+  for (let i = 1; i < rotIndices.length; i++) {
+    const gap = rotIndices[i] - rotIndices[i - 1];
+    assert.ok(gap >= 2 && gap <= 3, `rotation gap ${gap} should be 2 or 3 turns`);
+  }
+
+  // Most turns remain standard 2x2 (~2/3), with special tile shifts occurring roughly every ~3 levels and never back-to-back
+  assert.ok(
+    tileIndices.length >= 4 && tileIndices.length <= 6,
+    `Expected ~5 special tile shifts across 18 turns, got ${tileIndices.length}`
+  );
+  for (let i = 1; i < tileIndices.length; i++) {
+    const gap = tileIndices[i] - tileIndices[i - 1];
+    assert.ok(gap >= 3 && gap <= 5, `tile shift gap ${gap} should space ~3-4 turns`);
+  }
+
+  // Per 3-turn stage window: <= 1 obstacle shift & <= 1 tile-type/color shift
+  for (let w = 0; w < 6; w++) {
+    const slice = history.slice(w * 3, w * 3 + 3);
+    const obsCount = slice.filter((s) => obstacleSet.has(s)).length;
+    const tileCount = slice.filter((s) => tileSet.has(s)).length;
+    assert.ok(obsCount <= 1, `Turn window ${w} had ${obsCount} obstacle shifts (max 1)`);
+    assert.ok(tileCount <= 1, `Turn window ${w} had ${tileCount} tile/color shifts (max 1)`);
+  }
+});
+
+test('pickNextShift avoids back-to-back repeat when multiple shifts enabled and respects empty list', () => {
+  assert.equal(pickNextShift([], null), null);
+  assert.equal(pickNextShift(['split_canyon'], 'split_canyon'), 'split_canyon');
+  for (let i = 0; i < 10; i++) {
+    const picked = pickNextShift(['rotate_90', 'split_canyon'], 'rotate_90');
+    assert.equal(picked, 'split_canyon');
+  }
+});
+
+test('storage.ts persists and sanitizes enabledShifts including explicit empty array and v1/v2 -> v3 upgrade', () => {
+  const store = new Map<string, string>();
+  const origStorage = (globalThis as unknown as { localStorage?: Storage }).localStorage;
+  (globalThis as unknown as { localStorage: Storage }).localStorage = {
+    getItem: (k: string) => store.get(k) ?? null,
+    setItem: (k: string, v: string) => {
+      store.set(k, v);
+    },
+    removeItem: (k: string) => {
+      store.delete(k);
+    },
+    clear: () => store.clear(),
+    key: () => null,
+    length: 0,
+  };
+  try {
+    const initial = loadProgress();
+    assert.equal(initial.enabledShifts.length, ALL_SHIFT_TYPES.length);
+
+    saveProgress({
+      ...initial,
+      enabledShifts: ['split_canyon', 'floating_shelf'],
+    });
+    const loaded = loadProgress();
+    assert.deepEqual(loaded.enabledShifts, ['split_canyon', 'floating_shelf']);
+
+    // Explicitly disabling all shifts must stay empty across reload
+    saveProgress({ ...loaded, enabledShifts: [] });
+    const loadedEmpty = loadProgress();
+    assert.deepEqual(loadedEmpty.enabledShifts, []);
+
+    // Legacy v1 save merges both v2 & v3 shifts seamlessly
+    store.set(
+      'iluminado_progress_v2',
+      JSON.stringify({ enabledShifts: ['rotate_90', 'split_canyon'] })
+    );
+    const migratedV1 = loadProgress();
+    assert.ok(migratedV1.enabledShifts.includes('corner_edge_block'));
+    assert.ok(migratedV1.enabledShifts.includes('three_color_mode'));
+    assert.ok(migratedV1.enabledShifts.includes('brick_3x1'));
+    assert.ok(migratedV1.enabledShifts.includes('brick_blocked'));
+
+    // v2 save merges v3/v5 shifts without overriding user's v2 choices
+    store.set(
+      'iluminado_progress_v2',
+      JSON.stringify({ enabledShifts: ['rotate_90', 'brick_2x1'], shiftCatalogVersion: 2 })
+    );
+    const migratedV2 = loadProgress();
+    assert.equal(migratedV2.enabledShifts.includes('corner_edge_block'), false);
+    assert.ok(migratedV2.enabledShifts.includes('brick_3x1'));
+    assert.ok(migratedV2.enabledShifts.includes('brick_blocked'));
+    for (const s of NEW_V5_SHIFTS) {
+      assert.ok(migratedV2.enabledShifts.includes(s), `v2->v5 migration should enable ${s}`);
+    }
+
+    // v4 save merges only NEW_V5_SHIFTS without adding missing older shifts
+    store.set(
+      'iluminado_progress_v2',
+      JSON.stringify({ enabledShifts: ['rotate_90'], shiftCatalogVersion: 4 })
+    );
+    const migratedV4 = loadProgress();
+    assert.equal(migratedV4.enabledShifts.includes('split_canyon'), false);
+    for (const s of NEW_V5_SHIFTS) {
+      assert.ok(migratedV4.enabledShifts.includes(s), `v4->v5 migration should enable ${s}`);
+    }
+
+    assert.equal(getPreviousDateKey('2026-11-16'), '2026-11-15');
+  } finally {
+    if (origStorage) {
+      (globalThis as unknown as { localStorage: Storage }).localStorage = origStorage;
+    } else {
+      delete (globalThis as unknown as { localStorage?: Storage }).localStorage;
+    }
+  }
+});
+
+test('Core new shifts: cyclotron_flow orbits gravity CW per piece, portal_wrap teleports edges, and reverse_sweep sweeps RTL', () => {
+  const rng = createSeededRng('core-new-shifts');
+
+  // 1. cyclotron_flow
+  const cyclo = createInitialBoardState(0, rng);
+  applyBoardShift(cyclo, 'cyclotron_flow', { animateBricks: false, rng });
+  assert.equal(cyclo.gravityDirection, 'right');
+  // Steer vertical along Y when gravity is horizontal
+  const startY = cyclo.activePiece!.y;
+  assert.equal(steerPiece(cyclo, -1), true);
+  assert.equal(cyclo.activePiece!.y, startY - 1);
+  // Locking orbits gravity right -> up -> left -> down
+  hardDropPiece(cyclo, 0, rng);
+  assert.equal(cyclo.gravityDirection, 'up');
+  hardDropPiece(cyclo, 0, rng);
+  assert.equal(cyclo.gravityDirection, 'left');
+  hardDropPiece(cyclo, 0, rng);
+  assert.equal(cyclo.gravityDirection, 'down');
+
+  // 2. portal_wrap
+  const portal = createInitialBoardState(0, rng);
+  applyBoardShift(portal, 'portal_wrap', { animateBricks: false, rng });
+  portal.activePiece!.x = 0;
+  assert.equal(steerPiece(portal, -1), true);
+  assert.equal(portal.activePiece!.x, portal.cols - 2);
+  assert.equal(steerPiece(portal, 1), true);
+  assert.equal(portal.activePiece!.x, 0);
+
+  // 3. reverse_sweep clears squares when swept right-to-left
+  const rtl = createInitialBoardState(0, rng);
+  applyBoardShift(rtl, 'reverse_sweep', { animateBricks: false, rng });
+  rtl.grid[8][4] = makeCell(0);
+  rtl.grid[8][5] = makeCell(0);
+  rtl.grid[9][4] = makeCell(0);
+  rtl.grid[9][5] = makeCell(0);
+  let totalRemoved = 0;
+  for (let col = rtl.cols - 1; col >= 0; col--) {
+    totalRemoved += stepTimelineColumn(rtl, col, 'rtl').cellsRemovedNow;
+  }
+  const rtlEv = finalizeSweep(rtl, totalRemoved > 0);
+  assert.equal(rtlEv?.squaresCleared, 1);
+  assert.equal(totalRemoved, 4);
+});
+
+test('New silhouette, obstacle, brick, and swap shifts preserve playability and apply signature mechanics', () => {
+  const rng = createSeededRng('new-shifts-suite');
+
+  // Silhouette shifts leave top spawn headroom clear and place fixed obstacles
+  for (const sil of ['staircase_terraces', 'center_spire', 'dome_pedestal'] as const) {
+    const s = createInitialBoardState(0, rng);
+    applyBoardShift(s, sil, { animateBricks: false, rng });
+    const obsCount = s.grid.flat().filter((c) => c?.isObstacle).length;
+    assert.ok(obsCount > 0, `${sil} must place stone silhouette blocks`);
+    assert.equal(s.grid[0][7], null);
+    assert.equal(s.grid[0][8], null);
+  }
+
+  // spring_bounce bounces an active piece mid-air off spring pads once per piece
+  const springState = createInitialBoardState(0, rng);
+  applyBoardShift(springState, 'spring_bounce', { animateBricks: false, rng });
+  const padX = springState.grid[springState.rows - 1].findIndex(
+    (c) => c?.isObstacle && c.obstacleStyle === 'spring'
+  );
+  assert.ok(padX >= 0, 'spring_bounce must place spring pads');
+  springState.activePiece = createPieceFromPattern([0, 0, 1, 1], -1, Math.max(0, padX - 1));
+  springState.activePiece.y = 0;
+  const springDrop = hardDropPiece(springState, 0, rng);
+  assert.equal(springDrop.landed, false, 'first contact with spring pad should bounce piece mid-air');
+  assert.ok((springDrop.bouncePositions?.length ?? 0) > 0);
+  assert.equal(springState.activePiece?.springBounced, true);
+
+  // conveyor_floor shifts bottom-row player cells laterally and drops upper blocks into vacated slots
+  const conv = createInitialBoardState(0, rng);
+  applyBoardShift(conv, 'conveyor_floor', { animateBricks: false, rng });
+  assert.ok(conv.conveyorDir === 1 || conv.conveyorDir === -1);
+  conv.conveyorDir = 1;
+  conv.grid[conv.rows - 1][4] = makeCell(0);
+  conv.grid[conv.rows - 2][4] = makeCell(1);
+  assert.equal(stepConveyorFloor(conv), true);
+  assert.equal(conv.grid[conv.rows - 1][5]?.color, 0);
+  assert.equal(conv.grid[conv.rows - 1][4]?.color, 1);
+
+  // crumble_blocks crack on piece drop impact (HP 2 -> 1 -> shatter)
+  const crumble = createInitialBoardState(0, rng);
+  applyBoardShift(crumble, 'crumble_blocks', { animateBricks: false, rng });
+  let cRow = -1;
+  let cCol = -1;
+  for (let r = 0; r < crumble.rows && cRow < 0; r++) {
+    for (let c = 0; c < crumble.cols; c++) {
+      if (crumble.grid[r][c]?.obstacleStyle === 'crumble') {
+        cRow = r;
+        cCol = c;
+        break;
+      }
+    }
+  }
+  assert.ok(cRow >= 2 && cCol >= 0, 'crumble_blocks must place crumble ledges');
+  assert.equal(crumble.grid[cRow][cCol]?.crumbleHp, 2);
+  crumble.activePiece = createPieceFromPattern([0, 0, 1, 1], -1, Math.min(crumble.cols - 2, cCol));
+  crumble.activePiece.y = 0;
+  hardDropPiece(crumble, 0, rng);
+  assert.equal(crumble.grid[cRow][cCol]?.crumbleHp, 1, 'landing above crumble block cracks it to HP 1');
+
+  // brick_l_trio spawns 3-block L-triominoes
+  const lTrio = createInitialBoardState(0, rng);
+  applyBoardShift(lTrio, 'brick_l_trio', { animateBricks: false, rng });
+  assert.equal(lTrio.pieceShapeMode, 'l_trio_2x2');
+  assert.equal(lTrio.activePiece!.cells.flat().filter(Boolean).length, 3);
+
+  // chameleon_rotate cycles piece colors on rotation
+  const cham = createInitialBoardState(0, rng);
+  applyBoardShift(cham, 'chameleon_rotate', { animateBricks: false, rng });
+  const beforeColor = cham.activePiece!.cells[0][0]!.color;
+  assert.equal(rotateActivePiece(cham, 'cw'), true);
+  const rotatedBack = cham.activePiece!.cells[0][1]!.color; // top-left moved to top-right on CW
+  assert.equal(rotatedBack, ((beforeColor + 1) % cham.colorCount) as CellColor);
+
+  // prism_wild_bricks spawns isWild tiles that complete 2x2 squares with any color and preserve single-color bonus
+  const prism = createInitialBoardState(0, rng);
+  applyBoardShift(prism, 'prism_wild_bricks', { animateBricks: false, rng });
+  assert.equal(prism.pieceShapeMode, 'prism_wild_2x2');
+  const hasWildInActive = prism.activePiece!.cells.flat().some((c) => c?.isWild);
+  assert.equal(hasWildInActive, true);
+  prism.grid[8][2] = makeCell(0);
+  prism.grid[8][3] = makeCell(0);
+  prism.grid[9][2] = makeCell(0);
+  prism.grid[9][3] = { ...makeCell(1), isWild: true };
+  prism.grid[9][10] = makeCell(0);
+  const prismMarks = detectBoardMarks(prism.grid);
+  assert.ok(prismMarks.some((sq) => sq.x === 2 && sq.y === 8), 'wild corner must complete 2x2 square');
+  for (let col = 0; col < prism.cols; col++) {
+    stepTimelineColumn(prism, col);
+  }
+  const prismEv = finalizeSweep(prism, true);
+  assert.equal(prismEv?.squaresCleared, 1);
+
+  // mirror_flip & vortex_swirl preserve exact color counts
+  for (const swapShift of ['mirror_flip', 'vortex_swirl'] as const) {
+    const sw = createInitialBoardState(0, rng);
+    let count0 = 0;
+    let count1 = 0;
+    for (let r = 6; r < sw.rows; r++) {
+      for (let c = 1; c < sw.cols - 1; c++) {
+        const col = ((r * 3 + c) % 2) as CellColor;
+        sw.grid[r][c] = makeCell(col);
+        if (col === 0) count0++;
+        else count1++;
+      }
+    }
+    applyBoardShift(sw, swapShift, { animateBricks: false, rng });
+    let after0 = 0;
+    let after1 = 0;
+    for (const cell of sw.grid.flat()) {
+      if (cell && !cell.isObstacle) {
+        if (cell.color === 0) after0++;
+        else after1++;
+      }
+    }
+    assert.equal(after0, count0, `${swapShift} preserves color 0 count`);
+    assert.equal(after1, count1, `${swapShift} preserves color 1 count`);
+  }
+});
+
+
 
 
 

@@ -1,12 +1,11 @@
 import React from 'react';
 import { getHexLuminance } from '../game/skins';
-import { BoardOrientation, HudSnapshot, SkinConfig } from '../game/types';
+import { HudSnapshot, SkinConfig } from '../game/types';
 import { PiecePreview } from './PiecePreview';
 
 interface GameHudProps {
   hud: HudSnapshot;
   skin: SkinConfig;
-  orientation: BoardOrientation;
   isCompactLandscape: boolean;
   muted: boolean;
   onToggleMute: () => void;
@@ -25,7 +24,6 @@ function formatTime(seconds: number): string {
 export const GameHud: React.FC<GameHudProps> = ({
   hud,
   skin,
-  orientation,
   isCompactLandscape,
   muted,
   onToggleMute,
@@ -79,35 +77,14 @@ export const GameHud: React.FC<GameHudProps> = ({
       }`}
     >
       {/* Top Perimeter Strip */}
-      <div className="flex items-start justify-between gap-2 sm:gap-4">
-        <div
-          className={`${
-            isCompactLandscape ? 'px-3 py-1.5' : 'px-3.5 py-2 sm:px-4 sm:py-2.5'
-          } rounded-xl flex items-center gap-3 transition-colors duration-300`}
-          style={cardStyle}
-        >
-          <div>
-            <div className="flex items-center gap-2 text-[11px] sm:text-xs font-medium" style={{ color: palette.hudMuted }}>
-              <span
-                className="inline-flex items-end gap-[2px] h-3 shrink-0"
-                aria-hidden="true"
-                style={{
-                  ['--beat-dur' as string]: `${(60 / Math.max(40, hud.bpm)).toFixed(3)}s`,
-                }}
-              >
-                <span className="w-[2.5px] h-2.5 rounded-t-xs animate-eq-bar" style={{ backgroundColor: palette.hudAccent }} />
-                <span className="w-[2.5px] h-3 rounded-t-xs animate-eq-bar" style={{ backgroundColor: palette.hudAccent, animationDelay: '0.12s' }} />
-                <span className="w-[2.5px] h-2 rounded-t-xs animate-eq-bar" style={{ backgroundColor: palette.hudAccent, animationDelay: '0.24s' }} />
-              </span>
-              <span className="font-mono-tabular uppercase tracking-wider">
-                {hud.boardCols}×{hud.boardRows}
-              </span>
-            </div>
-            <div className={`font-display ${isCompactLandscape ? 'text-base' : 'text-lg'} font-semibold leading-tight capitalize`}>
-              {hud.mode.replace('_', ' ')}
-            </div>
-          </div>
-        </div>
+      <div
+        className={`flex items-start gap-2 sm:gap-4 ${
+          hud.timeRemaining !== null || isDual ? 'justify-between' : 'justify-end'
+        }`}
+      >
+        {(hud.timeRemaining !== null || isDual) && (
+          <div className="w-10 sm:w-[136px] shrink-0" aria-hidden="true" />
+        )}
 
         {hud.timeRemaining !== null ? (
           <div className="px-5 py-2 rounded-xl text-center" style={cardStyle}>
@@ -125,15 +102,37 @@ export const GameHud: React.FC<GameHudProps> = ({
             >
               {formatTime(hud.timeRemaining)}
             </div>
+            {hud.mode === 'time_attack' && hud.timeAttackPaceDelta !== null && (
+              <div
+                className="font-mono-tabular text-[10px] font-semibold mt-1"
+                style={{
+                  color:
+                    hud.timeAttackPaceDelta >= 0 ? palette.hudAccent : palette.hudMuted,
+                }}
+              >
+                {hud.timeAttackPaceDelta >= 0 ? '+' : ''}
+                {hud.timeAttackPaceDelta.toLocaleString()} vs PB
+              </div>
+            )}
           </div>
         ) : isDual ? (
           <div
-            className="px-5 py-2 rounded-xl flex items-center gap-6"
+            className="px-4 sm:px-5 py-2 rounded-xl flex items-center gap-4 sm:gap-6"
             style={cardStyle}
           >
             <div className="text-center">
-              <div className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: palette.hudMuted }}>
-                Player 1
+              <div className="text-[11px] font-semibold uppercase tracking-wider flex items-center justify-center gap-1.5" style={{ color: palette.hudMuted }}>
+                <span>Player 1</span>
+                {hud.pendingGarbage > 0 && (
+                  <span
+                    className="font-mono-tabular text-[10px] font-bold px-1.5 py-0.5 rounded text-[#faf6ee]"
+                    style={{ backgroundColor: palette.hudAccent }}
+                    title={`Incoming ${hud.pendingGarbage} garbage blocks on next sweep`}
+                    data-testid="p1-incoming-garbage"
+                  >
+                    +{hud.pendingGarbage}
+                  </span>
+                )}
               </div>
               <div className="font-mono-tabular text-xl font-semibold">
                 {Math.round(hud.score).toLocaleString()}
@@ -141,8 +140,18 @@ export const GameHud: React.FC<GameHudProps> = ({
             </div>
             <div className="h-6 w-px bg-[#201c2c]/10" aria-hidden="true" />
             <div className="text-center">
-              <div className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: palette.hudMuted }}>
-                {hud.mode === 'vs_cpu' ? 'CPU' : 'Player 2'}
+              <div className="text-[11px] font-semibold uppercase tracking-wider flex items-center justify-center gap-1.5" style={{ color: palette.hudMuted }}>
+                <span>{hud.mode === 'vs_cpu' ? 'CPU' : 'Player 2'}</span>
+                {hud.p2PendingGarbage > 0 && (
+                  <span
+                    className="font-mono-tabular text-[10px] font-bold px-1.5 py-0.5 rounded text-[#faf6ee]"
+                    style={{ backgroundColor: palette.hudInk }}
+                    title={`Incoming ${hud.p2PendingGarbage} garbage blocks on next sweep`}
+                    data-testid="p2-incoming-garbage"
+                  >
+                    +{hud.p2PendingGarbage}
+                  </span>
+                )}
               </div>
               <div className="font-mono-tabular text-xl font-semibold">
                 {Math.round(hud.p2Score ?? 0).toLocaleString()}
@@ -346,95 +355,147 @@ export const GameHud: React.FC<GameHudProps> = ({
         </div>
       )}
 
-      {/* Flanking Single-Player Docks (Desktop Wide Viewports) */}
+      {/* Consolidated Single-Player Left Sidebar (Desktop Wide Viewports) */}
       {!isDual && !isCompactLandscape && (
-        <div className="hidden lg:flex items-center justify-between flex-1 pointer-events-none">
-          <div className="w-36 flex flex-col gap-3">
-            <div className="px-4 py-3.5 rounded-xl" style={cardStyle}>
-              <div className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: palette.hudMuted }}>
-                Score
-              </div>
-              <div
-                className="font-mono-tabular text-2xl font-semibold mt-0.5"
-                data-testid="hud-score"
-              >
-                {Math.round(hud.score).toLocaleString()}
-              </div>
-              <div className="text-[11px] font-medium mt-2" style={{ color: palette.hudMuted }}>
-                Best {Math.round(hud.highScore).toLocaleString()}
-              </div>
-            </div>
-
-            <div className="px-4 py-3.5 rounded-xl" style={cardStyle}>
-              <div className="flex items-baseline justify-between">
-                <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: palette.hudMuted }}>
-                  Level
-                </span>
-                <span className="font-mono-tabular text-sm font-semibold">
-                  {hud.level}
-                </span>
-              </div>
-              <div className="mt-2 h-1.5 w-full rounded-full overflow-hidden bg-[#201c2c]/10">
-                <div
-                  className="h-full transition-[width] duration-300 ease-out"
-                  style={{
-                    width: `${Math.min(100, Math.round((hud.stageSquares / Math.max(1, hud.stageGoal)) * 100))}%`,
-                    backgroundColor: palette.hudAccent,
-                  }}
-                />
-              </div>
-              <div className="flex items-center justify-between text-[11px] mt-1.5 font-mono-tabular" style={{ color: palette.hudMuted }}>
-                <span>Cleared</span>
-                <span>{hud.squaresTotal}</span>
-              </div>
-            </div>
-
+        <div className="hidden lg:flex items-center justify-start flex-1 pointer-events-none">
+          <div className="w-[126px] flex flex-col gap-2.5 items-stretch">
+            {/* Unified Score + Level + Combo Card */}
             <div
-              className="px-4 py-3.5 rounded-xl transition-transform duration-150"
+              className="px-3 py-2.5 rounded-xl transition-transform duration-150"
               style={{
                 ...cardStyle,
                 border:
                   hud.comboMultiplier >= 4
                     ? `1.5px solid ${palette.hudAccent}`
                     : cardStyle.border,
-                transform: hud.comboMultiplier >= 4 ? 'scale(1.03)' : 'scale(1)',
               }}
             >
-              <div className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: palette.hudMuted }}>
-                Combo
+              <div className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: palette.hudMuted }}>
+                Score
               </div>
               <div
-                className="font-mono-tabular text-2xl font-semibold mt-0.5"
-                style={{
-                  color: hud.comboMultiplier >= 4 ? palette.hudAccent : palette.hudInk,
-                }}
+                className="font-mono-tabular text-xl font-semibold leading-tight mt-0.5"
+                data-testid="hud-score"
               >
-                {hud.comboMultiplier}×
+                {Math.round(hud.score).toLocaleString()}
               </div>
-              <div className="text-[11px] font-medium mt-1" style={{ color: palette.hudMuted }}>
-                Sweep: <span className="font-mono-tabular">{hud.squaresThisSweep}</span> sq
+              <div className="text-[10px] font-medium mt-0.5" style={{ color: palette.hudMuted }}>
+                Best {Math.round(hud.highScore).toLocaleString()}
               </div>
-            </div>
-          </div>
 
-          <div className="w-36 flex flex-col gap-3 items-end">
-            <div className="w-full px-4 py-3.5 rounded-xl flex flex-col items-center" style={cardStyle}>
+              {hud.mode === 'time_attack' &&
+                hud.timeAttackPaceDelta !== null &&
+                hud.timeAttackPbFraction !== null &&
+                hud.timeAttackCurrentFraction !== null && (
+                  <div className="mt-2 pt-2 border-t border-[#201c2c]/10">
+                    <div className="flex items-center justify-between text-[10px] font-mono-tabular font-semibold mb-1">
+                      <span style={{ color: palette.hudMuted }}>PB Pace</span>
+                      <span
+                        data-testid="time-attack-pace-delta"
+                        style={{
+                          color:
+                            hud.timeAttackPaceDelta >= 0
+                              ? palette.hudAccent
+                              : palette.hudMuted,
+                        }}
+                      >
+                        {hud.timeAttackPaceDelta >= 0 ? '+' : ''}
+                        {hud.timeAttackPaceDelta.toLocaleString()}
+                      </span>
+                    </div>
+                    <div className="relative h-1.5 w-full rounded-full bg-[#201c2c]/10 overflow-visible">
+                      <div
+                        className="h-full rounded-full transition-[width] duration-300"
+                        style={{
+                          width: `${Math.min(100, Math.round(hud.timeAttackCurrentFraction * 100))}%`,
+                          backgroundColor: palette.hudAccent,
+                        }}
+                      />
+                      <span
+                        className="absolute top-[-3px] w-[2px] h-3 rounded-full"
+                        style={{
+                          left: `calc(${Math.min(100, Math.round(hud.timeAttackPbFraction * 100))}% - 1px)`,
+                          backgroundColor: palette.hudInk,
+                        }}
+                        title="Personal Best pace marker"
+                      />
+                    </div>
+                  </div>
+                )}
+
+              <div className="border-t border-[#201c2c]/10 my-2 pt-2">
+                <div className="flex items-baseline justify-between">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: palette.hudMuted }}>
+                    Level
+                  </span>
+                  <span className="font-mono-tabular text-xs font-semibold">
+                    {hud.level}
+                  </span>
+                </div>
+                <div className="mt-1.5 h-1.5 w-full rounded-full overflow-hidden bg-[#201c2c]/10">
+                  <div
+                    className="h-full transition-[width] duration-300 ease-out"
+                    style={{
+                      width: `${Math.min(100, Math.round((hud.stageSquares / Math.max(1, hud.stageGoal)) * 100))}%`,
+                      backgroundColor: palette.hudAccent,
+                    }}
+                  />
+                </div>
+                <div className="flex items-center justify-between text-[10px] mt-1 font-mono-tabular" style={{ color: palette.hudMuted }}>
+                  <span>Cleared</span>
+                  <span>{hud.squaresTotal}</span>
+                </div>
+              </div>
+
+              <div className="border-t border-[#201c2c]/10 pt-2">
+                <div className="flex items-baseline justify-between">
+                  <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: palette.hudMuted }}>
+                    Combo
+                  </span>
+                  <span
+                    className="font-mono-tabular text-base font-semibold"
+                    style={{
+                      color: hud.comboMultiplier >= 4 ? palette.hudAccent : palette.hudInk,
+                    }}
+                  >
+                    {hud.comboMultiplier}×
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-[10px] mt-0.5 font-mono-tabular" style={{ color: palette.hudMuted }}>
+                  <span>Sweep</span>
+                  <span>{hud.squaresThisSweep} sq</span>
+                </div>
+              </div>
+
+              {hud.activeShiftLabel && (
+                <div
+                  className="border-t border-[#201c2c]/10 mt-2 pt-1.5 text-[10px] font-mono-tabular font-semibold truncate"
+                  style={{ color: palette.hudAccent }}
+                  title={hud.activeShiftLabel}
+                >
+                  {hud.activeShiftLabel}
+                </div>
+              )}
+            </div>
+
+            {/* Next Queue Card */}
+            <div className="px-3 py-2.5 rounded-xl flex flex-col items-center" style={cardStyle}>
               <div
-                className="text-[11px] font-semibold uppercase tracking-wider mb-3 self-start"
+                className="text-[10px] font-semibold uppercase tracking-wider mb-2 self-start"
                 style={{ color: palette.hudMuted }}
               >
                 Next
               </div>
-              <div className="flex flex-col gap-3 items-center">
+              <div className="flex flex-col gap-2 items-center">
                 {hud.nextPieces.slice(0, 3).map((piece, idx) => (
                   <div
                     key={idx}
-                    style={{ opacity: idx === 0 ? 1 : idx === 1 ? 0.8 : 0.6 }}
+                    style={{ opacity: idx === 0 ? 1 : idx === 1 ? 0.82 : 0.62 }}
                   >
                     <PiecePreview
                       piece={piece}
                       skin={skin}
-                      cellSize={idx === 0 ? 22 : 18}
+                      cellSize={idx === 0 ? 18 : 14}
                     />
                   </div>
                 ))}
@@ -442,14 +503,14 @@ export const GameHud: React.FC<GameHudProps> = ({
             </div>
 
             {hud.activePuzzle && (
-              <div className="w-full px-4 py-3.5 rounded-xl" style={cardStyle}>
-                <div className="text-[11px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: palette.hudMuted }}>
-                  Target Shape
+              <div className="px-3 py-2.5 rounded-xl" style={cardStyle}>
+                <div className="text-[10px] font-semibold uppercase tracking-wider mb-1" style={{ color: palette.hudMuted }}>
+                  Target
                 </div>
-                <div className="text-xs font-semibold mb-2">
+                <div className="text-[11px] font-semibold mb-1.5 leading-tight">
                   {hud.activePuzzle.title}
                 </div>
-                <div className="flex flex-col gap-0.5 items-center py-1">
+                <div className="flex flex-col gap-0.5 items-center py-0.5">
                   {hud.activePuzzle.pattern.map((row, rIdx) => (
                     <div key={rIdx} className="flex gap-0.5">
                       {row.split('').map((ch, cIdx) => {
@@ -460,7 +521,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                         return (
                           <span
                             key={cIdx}
-                            className="w-3.5 h-3.5 rounded-[2px] block"
+                            className="w-3 h-3 rounded-[2px] block"
                             style={{
                               backgroundColor:
                                 ch === '#' ? targetStyle.fill : 'rgba(32, 28, 44, 0.08)',
@@ -479,17 +540,17 @@ export const GameHud: React.FC<GameHudProps> = ({
             )}
 
             {hud.activeMission && (
-              <div className="w-full px-4 py-3.5 rounded-xl" style={cardStyle}>
-                <div className="text-[11px] font-semibold uppercase tracking-wider mb-1" style={{ color: palette.hudMuted }}>
+              <div className="px-3 py-2.5 rounded-xl" style={cardStyle}>
+                <div className="text-[10px] font-semibold uppercase tracking-wider mb-0.5" style={{ color: palette.hudMuted }}>
                   {hud.mode === 'daily' ? `Daily ${hud.activeDailyDateKey ?? ''}` : 'Mission'}
                 </div>
-                <div className="text-xs font-semibold leading-snug">
+                <div className="text-[11px] font-semibold leading-snug">
                   {hud.activeMission.title}
                 </div>
-                <div className="text-[11px] mt-1 leading-snug" style={{ color: palette.hudMuted }}>
+                <div className="text-[10px] mt-1 leading-snug" style={{ color: palette.hudMuted }}>
                   {hud.activeMission.description}
                 </div>
-                <div className="font-mono-tabular text-sm font-semibold mt-2" style={{ color: palette.hudAccent }}>
+                <div className="font-mono-tabular text-xs font-semibold mt-1.5" style={{ color: palette.hudAccent }}>
                   {hud.missionProgress ?? 0} / {hud.activeMission.targetValue}
                 </div>
               </div>
@@ -670,8 +731,8 @@ export const GameHud: React.FC<GameHudProps> = ({
           }}
         >
           {hud.mode === 'battle_2p'
-            ? 'P1: A D Move · W/Q Rotate · L-Shift Slam   ·   P2: Arrows Move · Up Rotate · R-Shift Slam   ·   Esc Pause'
-            : 'Arrows / A D Move · Up / W / Space Rotate · Z CCW · C / Shift Slam · Esc Pause'}
+            ? 'P1: A D Move · W Rotate · S Slam   ·   P2: ← → Move · ↑ Rotate · ↓ Slam   ·   Esc Pause'
+            : '← → Move · ↑ Rotate · ↓ Slam · Z CCW · Esc Pause'}
         </div>
       </div>
     </div>

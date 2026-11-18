@@ -3,10 +3,20 @@ import {
   BOARD_ROWS,
   LOCK_DELAY_SEC,
   canPlacePiece,
+  getGravityVector,
   getPieceLandingColumns,
 } from './engine';
-import { getHexLuminance, isHexColorDark } from './skins';
-import { BlockStyle, BoardOrientation, BoardState, Cell, Piece, SkinConfig } from './types';
+import { getBlockStyle, getHexLuminance, isHexColorDark } from './skins';
+import {
+  BlockStyle,
+  BoardOrientation,
+  BoardState,
+  Cell,
+  CellColor,
+  GravityDirection,
+  Piece,
+  SkinConfig,
+} from './types';
 
 interface Particle {
   active: boolean;
@@ -21,7 +31,7 @@ interface Particle {
   color: string;
   rotation: number;
   vRot: number;
-  shape: SkinConfig['particleShape'];
+  shape: SkinConfig['particleShape'] | 'star' | 'diamond';
 }
 
 interface ClearRing {
@@ -74,6 +84,18 @@ interface LandingRipple {
   maxLife: number;
 }
 
+interface DropBeam {
+  active: boolean;
+  boardIdx: 0 | 1;
+  col: number;
+  startRow: number;
+  colBotRows: number[];
+  colColors: (CellColor | null)[];
+  gravityDirection: GravityDirection;
+  life: number;
+  maxLife: number;
+}
+
 interface NeighborJoins {
   top: boolean;
   right: boolean;
@@ -109,6 +131,7 @@ const MAX_FLARES = 36;
 const MAX_POPUPS = 16;
 const MAX_MOTES = 42;
 const MAX_LAND_RIPPLES = 16;
+const MAX_DROP_BEAMS = 12;
 const PARALLAX_OVERSCAN_X = 56;
 const PARALLAX_OVERSCAN_Y = 24;
 
@@ -196,6 +219,19 @@ export class IluminadoCanvasRenderer {
   }));
   private landRippleCursor = 0;
 
+  private dropBeams: DropBeam[] = Array.from({ length: MAX_DROP_BEAMS }, () => ({
+    active: false,
+    boardIdx: 0,
+    col: 0,
+    startRow: 0,
+    colBotRows: [0, 0],
+    colColors: [0, 1],
+    gravityDirection: 'down' as GravityDirection,
+    life: 0,
+    maxLife: 0.26,
+  }));
+  private dropBeamCursor = 0;
+
   private pointerNormX = 0;
   private pointerNormY = 0;
   private parallaxX = 0;
@@ -211,6 +247,23 @@ export class IluminadoCanvasRenderer {
   private rotateAnimT = 0;
   private rotateAnimDir: 'cw' | 'ccw' = 'cw';
   private rotateFromCellSize: number | null = null;
+
+  private tmpJoins: NeighborJoins = { top: false, right: false, bottom: false, left: false };
+  private tmpRipple = { liftPx: 0, glow: 0 };
+  private tmpBlockFx = {
+    row: 0,
+    col: 0,
+    inSquare: false,
+    chainMarked: false,
+    pendingClear: false,
+    sweptCol: false,
+    landFlash: 0,
+    rippleGlow: 0,
+    beatPhase: 0,
+    timeSec: 0,
+    shimmerWave: 0,
+    isWild: false,
+  };
 
   public setPointerOffset(nx: number, ny: number): void {
     this.pointerNormX = Math.max(-1, Math.min(1, nx));
@@ -230,6 +283,27 @@ export class IluminadoCanvasRenderer {
     rip.row = Math.max(0, row);
     rip.life = 0;
     rip.maxLife = 0.62;
+  }
+
+  public triggerHardDropBeam(
+    boardIdx: 0 | 1,
+    col: number,
+    startRow: number,
+    colBotRows: number[],
+    colColors: (CellColor | null)[],
+    gravityDirection: GravityDirection = 'down'
+  ): void {
+    const beam = this.dropBeams[this.dropBeamCursor];
+    this.dropBeamCursor = (this.dropBeamCursor + 1) % MAX_DROP_BEAMS;
+    beam.active = true;
+    beam.boardIdx = boardIdx;
+    beam.col = col;
+    beam.startRow = startRow;
+    beam.colBotRows = colBotRows;
+    beam.colColors = colColors;
+    beam.gravityDirection = gravityDirection;
+    beam.life = 0;
+    beam.maxLife = 0.28;
   }
 
   public triggerOrientationShift(
@@ -262,7 +336,7 @@ export class IluminadoCanvasRenderer {
 
   public spawnClearBurst(
     boardIdx: 0 | 1,
-    positions: Array<{ x: number; y: number; color: 0 | 1 }>,
+    positions: Array<{ x: number; y: number; color: CellColor }>,
     skin: SkinConfig
   ): void {
     const rect =
@@ -272,27 +346,40 @@ export class IluminadoCanvasRenderer {
     for (const pos of positions) {
       const cx = rect.x + (pos.x + 0.5) * rect.cellSize;
       const cy = rect.y + (pos.y + 0.5) * rect.cellSize;
-      const style = pos.color === 0 ? skin.palette.blockA : skin.palette.blockB;
+      const style = getBlockStyle(skin.palette, pos.color);
 
-      // Restrained Zen dissolve: 2 soft slow mist/water motes per cleared tile
-      for (let i = 0; i < 2; i++) {
+      // Joyful clear burst: 2 shaped motes + 1 rising 4-point star/diamond glint per tile
+      for (let i = 0; i < 3; i++) {
         const p = this.particles[this.particleCursor];
         this.particleCursor = (this.particleCursor + 1) % MAX_PARTICLES;
-        const angle = -Math.PI * 0.5 + (i === 0 ? -0.45 : 0.45) + (Math.random() - 0.5) * 0.4;
-        const speed = 16 + Math.random() * 28;
+        const spread = i === 0 ? -0.58 : i === 1 ? 0.58 : 0;
+        const angle = -Math.PI * 0.5 + spread + (Math.random() - 0.5) * 0.45;
+        const speed = i === 2 ? 28 + Math.random() * 34 : 16 + Math.random() * 28;
         p.active = true;
-        p.x = cx + (i === 0 ? -rect.cellSize * 0.16 : rect.cellSize * 0.16);
+        p.x = cx + (i - 1) * rect.cellSize * 0.14;
         p.y = cy;
         p.vx = Math.cos(angle) * speed;
-        p.vy = Math.sin(angle) * speed - 12;
-        p.size = rect.cellSize * (0.12 + Math.random() * 0.08);
-        p.alpha = 0.58;
+        p.vy = Math.sin(angle) * speed - (i === 2 ? 18 : 12);
+        p.size = rect.cellSize * (i === 2 ? 0.22 + Math.random() * 0.1 : 0.13 + Math.random() * 0.08);
+        p.alpha = i === 2 ? 0.85 : 0.62;
         p.life = 0;
-        p.maxLife = 0.55 + Math.random() * 0.35;
-        p.color = i === 0 ? style.highlight : style.fill;
+        p.maxLife = (i === 2 ? 0.65 : 0.55) + Math.random() * 0.3;
+        p.color =
+          i === 2
+            ? skin.palette.squareHighlight
+            : i === 0
+            ? style.highlight
+            : style.fill;
         p.rotation = Math.random() * Math.PI;
-        p.vRot = (Math.random() - 0.5) * 2;
-        p.shape = pos.color === 0 ? 'bubble' : skin.particleShape;
+        p.vRot = (Math.random() - 0.5) * (i === 2 ? 4.5 : 2.2);
+        p.shape =
+          i === 2
+            ? pos.color === 0
+              ? 'star'
+              : 'diamond'
+            : pos.color === 0
+            ? 'bubble'
+            : skin.particleShape;
       }
 
       // Soft expanding water ripple halo on clear
@@ -301,10 +388,10 @@ export class IluminadoCanvasRenderer {
       ring.active = true;
       ring.x = cx;
       ring.y = cy;
-      ring.maxRadius = rect.cellSize * 1.08;
+      ring.maxRadius = rect.cellSize * 1.15;
       ring.life = 0;
-      ring.maxLife = 0.48;
-      ring.color = skin.palette.squareHighlight;
+      ring.maxLife = 0.5;
+      ring.color = style.highlight;
 
       // Subtle vertical translucent wake veil
       const flare = this.sweepFlares[this.flareCursor];
@@ -312,12 +399,56 @@ export class IluminadoCanvasRenderer {
       flare.active = true;
       flare.x = cx;
       flare.y = cy;
-      flare.width = rect.cellSize * 0.72;
-      flare.height = rect.height * 0.78;
+      flare.width = rect.cellSize * 0.78;
+      flare.height = rect.height * 0.82;
       flare.life = 0;
-      flare.maxLife = 0.52;
+      flare.maxLife = 0.55;
       flare.color = style.highlight;
     }
+  }
+
+  public spawnPeggleBounce(
+    boardIdx: 0 | 1,
+    gx: number,
+    gy: number,
+    skin: SkinConfig
+  ): void {
+    const rect =
+      boardIdx === 1 && this.lastSecondaryRect
+        ? this.lastSecondaryRect
+        : this.lastPrimaryRect;
+    const cx = rect.x + (gx + 0.5) * rect.cellSize;
+    const cy = rect.y + (gy + 0.5) * rect.cellSize;
+
+    for (let i = 0; i < 4; i++) {
+      const p = this.particles[this.particleCursor];
+      this.particleCursor = (this.particleCursor + 1) % MAX_PARTICLES;
+      const angle = (Math.PI * 2 * i) / 4 + Math.random() * 0.6;
+      const speed = 26 + Math.random() * 28;
+      p.active = true;
+      p.x = cx;
+      p.y = cy;
+      p.vx = Math.cos(angle) * speed;
+      p.vy = Math.sin(angle) * speed;
+      p.size = rect.cellSize * (0.14 + Math.random() * 0.08);
+      p.alpha = 0.85;
+      p.life = 0;
+      p.maxLife = 0.36 + Math.random() * 0.14;
+      p.color = i % 2 === 0 ? skin.palette.squareHighlight : skin.palette.hudAccent;
+      p.rotation = Math.random() * Math.PI;
+      p.vRot = (Math.random() - 0.5) * 6;
+      p.shape = i % 2 === 0 ? 'star' : 'bubble';
+    }
+
+    const ring = this.clearRings[this.ringCursor];
+    this.ringCursor = (this.ringCursor + 1) % MAX_RINGS;
+    ring.active = true;
+    ring.x = cx;
+    ring.y = cy;
+    ring.maxRadius = rect.cellSize * 0.82;
+    ring.life = 0;
+    ring.maxLife = 0.32;
+    ring.color = skin.palette.squareHighlight;
   }
 
   public spawnScorePopup(
@@ -398,6 +529,15 @@ export class IluminadoCanvasRenderer {
       rip.life += dt;
       if (rip.life >= rip.maxLife) {
         rip.active = false;
+      }
+    }
+
+    for (let i = 0; i < MAX_DROP_BEAMS; i++) {
+      const beam = this.dropBeams[i];
+      if (!beam.active) continue;
+      beam.life += dt;
+      if (beam.life >= beam.maxLife) {
+        beam.active = false;
       }
     }
 
@@ -647,7 +787,8 @@ export class IluminadoCanvasRenderer {
       secondaryBoard: BoardState | null;
       isTitleScreen: boolean;
       secondaryLabel?: string;
-      audioSpectrum?: { subBass: number; mid: number; high: number };
+      audioSpectrum?: { subBass: number; mid: number; high: number; bands?: number[] };
+      encoreIntensity?: number;
     }
   ): void {
     const {
@@ -662,6 +803,7 @@ export class IluminadoCanvasRenderer {
       isTitleScreen,
       secondaryLabel,
       audioSpectrum = { subBass: 0, mid: 0, high: 0 },
+      encoreIntensity = 0,
     } = params;
 
     const primaryCols = primaryBoard
@@ -713,7 +855,8 @@ export class IluminadoCanvasRenderer {
       timeSec,
       beatPhase,
       isTitleScreen,
-      audioSpectrum
+      audioSpectrum,
+      encoreIntensity
     );
 
     if (!isTitleScreen && primaryBoard) {
@@ -759,7 +902,7 @@ export class IluminadoCanvasRenderer {
         const secCols = secondaryBoard.grid[0]?.length ?? secondaryBoard.cols ?? BOARD_COLS;
         const secRows = secondaryBoard.grid.length ?? secondaryBoard.rows ?? BOARD_ROWS;
         const headerReserve = isCompactLandscape ? 58 : 88;
-        const bottomMargin = isPortrait ? 148 : isCompactLandscape ? 16 : 44;
+        const bottomMargin = isPortrait ? 148 : isCompactLandscape ? 16 : 58;
         const sidePad = Math.max(16, width * 0.03);
         const gap = Math.max(16, width * 0.03);
         const availW = isPortrait
@@ -769,7 +912,7 @@ export class IluminadoCanvasRenderer {
           ? (height - headerReserve - bottomMargin - gap) / 2
           : Math.max(180, height - headerReserve - bottomMargin);
         const cellSize = Math.floor(
-          Math.min(availW / Math.max(primaryCols, secCols), availH / (Math.max(primaryRows, secRows) + 2.25))
+          Math.min(availW / Math.max(primaryCols, secCols), availH / (Math.max(primaryRows, secRows) + 2.28))
         );
         const boardW = cellSize * primaryCols;
         const boardH = cellSize * primaryRows;
@@ -789,8 +932,8 @@ export class IluminadoCanvasRenderer {
           const startX = Math.floor((width - totalW) / 2);
           const startY = Math.floor(
             headerReserve +
-              cellSize * 2.1 +
-              (availH - (primaryRows + 2.25) * cellSize) / 2
+              cellSize * 2.08 +
+              (availH - (primaryRows + 2.28) * cellSize) / 2
           );
           this.lastPrimaryRect = { x: startX, y: startY, width: boardW, height: boardH, cellSize };
           this.lastSecondaryRect = {
@@ -843,23 +986,26 @@ export class IluminadoCanvasRenderer {
         ctx.restore();
       } else {
         const isDesktopWide = width >= 1024 && height > 560;
-        const headerReserve = isDesktopWide ? 88 : isPortrait ? 82 : 56;
-        const bottomMargin = isDesktopWide ? 50 : isPortrait ? 148 : 16;
-        const horizReserve = isDesktopWide ? 340 : isCompactLandscape ? 256 : 26;
-        const availW = Math.max(220, width - horizReserve);
+        const headerReserve = isDesktopWide ? 44 : isPortrait ? 74 : 48;
+        const bottomMargin = isDesktopWide ? 58 : isPortrait ? 148 : 22;
+        const leftReserve = isDesktopWide ? 148 : isCompactLandscape ? 128 : 14;
+        const rightReserve = isDesktopWide ? 24 : isCompactLandscape ? 128 : 14;
+        const availW = Math.max(220, width - leftReserve - rightReserve);
         const availH = Math.max(180, height - headerReserve - bottomMargin);
         const cellSize = Math.floor(
-          Math.min(availW / primaryCols, availH / (primaryRows + 2.3))
+          Math.min(availW / primaryCols, availH / (primaryRows + 2.22))
         );
         const boardW = cellSize * primaryCols;
         const boardH = cellSize * primaryRows;
-        const startX = Math.floor((width - boardW) / 2);
+        const startX = isDesktopWide
+          ? Math.floor(leftReserve + (availW - boardW) * 0.5)
+          : Math.floor((width - boardW) / 2);
         // Slightly elevated ("moved up") bias in portrait so lower courtyard horizon/water breathes cleanly
-        const slackBias = isPortrait ? 0.38 : 0.5;
+        const slackBias = isPortrait ? 0.38 : 0.45;
         const startY = Math.floor(
           headerReserve +
-            cellSize * 2.18 +
-            (availH - (primaryRows + 2.3) * cellSize) * slackBias
+            cellSize * 2.04 +
+            (availH - (primaryRows + 2.22) * cellSize) * slackBias
         );
 
         this.lastPrimaryRect = {
@@ -925,20 +1071,21 @@ export class IluminadoCanvasRenderer {
     timeSec: number,
     beatPhase: number,
     isTitleScreen: boolean,
-    audioSpectrum: { subBass: number; mid: number; high: number } = {
+    audioSpectrum: { subBass: number; mid: number; high: number; bands?: number[] } = {
       subBass: 0,
       mid: 0,
       high: 0,
-    }
+    },
+    encoreIntensity: number = 0
   ): void {
     const horizonY = height * 0.76 - this.parallaxY * 0.6;
     const beatPulse = Math.pow(1 - beatPhase, 2.6);
-    const { subBass, mid, high } = audioSpectrum;
+    const { subBass, mid, high, bands } = audioSpectrum;
     const { palette, theme } = skin;
 
     ctx.save();
 
-    // Zen Lumines acoustic mandala halo behind central stage (responds smoothly to both beat & audio spectrum)
+    // Zen acoustic mandala halo behind central stage (responds smoothly to both beat & audio spectrum)
     const mandalaX =
       (isTitleScreen ? width * 0.62 : width * 0.5) - this.parallaxX * 0.38;
     const mandalaY =
@@ -953,76 +1100,70 @@ export class IluminadoCanvasRenderer {
       ctx.drawImage(glowSprite, mandalaX - glowR, mandalaY - glowR, glowR * 2, glowR * 2);
     }
 
-    ctx.strokeStyle = palette.architectureLight;
-    ctx.globalAlpha = 0.11 + beatPulse * 0.06 + mid * 0.09 + this.sweepBloom * 0.12;
-    ctx.lineWidth = 1.25 + subBass * 0.85;
+    // Soft translucent breathing mandala ring + orbiting geometric petals
+    ctx.fillStyle = palette.architectureLight;
+    ctx.globalAlpha = 0.045 + beatPulse * 0.03 + mid * 0.04 + this.sweepBloom * 0.05;
     ctx.beginPath();
     ctx.arc(mandalaX, mandalaY, baseOrbR, 0, Math.PI * 2);
-    ctx.stroke();
+    ctx.fill();
 
-    ctx.globalAlpha = 0.07 + beatPulse * 0.04 + high * 0.08 + this.sweepBloom * 0.08;
-    ctx.lineWidth = 1.1;
+    ctx.fillStyle = palette.architectureMid;
+    ctx.globalAlpha = 0.035 + high * 0.035;
     ctx.beginPath();
-    ctx.arc(mandalaX, mandalaY, baseOrbR * (1.18 + mid * 0.025), 0, Math.PI * 2);
-    ctx.stroke();
+    ctx.arc(mandalaX, mandalaY, baseOrbR * (0.72 + subBass * 0.04), 0, Math.PI * 2);
+    ctx.fill();
 
-    // Softly revolving 16-beat radial ticks on outer mandala ring
-    ctx.lineWidth = 1.1;
-    for (let i = 0; i < 16; i++) {
-      const ang = (i / 16) * Math.PI * 2 + timeSec * 0.03;
-      const inner = baseOrbR * 1.15;
-      const eqLift = i % 2 === 0 ? mid * 0.05 : high * 0.05;
-      const outer =
-        baseOrbR *
-        (i % 4 === 0
-          ? 1.24 + beatPulse * 0.03 + subBass * 0.045
-          : 1.2 + eqLift);
-      ctx.globalAlpha =
-        i % 4 === 0
-          ? 0.16 + beatPulse * 0.1 + subBass * 0.12
-          : 0.07 + high * 0.09 + this.sweepBloom * 0.06;
-      ctx.beginPath();
-      ctx.moveTo(mandalaX + Math.cos(ang) * inner, mandalaY + Math.sin(ang) * inner);
-      ctx.lineTo(mandalaX + Math.cos(ang) * outer, mandalaY + Math.sin(ang) * outer);
-      ctx.stroke();
+    for (let i = 0; i < 12; i++) {
+      const ang = (i / 12) * Math.PI * 2 + timeSec * 0.04;
+      const orbitR = baseOrbR * (1.14 + (i % 2 === 0 ? mid : high) * 0.06);
+      const sx = mandalaX + Math.cos(ang) * orbitR;
+      const sy = mandalaY + Math.sin(ang) * orbitR;
+      const shapeR = i % 3 === 0 ? 5.5 + beatPulse * 2.5 : 3.2 + subBass * 2;
+      ctx.fillStyle = i % 2 === 0 ? palette.architectureLight : palette.blockA.highlight;
+      ctx.globalAlpha = i % 3 === 0 ? 0.14 + beatPulse * 0.09 : 0.08 + high * 0.08;
+      if (i % 2 === 0) {
+        this.drawDiamond(ctx, sx, sy, shapeR);
+      } else {
+        ctx.beginPath();
+        ctx.arc(sx, sy, shapeR * 0.78, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
 
     // Soft drifting mist wisps across sky/midground with subtle parallax + gentle move reaction
     ctx.fillStyle = palette.horizonMist;
-    for (let i = 0; i < 3; i++) {
-      const drift = ((timeSec * (0.012 + i * 0.005) + i * 0.34) % 1.35) - 0.18;
+    for (let i = 0; i < 4; i++) {
+      const drift = ((timeSec * (0.011 + i * 0.004) + i * 0.27) % 1.35) - 0.18;
       const cx =
         drift * width -
-        this.parallaxX * (0.3 + i * 0.12) -
-        this.moveRippleShift * (0.65 + i * 0.25);
-      const cy = height * (0.16 + i * 0.14) + Math.sin(timeSec * 0.4 + i) * 6;
-      const rw = width * (0.16 + i * 0.04);
-      const rh = 14 + i * 5;
-      ctx.globalAlpha = 0.08 + beatPulse * 0.025 + mid * 0.03;
+        this.parallaxX * (0.3 + i * 0.1) -
+        this.moveRippleShift * (0.65 + i * 0.22);
+      const cy = height * (0.14 + i * 0.13) + Math.sin(timeSec * 0.4 + i) * 7;
+      const rw = width * (0.14 + (i % 3) * 0.045);
+      const rh = 16 + i * 5;
+      ctx.globalAlpha = 0.075 + beatPulse * 0.025 + mid * 0.025;
       ctx.beginPath();
       ctx.ellipse(cx, cy, rw, rh, 0, 0, Math.PI * 2);
       ctx.fill();
     }
 
-    // Dual concentric beat-reactive celestial halo around sun/moon (far layer drift)
+    // Layered soft glowing celestial solar discs (shape-forward, zero harsh lines)
     const sunX = width * 0.72 - this.parallaxX * 0.18;
     const sunY = height * 0.24 - this.parallaxY * 0.14;
     const pulseR =
-      Math.min(width, height) * (0.1 + beatPulse * 0.026 + subBass * 0.024);
-    ctx.strokeStyle = palette.architectureLight;
-    ctx.globalAlpha = 0.13 + beatPulse * 0.11 + mid * 0.12;
-    ctx.lineWidth = 1.5;
+      Math.min(width, height) * (0.1 + beatPulse * 0.024 + subBass * 0.022);
+    ctx.fillStyle = palette.architectureLight;
+    ctx.globalAlpha = 0.07 + beatPulse * 0.04 + mid * 0.05;
     ctx.beginPath();
-    ctx.arc(sunX, sunY, pulseR, 0, Math.PI * 2);
-    ctx.stroke();
+    ctx.arc(sunX, sunY, pulseR * 1.45, 0, Math.PI * 2);
+    ctx.fill();
 
-    ctx.globalAlpha = 0.06 + beatPulse * 0.06 + high * 0.08;
-    ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.12 + beatPulse * 0.06 + high * 0.06;
     ctx.beginPath();
-    ctx.arc(sunX, sunY, pulseR * 1.36, 0, Math.PI * 2);
-    ctx.stroke();
+    ctx.arc(sunX, sunY, pulseR * 0.92, 0, Math.PI * 2);
+    ctx.fill();
 
-    // Theme-authentic subtle background animations
+    // Theme-authentic subtle shape-rich background animations
     if (
       theme === 'monument_valley' ||
       theme === 'old_mans_journey' ||
@@ -1032,19 +1173,20 @@ export class IluminadoCanvasRenderer {
       theme === 'terracotta_mosaic' ||
       theme === 'ochre_skyline'
     ) {
-      ctx.strokeStyle = 'rgba(250, 246, 238, 0.28)';
-      ctx.lineWidth = 1.1;
-      for (let i = 0; i < 7; i++) {
-        const ry = horizonY + 12 + i * ((height - horizonY) / 7);
+      for (let i = 0; i < 6; i++) {
+        const ry = horizonY + 14 + i * ((height - horizonY) / 6.2);
         const offset =
-          Math.sin(timeSec * 0.75 + i * 1.35) * 26 -
-          this.parallaxX * 0.75 -
-          this.moveRippleShift * (0.4 + i * 0.14);
-        ctx.globalAlpha = 0.18 + (i % 2) * 0.06 + beatPulse * 0.05;
+          Math.sin(timeSec * 0.65 + i * 1.4) * 34 -
+          this.parallaxX * 0.72 -
+          this.moveRippleShift * (0.4 + i * 0.12);
+        const pillW = width * (0.14 + (i % 3) * 0.05) + beatPulse * 12;
+        const pillH = 6 + (i % 2) * 4;
+        const px = width * (0.16 + ((i * 0.19) % 0.68)) + offset;
+        ctx.fillStyle = i % 2 === 0 ? palette.architectureLight : palette.blockB.highlight;
+        ctx.globalAlpha = 0.11 + (i % 2) * 0.04 + beatPulse * 0.045;
         ctx.beginPath();
-        ctx.moveTo(width * (0.1 + i * 0.02) + offset, ry);
-        ctx.lineTo(width * (0.9 - i * 0.02) + offset * 0.6, ry);
-        ctx.stroke();
+        ctx.ellipse(px, ry, pillW * 0.5, pillH, 0, 0, Math.PI * 2);
+        ctx.fill();
       }
     } else if (theme === 'gorogoa' || theme === 'transistor' || theme === 'sayonara' || theme === 'indigo_risograph') {
       const cx = width * 0.5 - this.parallaxX * 0.4;
@@ -1052,14 +1194,21 @@ export class IluminadoCanvasRenderer {
       const radius = Math.min(width, height) * 0.34;
       ctx.save();
       ctx.translate(cx, cy);
-      ctx.rotate(timeSec * 0.05);
-      ctx.strokeStyle = palette.architectureLight;
-      ctx.globalAlpha = 0.14 + beatPulse * 0.08;
-      ctx.lineWidth = 1.2;
-      ctx.setLineDash([8, 12]);
-      ctx.beginPath();
-      ctx.arc(0, 0, radius, 0, Math.PI * 2);
-      ctx.stroke();
+      ctx.rotate(timeSec * 0.045);
+      for (let k = 0; k < 6; k++) {
+        const a = (k / 6) * Math.PI * 2;
+        const px = Math.cos(a) * radius;
+        const py = Math.sin(a) * radius;
+        ctx.fillStyle = k % 2 === 0 ? palette.architectureLight : palette.blockA.highlight;
+        ctx.globalAlpha = 0.11 + beatPulse * 0.06;
+        if (k % 2 === 0) {
+          this.drawDiamond(ctx, px, py, 16 + beatPulse * 4);
+        } else {
+          ctx.beginPath();
+          ctx.arc(px, py, 12 + mid * 8, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
       ctx.restore();
     } else if (theme === 'abzu') {
       for (let i = 0; i < 3; i++) {
@@ -1094,60 +1243,59 @@ export class IluminadoCanvasRenderer {
         ctx.save();
         ctx.translate(gx, gy);
         ctx.rotate(rot);
-        ctx.strokeStyle = palette.architectureShadow;
-        ctx.globalAlpha = 0.24;
-        ctx.lineWidth = 2;
+        ctx.fillStyle = palette.architectureShadow;
+        ctx.globalAlpha = 0.18;
         ctx.beginPath();
         for (let i = 0; i < teeth * 2; i++) {
           const ang = (i / (teeth * 2)) * Math.PI * 2;
-          const r = i % 2 === 0 ? gr : gr * 0.86;
+          const r = i % 2 === 0 ? gr : gr * 0.84;
           if (i === 0) ctx.moveTo(Math.cos(ang) * r, Math.sin(ang) * r);
           else ctx.lineTo(Math.cos(ang) * r, Math.sin(ang) * r);
         }
         ctx.closePath();
-        ctx.stroke();
+        ctx.fill();
         ctx.restore();
       };
       drawTinyGear(width * 0.1 - this.parallaxX * 0.62, height * 0.72 - this.parallaxY * 0.52, 118, 12, timeSec * 0.08);
       drawTinyGear(width * 0.9 - this.parallaxX * 0.62, height * 0.7 - this.parallaxY * 0.52, 128, 14, -timeSec * 0.07);
     } else if (theme === 'ori' || theme === 'aurora_prism') {
-      for (let i = 0; i < 6; i++) {
+      for (let i = 0; i < 7; i++) {
         const fx =
-          width * (0.08 + (i % 2 === 0 ? i * 0.035 : 0.78 + i * 0.025)) -
+          width * (0.07 + (i % 2 === 0 ? i * 0.032 : 0.78 + i * 0.024)) -
           this.parallaxX * 0.9;
         const fy =
-          height * (0.28 + i * 0.1) +
+          height * (0.24 + i * 0.095) +
           Math.sin(timeSec * 1.2 + i * 2) * 14 -
           this.parallaxY * 0.7;
-        const glow = 0.14 + 0.14 * Math.sin(timeSec * 2.4 + i);
-        ctx.fillStyle = palette.architectureLight;
-        ctx.globalAlpha = Math.max(0.05, glow);
+        const glow = 0.13 + 0.12 * Math.sin(timeSec * 2.4 + i);
+        ctx.fillStyle = i % 2 === 0 ? palette.architectureLight : palette.blockA.highlight;
+        ctx.globalAlpha = Math.max(0.06, glow);
         ctx.beginPath();
-        ctx.arc(fx, fy, 12 + beatPulse * 4, 0, Math.PI * 2);
+        ctx.arc(fx, fy, 13 + beatPulse * 5, 0, Math.PI * 2);
         ctx.fill();
       }
     } else if (theme === 'altos_odyssey' || theme === 'amber_encaustic') {
-      const by = Math.sin(timeSec * 0.7) * 6 - this.parallaxY * 0.4;
-      const bx = Math.cos(timeSec * 0.35) * 8 - this.parallaxX * 0.45;
-      ctx.fillStyle = palette.architectureShadow;
-      ctx.globalAlpha = 0.32;
-      ctx.beginPath();
-      ctx.arc(width * 0.14 + bx, height * 0.32 + by, 14, 0, Math.PI * 2);
-      ctx.fill();
-    } else if (theme === 'journey' || theme === 'sable' || theme === 'celadon_fresco') {
-      ctx.strokeStyle = palette.architectureLight;
-      ctx.lineWidth = 1.4;
-      for (let i = 0; i < 3; i++) {
-        const ry = horizonY - 22 + i * 24;
-        const drift =
-          ((timeSec * (45 + i * 16) + i * 260) % (width + 240)) -
-          120 -
-          this.parallaxX * 0.65;
-        ctx.globalAlpha = 0.16;
+      for (let i = 0; i < 4; i++) {
+        const by = Math.sin(timeSec * 0.65 + i * 1.5) * 9 - this.parallaxY * 0.4;
+        const bx = Math.cos(timeSec * 0.32 + i) * 12 - this.parallaxX * 0.45;
+        ctx.fillStyle = i % 2 === 0 ? palette.architectureShadow : palette.blockB.fill;
+        ctx.globalAlpha = 0.18 + beatPulse * 0.06;
         ctx.beginPath();
-        ctx.moveTo(drift, ry);
-        ctx.quadraticCurveTo(drift + 60, ry - 5, drift + 120, ry);
-        ctx.stroke();
+        ctx.arc(width * (0.1 + i * 0.25) + bx, height * (0.24 + (i % 2) * 0.16) + by, 12 + i * 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else if (theme === 'journey' || theme === 'sable' || theme === 'celadon_fresco') {
+      ctx.fillStyle = palette.architectureLight;
+      for (let i = 0; i < 5; i++) {
+        const ry = horizonY - 26 + i * 22;
+        const drift =
+          ((timeSec * (36 + i * 12) + i * 240) % (width + 260)) -
+          130 -
+          this.parallaxX * 0.65;
+        ctx.globalAlpha = 0.12 + beatPulse * 0.04;
+        ctx.beginPath();
+        ctx.ellipse(drift + 55, ry, 52 + i * 8, 5.5, -0.06, 0, Math.PI * 2);
+        ctx.fill();
       }
     } else if (theme === 'cityscape_deco') {
       const glowPts = [0.09, 0.15, 0.85, 0.91];
@@ -1156,19 +1304,24 @@ export class IluminadoCanvasRenderer {
         const px = width * rx - this.parallaxX * 0.62;
         const py = height * (0.42 + (idx % 2) * 0.12) - this.parallaxY * 0.52;
         ctx.globalAlpha = 0.16 + beatPulse * 0.1 + 0.08 * Math.sin(timeSec * 2 + idx);
-        ctx.fillRect(px - 10, py - 4, 20, 8);
+        this.roundRect(ctx, px - 12, py - 5, 24, 10, 4);
+        ctx.fill();
       });
     } else if (theme === 'noland_target' || theme === 'artisan_blocks') {
       const cxPositions = [width * 0.12, width * 0.88];
       cxPositions.forEach((tx, idx) => {
         const px = tx - this.parallaxX * 0.62;
         const py = height * 0.46 - this.parallaxY * 0.52;
-        ctx.strokeStyle = idx === 0 ? palette.blockA.fill : palette.blockB.fill;
-        ctx.lineWidth = 1.5;
-        ctx.globalAlpha = 0.16 + beatPulse * 0.08;
+        ctx.fillStyle = idx === 0 ? palette.blockA.fill : palette.blockB.fill;
+        ctx.globalAlpha = 0.11 + beatPulse * 0.06;
         ctx.beginPath();
-        ctx.arc(px, py, 54 + beatPulse * 8, 0, Math.PI * 2);
-        ctx.stroke();
+        ctx.arc(px, py, 56 + beatPulse * 8, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = idx === 0 ? palette.blockB.highlight : palette.blockA.highlight;
+        ctx.globalAlpha = 0.12 + high * 0.07;
+        ctx.beginPath();
+        ctx.arc(px, py, 28 + mid * 6, 0, Math.PI * 2);
+        ctx.fill();
       });
     } else if (theme === 'limbo_inside') {
       const swayX = width * 0.5 + Math.sin(timeSec * 0.32) * 32 - this.parallaxX * 0.4;
@@ -1178,6 +1331,71 @@ export class IluminadoCanvasRenderer {
       ctx.fillStyle = spot;
       ctx.globalAlpha = 1;
       ctx.fillRect(0, 0, width, height);
+    } else {
+      // Shape-rich floating geometric pebbles for any remaining themes (gris, fez, papetura, hohokum, kentucky_rz)
+      for (let i = 0; i < 6; i++) {
+        const angle = timeSec * 0.14 + i * 1.1;
+        const px = width * (0.08 + ((i * 0.17) % 0.84)) + Math.cos(angle) * 14 - this.parallaxX * 0.65;
+        const py = height * (0.22 + ((i * 0.14) % 0.48)) + Math.sin(angle * 1.3) * 12 - this.parallaxY * 0.5;
+        ctx.fillStyle = i % 2 === 0 ? palette.blockA.highlight : palette.blockB.highlight;
+        ctx.globalAlpha = 0.09 + beatPulse * 0.05;
+        ctx.beginPath();
+        ctx.arc(px, py, 12 + (i % 3) * 7 + subBass * 5, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+
+    // Music-reactive soft rounded capsule shapes along the waterline (shape-forward, minimal lines)
+    {
+      const barCount = 20;
+      const spanW = width * 0.9;
+      const startX = width * 0.05;
+      const stepW = spanW / barCount;
+      for (let i = 0; i < barCount; i++) {
+        const bandIdx = Math.min(9, Math.floor((i / barCount) * 10));
+        const liveBand = bands && bands.length > bandIdx ? bands[bandIdx] : 0;
+        const synthWave =
+          0.2 +
+          0.28 *
+            Math.pow(
+              0.5 + 0.5 * Math.sin(timeSec * (skin.bpm / 60) * Math.PI - i * 0.5),
+              2
+            );
+        const energy = liveBand > 0.02 ? liveBand : synthWave * (0.45 + beatPulse * 0.55);
+        const pillH = 6 + energy * (isTitleScreen ? 32 : 24);
+        const bx = startX + i * stepW + stepW * 0.22 - this.parallaxX * 0.35;
+        const bw = Math.max(6, stepW * 0.52);
+        ctx.fillStyle = i % 2 === 0 ? palette.blockA.highlight : palette.architectureLight;
+        ctx.globalAlpha = (isTitleScreen ? 0.13 : 0.1) + energy * 0.14;
+        this.roundRect(ctx, bx, horizonY - pillH * 0.5, bw, pillH, bw * 0.5);
+        ctx.fill();
+      }
+    }
+
+    // Encore Finale heightened aurora ribbons across upper sky
+    if (encoreIntensity > 0.02) {
+      ctx.save();
+      for (let band = 0; band < 2; band++) {
+        const baseY = height * (0.11 + band * 0.09);
+        const grad = ctx.createLinearGradient(0, baseY - 26, width, baseY + 34);
+        grad.addColorStop(0, 'rgba(250, 246, 238, 0)');
+        grad.addColorStop(0.28, band === 0 ? palette.blockA.highlight : palette.blockB.highlight);
+        grad.addColorStop(0.68, palette.squareHighlight);
+        grad.addColorStop(1, 'rgba(250, 246, 238, 0)');
+        ctx.fillStyle = grad;
+        ctx.globalAlpha = (0.14 + beatPulse * 0.09) * encoreIntensity;
+        ctx.beginPath();
+        ctx.moveTo(0, baseY);
+        for (let sx = 0; sx <= width; sx += 48) {
+          const wave = Math.sin(timeSec * (1.2 + band * 0.4) + sx * 0.008 + band * 2) * (16 + subBass * 18);
+          ctx.lineTo(sx, baseY + wave);
+        }
+        ctx.lineTo(width, baseY + 46);
+        ctx.lineTo(0, baseY + 46);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.restore();
     }
 
     // Shape-matched floating ambient motes with depth-scaled parallax drift
@@ -1196,7 +1414,8 @@ export class IluminadoCanvasRenderer {
         Math.sin(timeSec * 0.8 + m.phase) * 16 -
         this.parallaxX * m.depth * 0.8;
       const my = m.y * height - this.parallaxY * m.depth * 0.6;
-      ctx.globalAlpha = 0.28 + 0.24 * Math.sin(timeSec * 1.4 + m.phase);
+      ctx.globalAlpha =
+        (0.28 + 0.24 * Math.sin(timeSec * 1.4 + m.phase)) * (1 + encoreIntensity * 0.55);
       if (skin.particleShape === 'petal') {
         ctx.save();
         ctx.translate(mx, my);
@@ -1351,34 +1570,36 @@ export class IluminadoCanvasRenderer {
         break;
       }
       case 'gorogoa': {
-        ctx.strokeStyle = palette.architectureShadow;
-        ctx.lineWidth = 2;
-        ctx.strokeRect(24, 24, width - 48, height - 48);
-        ctx.strokeStyle = palette.architectureMid;
-        ctx.lineWidth = 1;
-        ctx.strokeRect(34, 34, width - 68, height - 68);
-        [width * 0.14, width * 0.86].forEach((cx) => {
+        // Layered rounded gallery niches & overlapping solar discs (shape-forward instead of box strokes)
+        [width * 0.13, width * 0.87].forEach((cx, idx) => {
           ctx.fillStyle = palette.architectureLight;
-          ctx.fillRect(cx - 75, height * 0.18, 150, height * 0.64);
-          ctx.strokeStyle = palette.architectureShadow;
-          ctx.lineWidth = 2;
-          ctx.strokeRect(cx - 75, height * 0.18, 150, height * 0.64);
+          ctx.globalAlpha = 0.52;
+          this.roundRect(ctx, cx - 76, height * 0.18, 152, height * 0.64, 24);
+          ctx.fill();
           ctx.fillStyle = palette.architectureMid;
+          ctx.globalAlpha = 0.72;
           ctx.beginPath();
-          ctx.arc(cx, height * 0.46, 46, Math.PI, 0);
-          ctx.lineTo(cx + 46, height * 0.78);
-          ctx.lineTo(cx - 46, height * 0.78);
+          ctx.arc(cx, height * 0.44, 48, Math.PI, 0);
+          ctx.lineTo(cx + 48, height * 0.78);
+          ctx.lineTo(cx - 48, height * 0.78);
           ctx.closePath();
           ctx.fill();
+          ctx.fillStyle = idx === 0 ? palette.blockA.highlight : palette.blockB.highlight;
+          ctx.globalAlpha = 0.28;
+          ctx.beginPath();
+          ctx.arc(cx, height * 0.36, 26, 0, Math.PI * 2);
+          ctx.fill();
         });
-        ctx.strokeStyle = palette.timelineBeam;
-        ctx.globalAlpha = 0.22;
+        ctx.fillStyle = palette.timelineBeam;
+        ctx.globalAlpha = 0.09;
         ctx.beginPath();
-        ctx.arc(width * 0.5, height * 0.42, 170, 0, Math.PI * 2);
-        ctx.stroke();
+        ctx.arc(width * 0.5, height * 0.42, 168, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = palette.architectureLight;
+        ctx.globalAlpha = 0.1;
         ctx.beginPath();
-        ctx.arc(width * 0.5, height * 0.42, 128, 0, Math.PI * 2);
-        ctx.stroke();
+        ctx.arc(width * 0.5, height * 0.42, 118, 0, Math.PI * 2);
+        ctx.fill();
         ctx.globalAlpha = 1;
         break;
       }
@@ -1399,14 +1620,15 @@ export class IluminadoCanvasRenderer {
           ctx.fill();
         }
         ctx.fillStyle = palette.architectureShadow;
-        ctx.globalAlpha = 0.38;
-        ctx.fillRect(width * 0.08, height * 0.34, 44, height * 0.66);
-        ctx.fillRect(width * 0.88, height * 0.28, 52, height * 0.72);
+        ctx.globalAlpha = 0.36;
+        this.roundRect(ctx, width * 0.07, height * 0.32, 48, height * 0.68, 22);
+        ctx.fill();
+        this.roundRect(ctx, width * 0.88, height * 0.26, 54, height * 0.74, 24);
+        ctx.fill();
         ctx.beginPath();
         ctx.moveTo(startX, horizonY + 30);
-        ctx.lineTo(width * 0.28, horizonY - 60);
-        ctx.lineTo(width * 0.65, horizonY + 10);
-        ctx.lineTo(width + PARALLAX_OVERSCAN_X, horizonY - 80);
+        ctx.quadraticCurveTo(width * 0.26, horizonY - 82, width * 0.58, horizonY + 8);
+        ctx.quadraticCurveTo(width * 0.82, horizonY - 76, width + PARALLAX_OVERSCAN_X, horizonY - 40);
         ctx.lineTo(width + PARALLAX_OVERSCAN_X, height + PARALLAX_OVERSCAN_Y);
         ctx.lineTo(startX, height + PARALLAX_OVERSCAN_Y);
         ctx.closePath();
@@ -1421,14 +1643,24 @@ export class IluminadoCanvasRenderer {
             const th = 36;
             const ty = horizonY - (t + 1) * th;
             ctx.fillStyle = t % 2 === 0 ? palette.architectureMid : palette.architectureShadow;
-            ctx.fillRect(cx - tw / 2, ty, tw, th);
+            this.roundRect(ctx, cx - tw / 2, ty, tw, th + 4, 8);
+            ctx.fill();
           }
+          // Soft sun dome atop ziggurat
+          ctx.fillStyle = palette.architectureLight;
+          ctx.beginPath();
+          ctx.arc(cx, horizonY - tiers * 36, baseW * 0.18, Math.PI, 0);
+          ctx.fill();
         };
         drawZiggurat(width * 0.15, 220, 5);
         drawZiggurat(width * 0.85, 240, 6);
         ctx.fillStyle = palette.timelineBeam;
-        ctx.fillRect(width * 0.07, 70, 18, 170);
-        ctx.fillRect(width * 0.92, 70, 18, 190);
+        ctx.globalAlpha = 0.55;
+        this.roundRect(ctx, width * 0.065, 72, 22, 168, 11);
+        ctx.fill();
+        this.roundRect(ctx, width * 0.915, 72, 22, 188, 11);
+        ctx.fill();
+        ctx.globalAlpha = 1;
         break;
       }
       case 'papetura': {
@@ -1560,18 +1792,21 @@ export class IluminadoCanvasRenderer {
         ctx.closePath();
         ctx.fill();
         [width * 0.12, width * 0.88].forEach((lx) => {
-          ctx.strokeStyle = palette.architectureLight;
-          ctx.lineWidth = 2;
-          ctx.beginPath();
-          ctx.moveTo(lx, horizonY + 12);
-          ctx.lineTo(lx, horizonY - 180);
-          ctx.stroke();
-          const g = ctx.createRadialGradient(lx, horizonY - 180, 0, lx, horizonY - 180, 75);
+          ctx.fillStyle = palette.architectureMid;
+          ctx.globalAlpha = 0.5;
+          this.roundRect(ctx, lx - 5, horizonY - 180, 10, 192, 5);
+          ctx.fill();
+          ctx.globalAlpha = 1;
+          const g = ctx.createRadialGradient(lx, horizonY - 180, 0, lx, horizonY - 180, 78);
           g.addColorStop(0, 'rgba(227, 186, 134, 0.55)');
           g.addColorStop(1, 'rgba(227, 186, 134, 0)');
           ctx.fillStyle = g;
           ctx.beginPath();
-          ctx.arc(lx, horizonY - 180, 75, 0, Math.PI * 2);
+          ctx.arc(lx, horizonY - 180, 78, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = palette.architectureLight;
+          ctx.beginPath();
+          ctx.arc(lx, horizonY - 180, 12, 0, Math.PI * 2);
           ctx.fill();
         });
         break;
@@ -1586,29 +1821,45 @@ export class IluminadoCanvasRenderer {
         ctx.fillStyle = palette.architectureShadow;
         [0.05, 0.11, 0.18, 0.82, 0.89, 0.95].forEach((rx, idx) => {
           const tx = width * rx;
-          const tw = 14 + (idx % 3) * 6;
-          ctx.fillRect(tx - tw / 2, -PARALLAX_OVERSCAN_Y, tw, height + PARALLAX_OVERSCAN_Y * 2);
+          const tw = 16 + (idx % 3) * 8;
+          this.roundRect(ctx, tx - tw / 2, -PARALLAX_OVERSCAN_Y, tw, height + PARALLAX_OVERSCAN_Y * 2, tw * 0.4);
+          ctx.fill();
+          ctx.beginPath();
+          ctx.arc(tx, height * (0.28 + (idx % 2) * 0.14), tw * 1.45, 0, Math.PI * 2);
+          ctx.fill();
         });
         ctx.fillRect(startX, horizonY + 28, fullW, height - horizonY + PARALLAX_OVERSCAN_Y);
         break;
       }
       case 'transistor': {
         ctx.save();
-        ctx.strokeStyle = palette.architectureLight;
-        ctx.globalAlpha = 0.2;
-        ctx.lineWidth = 1.5;
-        const cx = width * 0.5;
-        const cy = height * 0.85;
-        for (let a = 0; a <= 18; a++) {
-          const ang = -Math.PI + (a / 18) * Math.PI;
-          ctx.beginPath();
-          ctx.moveTo(cx, cy);
-          ctx.lineTo(cx + Math.cos(ang) * width, cy + Math.sin(ang) * width);
-          ctx.stroke();
-        }
-        ctx.globalAlpha = 0.45;
-        ctx.strokeRect(48, 90, 96, height - 180);
-        ctx.strokeRect(width - 144, 90, 96, height - 180);
+        ctx.fillStyle = palette.architectureLight;
+        ctx.globalAlpha = 0.13;
+        ctx.beginPath();
+        ctx.moveTo(width * 0.5, height * 0.88);
+        ctx.lineTo(width * 0.14, height * 0.15);
+        ctx.lineTo(width * 0.32, height * 0.08);
+        ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(width * 0.5, height * 0.88);
+        ctx.lineTo(width * 0.86, height * 0.14);
+        ctx.lineTo(width * 0.68, height * 0.08);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = palette.architectureShadow;
+        ctx.globalAlpha = 0.42;
+        this.roundRect(ctx, 44, 88, 102, height - 176, 16);
+        ctx.fill();
+        this.roundRect(ctx, width - 146, 88, 102, height - 176, 16);
+        ctx.fill();
+        ctx.fillStyle = palette.blockA.highlight;
+        ctx.globalAlpha = 0.25;
+        ctx.beginPath();
+        ctx.arc(95, 160, 22, 0, Math.PI * 2);
+        ctx.arc(width - 95, 160, 22, 0, Math.PI * 2);
+        ctx.fill();
         ctx.restore();
         break;
       }
@@ -1636,24 +1887,36 @@ export class IluminadoCanvasRenderer {
       }
       case 'fez': {
         [
-          { x: width * 0.1, y: height * 0.34, w: 92, h: 24 },
-          { x: width * 0.82, y: height * 0.28, w: 110, h: 26 },
-          { x: width * 0.06, y: height * 0.62, w: 130, h: 28 },
-          { x: width * 0.86, y: height * 0.60, w: 120, h: 28 },
-        ].forEach((p) => {
+          { x: width * 0.08, y: height * 0.34, w: 96, h: 32 },
+          { x: width * 0.82, y: height * 0.28, w: 112, h: 34 },
+          { x: width * 0.06, y: height * 0.62, w: 130, h: 36 },
+          { x: width * 0.85, y: height * 0.60, w: 120, h: 36 },
+        ].forEach((p, idx) => {
           ctx.fillStyle = palette.architectureMid;
-          ctx.fillRect(p.x, p.y, p.w, 10);
+          this.roundRect(ctx, p.x, p.y, p.w, 14, 7);
+          ctx.fill();
           ctx.fillStyle = palette.architectureShadow;
-          ctx.fillRect(p.x + 6, p.y + 10, p.w - 12, p.h - 10);
+          this.roundRect(ctx, p.x + 8, p.y + 12, p.w - 16, p.h - 10, 8);
+          ctx.fill();
+          ctx.fillStyle = idx % 2 === 0 ? palette.blockA.highlight : palette.blockB.highlight;
+          ctx.globalAlpha = 0.45;
+          this.drawDiamond(ctx, p.x + p.w * 0.5, p.y - 16, 10);
+          ctx.globalAlpha = 1;
         });
         break;
       }
       case 'sable': {
-        ctx.strokeStyle = palette.boardFrame;
-        ctx.lineWidth = 2;
+        ctx.fillStyle = palette.architectureLight;
+        ctx.globalAlpha = 0.38;
         ctx.beginPath();
-        ctx.arc(width * 0.8, height * 0.22, 46, 0, Math.PI * 2);
-        ctx.stroke();
+        ctx.arc(width * 0.8, height * 0.22, 48, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = palette.skyTop;
+        ctx.globalAlpha = 0.9;
+        ctx.beginPath();
+        ctx.arc(width * 0.8 + 16, height * 0.22 - 8, 38, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
 
         ctx.fillStyle = palette.architectureMid;
         ctx.beginPath();
@@ -1669,7 +1932,6 @@ export class IluminadoCanvasRenderer {
         ctx.lineTo(startX, height + PARALLAX_OVERSCAN_Y);
         ctx.closePath();
         ctx.fill();
-        ctx.stroke();
         break;
       }
       case 'spiritfarer': {
@@ -1721,21 +1983,19 @@ export class IluminadoCanvasRenderer {
       }
       case 'sayonara': {
         ctx.save();
-        ctx.strokeStyle = palette.architectureLight;
-        ctx.globalAlpha = 0.24;
-        ctx.lineWidth = 2;
         const cx = width * 0.5;
         const cy = height * 0.48;
+        ctx.fillStyle = palette.architectureLight;
+        ctx.globalAlpha = 0.14;
         ctx.beginPath();
-        ctx.moveTo(cx, cy - 280);
-        ctx.lineTo(cx + 280, cy);
-        ctx.lineTo(cx, cy + 280);
-        ctx.lineTo(cx - 280, cy);
-        ctx.closePath();
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.arc(cx, cy, 220, 0, Math.PI * 2);
-        ctx.stroke();
+        ctx.arc(cx, cy, 240, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = palette.blockA.highlight;
+        ctx.globalAlpha = 0.16;
+        this.drawDiamond(ctx, cx, cy, 270);
+        ctx.fillStyle = palette.skyMid;
+        ctx.globalAlpha = 0.24;
+        this.drawDiamond(ctx, cx, cy, 180);
         ctx.restore();
         break;
       }
@@ -1789,32 +2049,40 @@ export class IluminadoCanvasRenderer {
         break;
       }
       case 'cityscape_deco': {
-        // Painterly staggered saffron-orange and slate skyscrapers (inspired by abstract cityscape)
+        // Sculptural domed & stepped Art Deco skyline towers with round porthole & arch windows (no rigid outlines)
         const towers = [
-          { x: width * 0.03, w: 62, h: 250, orange: false },
-          { x: width * 0.09, w: 54, h: 320, orange: true },
-          { x: width * 0.16, w: 58, h: 210, orange: false },
-          { x: width * 0.76, w: 60, h: 230, orange: false },
-          { x: width * 0.83, w: 66, h: 310, orange: true },
-          { x: width * 0.90, w: 56, h: 260, orange: false },
+          { x: width * 0.03, w: 64, h: 245, tone: palette.architectureShadow, dome: true },
+          { x: width * 0.09, w: 58, h: 315, tone: palette.blockA.fill, dome: false },
+          { x: width * 0.16, w: 60, h: 205, tone: palette.architectureMid, dome: true },
+          { x: width * 0.76, w: 62, h: 225, tone: palette.architectureMid, dome: true },
+          { x: width * 0.83, w: 68, h: 305, tone: palette.blockA.fill, dome: false },
+          { x: width * 0.90, w: 58, h: 255, tone: palette.architectureShadow, dome: true },
         ];
         towers.forEach((t, idx) => {
           const topY = horizonY - t.h;
-          ctx.fillStyle = t.orange ? palette.blockA.fill : palette.architectureShadow;
-          ctx.globalAlpha = t.orange ? 0.65 : 0.48;
-          ctx.fillRect(t.x, topY, t.w, t.h + 45);
-          ctx.strokeStyle = palette.architectureShadow;
-          ctx.globalAlpha = 0.55;
-          ctx.lineWidth = 2.2;
-          ctx.strokeRect(t.x, topY, t.w, t.h + 45);
-          // Delicate horizontal window dashes
+          ctx.fillStyle = t.tone;
+          ctx.globalAlpha = idx === 1 || idx === 4 ? 0.56 : 0.42;
+          this.roundRect(ctx, t.x, topY, t.w, t.h + 45, 14);
+          ctx.fill();
+          if (t.dome) {
+            ctx.beginPath();
+            ctx.arc(t.x + t.w * 0.5, topY + 2, t.w * 0.36, Math.PI, 0);
+            ctx.fill();
+          } else {
+            ctx.fillStyle = palette.architectureLight;
+            ctx.globalAlpha = 0.42;
+            this.roundRect(ctx, t.x + t.w * 0.22, topY - 18, t.w * 0.56, 22, 8);
+            ctx.fill();
+          }
+          // Soft circular & pill arch windows
           ctx.fillStyle = palette.architectureLight;
-          ctx.globalAlpha = 0.55;
-          for (let wy = topY + 18; wy < horizonY - 12; wy += 16) {
-            for (let wx = t.x + 9; wx < t.x + t.w - 12; wx += 14) {
-              if ((wx + wy + idx) % 3 !== 0) {
-                ctx.fillRect(wx, wy, 7, 4);
-              }
+          ctx.globalAlpha = 0.48;
+          for (let wy = topY + 24; wy < horizonY - 16; wy += 24) {
+            for (let col = 0; col < 2; col++) {
+              const wx = t.x + t.w * (0.3 + col * 0.4);
+              ctx.beginPath();
+              ctx.arc(wx, wy, 4.5, 0, Math.PI * 2);
+              ctx.fill();
             }
           }
         });
@@ -1831,8 +2099,9 @@ export class IluminadoCanvasRenderer {
         ];
         targets.forEach((tg) => {
           ctx.fillStyle = palette.architectureLight;
-          ctx.globalAlpha = 0.62;
-          ctx.fillRect(tg.x - tg.r - 8, tg.y - tg.r - 8, (tg.r + 8) * 2, (tg.r + 8) * 2);
+          ctx.globalAlpha = 0.56;
+          this.roundRect(ctx, tg.x - tg.r - 8, tg.y - tg.r - 8, (tg.r + 8) * 2, (tg.r + 8) * 2, 18);
+          ctx.fill();
           ctx.fillStyle = tg.outer;
           ctx.globalAlpha = 0.48;
           ctx.beginPath();
@@ -1859,20 +2128,21 @@ export class IluminadoCanvasRenderer {
         ];
         tiles.forEach((tl, idx) => {
           ctx.fillStyle = palette.architectureShadow;
-          ctx.globalAlpha = 0.22;
-          ctx.fillRect(tl.x + 5, tl.y + 6, tl.s, tl.s);
+          ctx.globalAlpha = 0.2;
+          this.roundRect(ctx, tl.x + 5, tl.y + 6, tl.s, tl.s, 14);
+          ctx.fill();
           ctx.fillStyle = tl.fill;
-          ctx.globalAlpha = 0.48;
-          ctx.fillRect(tl.x, tl.y, tl.s, tl.s);
-          ctx.strokeStyle = tl.accent;
-          ctx.lineWidth = 2;
-          ctx.globalAlpha = 0.45;
+          ctx.globalAlpha = 0.46;
+          this.roundRect(ctx, tl.x, tl.y, tl.s, tl.s, 14);
+          ctx.fill();
+          ctx.fillStyle = tl.accent;
+          ctx.globalAlpha = 0.42;
           if (idx % 2 === 0) {
             ctx.beginPath();
-            ctx.arc(tl.x + tl.s * 0.5, tl.y + tl.s * 0.5, tl.s * 0.28, 0, Math.PI * 2);
-            ctx.stroke();
+            ctx.arc(tl.x + tl.s * 0.5, tl.y + tl.s * 0.5, tl.s * 0.26, 0, Math.PI * 2);
+            ctx.fill();
           } else {
-            ctx.strokeRect(tl.x + 12, tl.y + 12, tl.s - 24, tl.s - 24);
+            this.drawDiamond(ctx, tl.x + tl.s * 0.5, tl.y + tl.s * 0.5, tl.s * 0.26);
           }
         });
         ctx.globalAlpha = 1;
@@ -1885,19 +2155,23 @@ export class IluminadoCanvasRenderer {
           const archTop = horizonY - 120;
           ctx.fillStyle = palette.architectureMid;
           ctx.globalAlpha = 0.52;
-          ctx.fillRect(baseX, archTop - 16, span * count, 18);
+          this.roundRect(ctx, baseX, archTop - 16, span * count, 18, 9);
+          ctx.fill();
           for (let i = 0; i < count; i++) {
             const ax = baseX + i * span;
             ctx.fillStyle = palette.architectureShadow;
-            ctx.fillRect(ax, archTop, 14, 125);
+            this.roundRect(ctx, ax, archTop, 14, 125, 6);
+            ctx.fill();
+            ctx.fillStyle = palette.architectureLight;
+            ctx.globalAlpha = 0.34;
             ctx.beginPath();
             ctx.arc(ax + span * 0.5, archTop + 26, span * 0.36, Math.PI, 0);
-            ctx.strokeStyle = palette.architectureLight;
-            ctx.lineWidth = 2;
-            ctx.stroke();
+            ctx.fill();
+            ctx.globalAlpha = 0.52;
           }
           ctx.fillStyle = palette.architectureShadow;
-          ctx.fillRect(baseX + count * span - 14, archTop, 14, 125);
+          this.roundRect(ctx, baseX + count * span - 14, archTop, 14, 125, 6);
+          ctx.fill();
         };
         drawArcade(width * 0.03, 3);
         drawArcade(width * 0.78, 3);
@@ -1909,13 +2183,15 @@ export class IluminadoCanvasRenderer {
         const drawDome = (cx: number, r: number) => {
           ctx.fillStyle = palette.architectureMid;
           ctx.globalAlpha = 0.52;
-          ctx.fillRect(cx - r * 1.1, horizonY - r * 1.15, r * 2.2, r * 1.15);
+          this.roundRect(ctx, cx - r * 1.1, horizonY - r * 1.15, r * 2.2, r * 1.15, 14);
+          ctx.fill();
           ctx.fillStyle = palette.architectureLight;
           ctx.beginPath();
           ctx.arc(cx, horizonY - r * 1.15, r * 0.9, Math.PI, 0);
           ctx.fill();
           ctx.fillStyle = palette.architectureShadow;
-          ctx.fillRect(cx - r * 0.3, horizonY - r * 0.72, r * 0.6, r * 0.72);
+          this.roundRect(ctx, cx - r * 0.3, horizonY - r * 0.72, r * 0.6, r * 0.72, r * 0.3);
+          ctx.fill();
         };
         drawDome(width * 0.12, 68);
         drawDome(width * 0.88, 72);
@@ -1923,21 +2199,25 @@ export class IluminadoCanvasRenderer {
         break;
       }
       case 'indigo_risograph': {
-        // Printmaker overlapping geometric halftones & registration frames
-        ctx.strokeStyle = palette.architectureShadow;
-        ctx.lineWidth = 1.6;
-        ctx.globalAlpha = 0.35;
-        ctx.strokeRect(32, 32, width - 64, height - 64);
+        // Printmaker overlapping geometric halftones & Bauhaus half-moons
         ctx.fillStyle = palette.blockA.fill;
         ctx.globalAlpha = 0.28;
         ctx.beginPath();
         ctx.arc(width * 0.12, height * 0.44, 72, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = palette.architectureLight;
+        ctx.globalAlpha = 0.32;
+        ctx.beginPath();
+        ctx.arc(width * 0.15, height * 0.36, 38, Math.PI, 0);
         ctx.fill();
         ctx.fillStyle = palette.blockB.fill;
         ctx.globalAlpha = 0.3;
         ctx.beginPath();
         ctx.arc(width * 0.88, height * 0.56, 76, 0, Math.PI * 2);
         ctx.fill();
+        ctx.fillStyle = palette.architectureShadow;
+        ctx.globalAlpha = 0.22;
+        this.drawDiamond(ctx, width * 0.86, height * 0.42, 42);
         ctx.globalAlpha = 1;
         break;
       }
@@ -1971,19 +2251,20 @@ export class IluminadoCanvasRenderer {
         break;
       }
       case 'celadon_fresco': {
-        // Graceful vaulted celadon porcelain ribs & side alcoves
+        // Graceful vaulted celadon porcelain domes & side alcoves (filled soft arches, no wire lines)
         [width * 0.11, width * 0.89].forEach((cx) => {
-          ctx.strokeStyle = palette.architectureShadow;
-          ctx.globalAlpha = 0.34;
-          ctx.lineWidth = 2;
+          ctx.fillStyle = palette.architectureMid;
+          ctx.globalAlpha = 0.28;
           ctx.beginPath();
           ctx.arc(cx, height * 0.52, 68, Math.PI, 0);
           ctx.lineTo(cx + 68, horizonY);
           ctx.lineTo(cx - 68, horizonY);
           ctx.closePath();
-          ctx.stroke();
-          ctx.fillStyle = palette.architectureMid;
-          ctx.globalAlpha = 0.24;
+          ctx.fill();
+          ctx.fillStyle = palette.architectureLight;
+          ctx.globalAlpha = 0.26;
+          ctx.beginPath();
+          ctx.arc(cx, height * 0.52, 40, Math.PI, 0);
           ctx.fill();
         });
         ctx.globalAlpha = 1;
@@ -2060,14 +2341,15 @@ export class IluminadoCanvasRenderer {
       false
     );
 
-    // Faint horizon reflection line across near plane
-    ctx.strokeStyle = palette.architectureLight;
-    ctx.globalAlpha = 0.14;
-    ctx.lineWidth = 1;
+    // Soft filled shoreline mist band + elliptical reflection pebbles
+    ctx.fillStyle = palette.architectureLight;
+    ctx.globalAlpha = 0.1;
+    ctx.fillRect(-PARALLAX_OVERSCAN_X, horizonY - 2, width + PARALLAX_OVERSCAN_X * 2, 5);
+    ctx.globalAlpha = 0.16;
     ctx.beginPath();
-    ctx.moveTo(-PARALLAX_OVERSCAN_X, horizonY);
-    ctx.lineTo(width + PARALLAX_OVERSCAN_X, horizonY);
-    ctx.stroke();
+    ctx.ellipse(width * 0.14, horizonY + 14, 72, 6, 0, 0, Math.PI * 2);
+    ctx.ellipse(width * 0.86, horizonY + 16, 84, 7, 0, 0, Math.PI * 2);
+    ctx.fill();
 
     ctx.restore();
   }
@@ -2148,60 +2430,80 @@ export class IluminadoCanvasRenderer {
     }
   }
 
-  private getGridCellJoins(
+  private writeGridCellJoins(
     grid: (Cell | null)[][],
     r: number,
     c: number,
-    cell: Cell
-  ): NeighborJoins {
+    cell: Cell,
+    out: NeighborJoins
+  ): void {
     const rows = grid.length;
     const cols = grid[0]?.length ?? BOARD_COLS;
-    // Only join cells that are settled (not actively falling or mid-pivot)
     if (
+      cell.isObstacle ||
+      cell.isWild ||
       cell.fallOffset > 0.15 ||
       Math.abs(cell.animOffsetX ?? 0) > 0.12 ||
       Math.abs(cell.animOffsetY ?? 0) > 0.12
     ) {
-      return { top: false, right: false, bottom: false, left: false };
+      out.top = false;
+      out.right = false;
+      out.bottom = false;
+      out.left = false;
+      return;
     }
     const matches = (nr: number, nc: number): boolean => {
       if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) return false;
       const other = grid[nr][nc];
       return (
         other !== null &&
+        !other.isObstacle &&
+        !other.isWild &&
         other.color === cell.color &&
         other.fallOffset <= 0.15 &&
         Math.abs(other.animOffsetX ?? 0) <= 0.12 &&
         Math.abs(other.animOffsetY ?? 0) <= 0.12
       );
     };
-    return {
-      top: matches(r - 1, c),
-      right: matches(r, c + 1),
-      bottom: matches(r + 1, c),
-      left: matches(r, c - 1),
-    };
+    out.top = matches(r - 1, c);
+    out.right = matches(r, c + 1);
+    out.bottom = matches(r + 1, c);
+    out.left = matches(r, c - 1);
   }
 
-  private getPieceCellJoins(
+  private writePieceCellJoins(
     piece: Piece,
     py: number,
-    px: number
-  ): NeighborJoins {
-    const color = piece.cells[py][px].color;
-    return {
-      top: py === 1 && piece.cells[0][px].color === color,
-      bottom: py === 0 && piece.cells[1][px].color === color,
-      left: px === 1 && piece.cells[py][0].color === color,
-      right: px === 0 && piece.cells[py][1].color === color,
+    px: number,
+    out: NeighborJoins
+  ): void {
+    const cell = piece.cells[py]?.[px];
+    if (!cell || cell.isBlocked || cell.isWild) {
+      out.top = false;
+      out.right = false;
+      out.bottom = false;
+      out.left = false;
+      return;
+    }
+    const color = cell.color;
+    const rows = piece.cells.length;
+    const cols = piece.cells[py]?.length ?? 0;
+    const matches = (nr: number, nc: number): boolean => {
+      const other = piece.cells[nr]?.[nc];
+      return Boolean(other && !other.isBlocked && !other.isWild && other.color === color);
     };
+    out.top = py > 0 && matches(py - 1, px);
+    out.bottom = py + 1 < rows && matches(py + 1, px);
+    out.left = px > 0 && matches(py, px - 1);
+    out.right = px + 1 < cols && matches(py, px + 1);
   }
 
-  private computeNeighborRipple(
+  private writeNeighborRipple(
     boardIdx: 0 | 1,
     col: number,
-    row: number
-  ): { liftPx: number; glow: number } {
+    row: number,
+    out: { liftPx: number; glow: number }
+  ): void {
     let liftPx = 0;
     let glow = 0;
     for (let i = 0; i < MAX_LAND_RIPPLES; i++) {
@@ -2220,7 +2522,8 @@ export class IluminadoCanvasRenderer {
         glow += envelope * 0.22;
       }
     }
-    return { liftPx, glow: Math.min(0.32, glow) };
+    out.liftPx = liftPx;
+    out.glow = Math.min(0.32, glow);
   }
 
   private drawBoard(
@@ -2232,7 +2535,7 @@ export class IluminadoCanvasRenderer {
     beatPhase: number,
     timeSec: number,
     label?: string,
-    audioSpectrum: { subBass: number; mid: number; high: number } = {
+    audioSpectrum: { subBass: number; mid: number; high: number; bands?: number[] } = {
       subBass: 0,
       mid: 0,
       high: 0,
@@ -2241,7 +2544,7 @@ export class IluminadoCanvasRenderer {
   ): void {
     const { x, y, width, height, cellSize } = rect;
     const { palette } = skin;
-    const { subBass, mid, high } = audioSpectrum;
+    const { subBass, mid, high, bands } = audioSpectrum;
     const boardRows = board.grid.length;
     const boardCols = board.grid[0]?.length ?? board.cols ?? BOARD_COLS;
 
@@ -2254,10 +2557,20 @@ export class IluminadoCanvasRenderer {
     this.roundRect(ctx, x - 6, y - 6, width + 12, height + 12, 10);
     ctx.fill();
 
-    ctx.strokeStyle = palette.boardFrame;
-    ctx.lineWidth = 2;
+    ctx.strokeStyle =
+      board.pendingGarbage > 0 ? palette.hudAccent : palette.boardFrame;
+    ctx.lineWidth = board.pendingGarbage > 0 ? 2.6 : 2;
     this.roundRect(ctx, x - 6, y - 6, width + 12, height + 12, 10);
     ctx.stroke();
+
+    if (board.pendingGarbage > 0) {
+      const pulse = 0.5 + 0.5 * Math.sin(timeSec * 8);
+      ctx.save();
+      ctx.fillStyle = palette.hudAccent;
+      ctx.globalAlpha = 0.14 + pulse * 0.12;
+      ctx.fillRect(x, y, width, 4);
+      ctx.restore();
+    }
 
     if (label) {
       ctx.fillStyle = isHexColorDark(palette.skyMid) ? '#faf7f2' : palette.hudInk;
@@ -2271,12 +2584,12 @@ export class IluminadoCanvasRenderer {
     ctx.rect(x, y, width, height);
     ctx.clip();
 
-    // Subtle beat + sub-bass reactive grid lines
+    // Subtle beat + sub-bass reactive grid vertices & soft hairlines
     const gridBeatPulse = Math.pow(1 - beatPhase, 2.8);
     ctx.save();
     ctx.strokeStyle = palette.gridLine;
     ctx.lineWidth = 1;
-    ctx.globalAlpha = 0.7 + gridBeatPulse * 0.22 + subBass * 0.18;
+    ctx.globalAlpha = 0.42 + gridBeatPulse * 0.14 + subBass * 0.12;
     for (let c = 1; c < boardCols; c++) {
       const gx = x + c * cellSize;
       ctx.beginPath();
@@ -2290,6 +2603,14 @@ export class IluminadoCanvasRenderer {
       ctx.moveTo(x, gy);
       ctx.lineTo(x + width, gy);
       ctx.stroke();
+    }
+    ctx.fillStyle = palette.gridLine;
+    ctx.globalAlpha = 0.55 + gridBeatPulse * 0.2;
+    for (let r = 1; r < boardRows; r++) {
+      const gy = y + r * cellSize;
+      for (let c = 1; c < boardCols; c++) {
+        ctx.fillRect(x + c * cellSize - 1, gy - 1, 2, 2);
+      }
     }
     ctx.restore();
 
@@ -2307,43 +2628,243 @@ export class IluminadoCanvasRenderer {
       );
     }
 
-    // Fluid waterline / ink-brushstroke wake trail fading over ~400ms behind timeline beam
-    const tlX = x + timelineNorm * width;
+    // Hard-drop impact light beams (supports downward, upward, and horizontal flows)
+    for (let i = 0; i < MAX_DROP_BEAMS; i++) {
+      const beam = this.dropBeams[i];
+      if (!beam.active || beam.boardIdx !== boardIdx) continue;
+      const t = beam.life / beam.maxLife;
+      const fade = (1 - t) * (1 - t);
+      const dir = beam.gravityDirection ?? 'down';
+      const botRows = beam.colBotRows;
+      const colors = beam.colColors;
+
+      if (dir === 'down') {
+        const topY = y + Math.max(0, beam.startRow) * cellSize;
+        for (let px = 0; px < botRows.length; px++) {
+          const colBot = botRows[px];
+          const colColor = colors[px];
+          if (colBot < 0 || colColor === null || colColor === undefined) continue;
+          const botY = y + Math.max(0, colBot + 1) * cellSize;
+          if (botY <= topY) continue;
+          const colX = x + (beam.col + px) * cellSize;
+          const colStyle = getBlockStyle(palette, colColor);
+          const grad = ctx.createLinearGradient(0, topY, 0, botY);
+          grad.addColorStop(0, 'rgba(250, 246, 238, 0)');
+          grad.addColorStop(0.65, colStyle.highlight);
+          grad.addColorStop(1, palette.squareHighlight);
+          ctx.save();
+          ctx.globalAlpha = fade * 0.42;
+          ctx.fillStyle = grad;
+          ctx.fillRect(colX + 2, topY, Math.max(2, cellSize - 4), botY - topY);
+          ctx.fillStyle = palette.squareHighlight;
+          ctx.globalAlpha = fade * 0.72;
+          ctx.fillRect(colX + 2, botY - 3, Math.max(2, cellSize - 4), 3);
+          ctx.restore();
+        }
+      } else if (dir === 'up') {
+        const botY = y + Math.min(boardRows, Math.max(1, beam.startRow + 1)) * cellSize;
+        for (let px = 0; px < botRows.length; px++) {
+          const colTop = botRows[px];
+          const colColor = colors[px];
+          if (colTop < 0 || colColor === null || colColor === undefined) continue;
+          const topY = y + Math.max(0, colTop) * cellSize;
+          if (botY <= topY) continue;
+          const colX = x + (beam.col + px) * cellSize;
+          const colStyle = getBlockStyle(palette, colColor);
+          const grad = ctx.createLinearGradient(0, botY, 0, topY);
+          grad.addColorStop(0, 'rgba(250, 246, 238, 0)');
+          grad.addColorStop(0.65, colStyle.highlight);
+          grad.addColorStop(1, palette.squareHighlight);
+          ctx.save();
+          ctx.globalAlpha = fade * 0.42;
+          ctx.fillStyle = grad;
+          ctx.fillRect(colX + 2, topY, Math.max(2, cellSize - 4), botY - topY);
+          ctx.fillStyle = palette.squareHighlight;
+          ctx.globalAlpha = fade * 0.72;
+          ctx.fillRect(colX + 2, topY, Math.max(2, cellSize - 4), 3);
+          ctx.restore();
+        }
+      } else if (dir === 'right') {
+        const startX = x + Math.max(0, beam.col) * cellSize;
+        for (let py = 0; py < botRows.length; py++) {
+          const stopCol = botRows[py];
+          const rowColor = colors[py];
+          if (stopCol < 0 || rowColor === null || rowColor === undefined) continue;
+          const endX = x + Math.max(0, stopCol + 1) * cellSize;
+          if (endX <= startX) continue;
+          const rowY = y + (beam.startRow + py) * cellSize;
+          const colStyle = getBlockStyle(palette, rowColor);
+          const grad = ctx.createLinearGradient(startX, 0, endX, 0);
+          grad.addColorStop(0, 'rgba(250, 246, 238, 0)');
+          grad.addColorStop(0.65, colStyle.highlight);
+          grad.addColorStop(1, palette.squareHighlight);
+          ctx.save();
+          ctx.globalAlpha = fade * 0.42;
+          ctx.fillStyle = grad;
+          ctx.fillRect(startX, rowY + 2, endX - startX, Math.max(2, cellSize - 4));
+          ctx.fillStyle = palette.squareHighlight;
+          ctx.globalAlpha = fade * 0.72;
+          ctx.fillRect(endX - 3, rowY + 2, 3, Math.max(2, cellSize - 4));
+          ctx.restore();
+        }
+      } else if (dir === 'left') {
+        const endX = x + Math.min(boardCols, Math.max(1, beam.col + 1)) * cellSize;
+        for (let py = 0; py < botRows.length; py++) {
+          const stopCol = botRows[py];
+          const rowColor = colors[py];
+          if (stopCol < 0 || rowColor === null || rowColor === undefined) continue;
+          const startX = x + Math.max(0, stopCol) * cellSize;
+          if (endX <= startX) continue;
+          const rowY = y + (beam.startRow + py) * cellSize;
+          const colStyle = getBlockStyle(palette, rowColor);
+          const grad = ctx.createLinearGradient(endX, 0, startX, 0);
+          grad.addColorStop(0, 'rgba(250, 246, 238, 0)');
+          grad.addColorStop(0.65, colStyle.highlight);
+          grad.addColorStop(1, palette.squareHighlight);
+          ctx.save();
+          ctx.globalAlpha = fade * 0.42;
+          ctx.fillStyle = grad;
+          ctx.fillRect(startX, rowY + 2, endX - startX, Math.max(2, cellSize - 4));
+          ctx.fillStyle = palette.squareHighlight;
+          ctx.globalAlpha = fade * 0.72;
+          ctx.fillRect(startX, rowY + 2, 3, Math.max(2, cellSize - 4));
+          ctx.restore();
+        }
+      }
+    }
+
+    // Subtle pulsing flow-direction entry chevrons when gravity is shifted away from downward
+    const gravDir: GravityDirection = board.gravityDirection ?? 'down';
+    if (gravDir !== 'down') {
+      const flowPulse = 0.34 + 0.18 * Math.sin(timeSec * 4.2);
+      ctx.save();
+      ctx.strokeStyle = palette.hudAccent;
+      ctx.lineWidth = 2;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.globalAlpha = flowPulse;
+      if (gravDir === 'right') {
+        for (let r = 1; r < boardRows; r += 2) {
+          const cy = y + (r + 0.5) * cellSize;
+          const cx = x + 9;
+          ctx.beginPath();
+          ctx.moveTo(cx - 4, cy - 5);
+          ctx.lineTo(cx + 2, cy);
+          ctx.lineTo(cx - 4, cy + 5);
+          ctx.stroke();
+        }
+      } else if (gravDir === 'left') {
+        for (let r = 1; r < boardRows; r += 2) {
+          const cy = y + (r + 0.5) * cellSize;
+          const cx = x + width - 9;
+          ctx.beginPath();
+          ctx.moveTo(cx + 4, cy - 5);
+          ctx.lineTo(cx - 2, cy);
+          ctx.lineTo(cx + 4, cy + 5);
+          ctx.stroke();
+        }
+      } else if (gravDir === 'up') {
+        for (let c = 1; c < boardCols; c += 3) {
+          const cx = x + (c + 0.5) * cellSize;
+          const cy = y + height - 9;
+          ctx.beginPath();
+          ctx.moveTo(cx - 5, cy + 4);
+          ctx.lineTo(cx, cy - 2);
+          ctx.lineTo(cx + 5, cy + 4);
+          ctx.stroke();
+        }
+      }
+      ctx.restore();
+    }
+
+    // Portal edge ribbons when portal_wrap is active
+    if (board.activeShift === 'portal_wrap') {
+      const portalPulse = 0.42 + 0.24 * Math.sin(timeSec * 4.5);
+      ctx.save();
+      ctx.fillStyle = palette.hudAccent;
+      ctx.globalAlpha = portalPulse;
+      if (gravDir === 'left' || gravDir === 'right') {
+        ctx.fillRect(x, y, width, 3.5);
+        ctx.fillRect(x, y + height - 3.5, width, 3.5);
+      } else {
+        ctx.fillRect(x, y, 3.5, height);
+        ctx.fillRect(x + width - 3.5, y, 3.5, height);
+      }
+      ctx.restore();
+    }
+
+    // Conveyor belt track chevrons along bottom row when conveyor_floor is active
+    if (board.activeShift === 'conveyor_floor') {
+      const dirSign = board.conveyorDir === -1 ? -1 : 1;
+      const beltY = y + height - Math.max(5, cellSize * 0.22);
+      const beltH = Math.max(5, cellSize * 0.22);
+      ctx.save();
+      ctx.fillStyle = 'rgba(32, 28, 44, 0.26)';
+      ctx.fillRect(x, beltY, width, beltH);
+      ctx.strokeStyle = palette.hudAccent;
+      ctx.lineWidth = 1.4;
+      ctx.globalAlpha = 0.72;
+      const shiftPx = ((timeSec * 28 * dirSign) % cellSize + cellSize) % cellSize;
+      for (let cx = x - cellSize + shiftPx; cx < x + width + cellSize; cx += cellSize * 0.7) {
+        const my = beltY + beltH * 0.5;
+        ctx.beginPath();
+        ctx.moveTo(cx - dirSign * 3.5, my - 2.6);
+        ctx.lineTo(cx + dirSign * 2.5, my);
+        ctx.lineTo(cx - dirSign * 3.5, my + 2.6);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // Fluid waterline / ink-brushstroke wake trail behind timeline beam(s)
+    const isRtlSweep = board.activeShift === 'reverse_sweep';
+    const isTwinSweep = board.activeShift === 'twin_sweep';
+    const tlX = isRtlSweep ? x + (1 - timelineNorm) * width : x + timelineNorm * width;
     const activeSweepBonus = board.sweepState.squaresThisSweep > 0 ? 0.35 : 0;
     const glowW = cellSize * (3.15 + activeSweepBonus * 0.9 + subBass * 0.9);
-    const glowGrad = ctx.createLinearGradient(tlX - glowW, 0, tlX, 0);
-    glowGrad.addColorStop(0, 'rgba(250, 246, 238, 0)');
-    glowGrad.addColorStop(0.55, palette.timelineGlow);
-    glowGrad.addColorStop(1, palette.timelineGlow);
-    ctx.fillStyle = glowGrad;
-    ctx.fillRect(tlX - glowW, y, glowW, height);
+    const drawSweepWake = (beamX: number, rtl: boolean) => {
+      const wakeStart = rtl ? beamX + glowW : beamX - glowW;
+      const glowGrad = ctx.createLinearGradient(wakeStart, 0, beamX, 0);
+      glowGrad.addColorStop(0, 'rgba(250, 246, 238, 0)');
+      glowGrad.addColorStop(0.55, palette.timelineGlow);
+      glowGrad.addColorStop(1, palette.timelineGlow);
+      ctx.fillStyle = glowGrad;
+      ctx.fillRect(rtl ? beamX : beamX - glowW, y, glowW, height);
 
-    // Subtle waterline meniscus ripples tracing the moving sweep edge
-    ctx.save();
-    ctx.strokeStyle = palette.squareHighlight;
-    ctx.lineWidth = 1;
-    ctx.globalAlpha = 0.26 + Math.pow(1 - beatPhase, 2.2) * 0.12;
-    ctx.beginPath();
-    for (let step = 0; step <= 14; step++) {
-      const sy = y + (step / 14) * height;
-      const sx = tlX - 2 + Math.sin(timeSec * 3.8 + step * 0.8) * 1.4;
-      if (step === 0) ctx.moveTo(sx, sy);
-      else ctx.lineTo(sx, sy);
+      ctx.save();
+      ctx.strokeStyle = palette.squareHighlight;
+      ctx.lineWidth = 1;
+      ctx.globalAlpha = 0.26 + Math.pow(1 - beatPhase, 2.2) * 0.12;
+      ctx.beginPath();
+      for (let step = 0; step <= 14; step++) {
+        const sy = y + (step / 14) * height;
+        const sx = beamX + (rtl ? 2 : -2) + Math.sin(timeSec * 3.8 + step * 0.8) * 1.4;
+        if (step === 0) ctx.moveTo(sx, sy);
+        else ctx.lineTo(sx, sy);
+      }
+      ctx.stroke();
+      ctx.restore();
+    };
+    drawSweepWake(tlX, isRtlSweep);
+    const twinNorm = (timelineNorm + 0.5) % 1;
+    const tl2X = x + twinNorm * width;
+    if (isTwinSweep) {
+      drawSweepWake(tl2X, false);
     }
-    ctx.stroke();
-    ctx.restore();
 
-    // Precompute smooth visualY for active piece so ghost beam aligns flush without gaps
+    // Precompute smooth visualX/visualY for active piece along gravityDirection
     const activePiece = board.activePiece && !board.isGameOver ? board.activePiece : null;
-    const subRowOffset =
+    const { gx: gVecX, gy: gVecY } = getGravityVector(gravDir);
+    const subStepOffset =
       activePiece &&
       board.orientationGraceTimer <= 0 &&
-      canPlacePiece(board, activePiece, 0, 1)
+      canPlacePiece(board, activePiece, gVecX, gVecY)
         ? Math.min(0.95, Math.max(0, board.gravityAccum))
         : 0;
-    const visualPieceY = activePiece ? activePiece.y + subRowOffset : 0;
+    const visualPieceX = activePiece ? activePiece.x + gVecX * subStepOffset : 0;
+    const visualPieceY = activePiece ? activePiece.y + gVecY * subStepOffset : 0;
 
-    // Ghost landing preview & vertical drop guide beam inside board
+    // Ghost landing preview & drop guide beam inside board
     if (activePiece) {
       this.drawGhostPiece(
         ctx,
@@ -2353,6 +2874,7 @@ export class IluminadoCanvasRenderer {
         board,
         activePiece,
         skin,
+        visualPieceX,
         visualPieceY,
         beatPhase
       );
@@ -2366,13 +2888,28 @@ export class IluminadoCanvasRenderer {
         const ax = cell.animOffsetX ?? 0;
         const ay = cell.animOffsetY ?? 0;
         const hopLift = Math.min(1.6, Math.abs(ax) * 0.36);
-        const rip = this.computeNeighborRipple(boardIdx, c, r);
+        this.writeNeighborRipple(boardIdx, c, r, this.tmpRipple);
         const drawX = x + (c + ax) * cellSize;
-        const drawY = y + (r - cell.fallOffset - ay - hopLift) * cellSize - rip.liftPx;
+        const drawY = y + (r - cell.fallOffset - ay - hopLift) * cellSize - this.tmpRipple.liftPx;
+
+        if (cell.isObstacle) {
+          this.drawObstacleCell(
+            ctx,
+            drawX,
+            drawY,
+            cellSize,
+            cell,
+            board,
+            skin,
+            timeSec,
+            beatPhase
+          );
+          continue;
+        }
 
         if (cell.fallOffset > 1.15) {
           const streakH = Math.min(cell.fallOffset, 3) * cellSize * 0.38;
-          const style = cell.color === 0 ? palette.blockA : palette.blockB;
+          const style = getBlockStyle(palette, cell.color);
           ctx.save();
           ctx.fillStyle = style.highlight;
           ctx.globalAlpha = 0.2;
@@ -2382,7 +2919,48 @@ export class IluminadoCanvasRenderer {
 
         const settledForMarks =
           cell.fallOffset <= 0.15 && Math.abs(ax) <= 0.12 && Math.abs(ay) <= 0.12;
-        const joins = this.getGridCellJoins(board.grid, r, c, cell);
+        if (cell.isPeggle) {
+          this.drawPeggleOrbCell(
+            ctx,
+            drawX,
+            drawY,
+            cellSize,
+            cell.color,
+            cell.isChain,
+            skin,
+            {
+              inSquare: cell.inSquare && settledForMarks,
+              chainMarked: cell.chainMarked,
+              pendingClear: cell.pendingClear,
+              sweptCol: cell.sweptCol,
+              landFlash: cell.landFlash,
+              rippleGlow: this.tmpRipple.glow,
+              beatPhase,
+              timeSec,
+              shimmerWave:
+                cell.inSquare && settledForMarks
+                  ? 0.5 + 0.5 * Math.sin(timeSec * 3.6 - (r + c) * 0.58)
+                  : 0,
+            }
+          );
+          continue;
+        }
+        this.writeGridCellJoins(board.grid, r, c, cell, this.tmpJoins);
+        this.tmpBlockFx.row = r;
+        this.tmpBlockFx.col = c;
+        this.tmpBlockFx.inSquare = cell.inSquare && settledForMarks;
+        this.tmpBlockFx.chainMarked = cell.chainMarked;
+        this.tmpBlockFx.pendingClear = cell.pendingClear;
+        this.tmpBlockFx.sweptCol = cell.sweptCol;
+        this.tmpBlockFx.landFlash = cell.landFlash;
+        this.tmpBlockFx.rippleGlow = this.tmpRipple.glow;
+        this.tmpBlockFx.beatPhase = beatPhase;
+        this.tmpBlockFx.timeSec = timeSec;
+        this.tmpBlockFx.shimmerWave =
+          cell.inSquare && settledForMarks
+            ? 0.5 + 0.5 * Math.sin(timeSec * 3.6 - (r + c) * 0.58)
+            : 0;
+        this.tmpBlockFx.isWild = Boolean(cell.isWild);
         this.drawBlockCell(
           ctx,
           drawX,
@@ -2391,28 +2969,13 @@ export class IluminadoCanvasRenderer {
           cell.color,
           cell.isChain,
           skin,
-          joins,
-          {
-            row: r,
-            col: c,
-            inSquare: cell.inSquare && settledForMarks,
-            chainMarked: cell.chainMarked,
-            pendingClear: cell.pendingClear,
-            sweptCol: cell.sweptCol,
-            landFlash: cell.landFlash,
-            rippleGlow: rip.glow,
-            beatPhase,
-            timeSec,
-            shimmerWave:
-              cell.inSquare && settledForMarks
-                ? 0.5 + 0.5 * Math.sin(timeSec * 3.6 - (r + c) * 0.58)
-                : 0,
-          }
+          this.tmpJoins,
+          this.tmpBlockFx
         );
       }
     }
 
-    // Luminous bridge filaments connecting chainMarked same-color clusters
+    // Luminous bridge filaments connecting chainMarked clusters (including isWild links)
     ctx.save();
     ctx.strokeStyle = '#faf6ee';
     ctx.lineWidth = Math.max(1.8, cellSize * 0.06);
@@ -2423,20 +2986,20 @@ export class IluminadoCanvasRenderer {
         if (!cell || !cell.chainMarked) continue;
         const cx = x + (c + 0.5 + (cell.animOffsetX ?? 0)) * cellSize;
         const cy = y + (r + 0.5 - (cell.animOffsetY ?? 0)) * cellSize;
+        const rightCell = c + 1 < boardCols ? board.grid[r][c + 1] : null;
         if (
-          c + 1 < boardCols &&
-          board.grid[r][c + 1]?.chainMarked &&
-          board.grid[r][c + 1]?.color === cell.color
+          rightCell?.chainMarked &&
+          (cell.isWild || rightCell.isWild || rightCell.color === cell.color)
         ) {
           ctx.beginPath();
           ctx.moveTo(cx, cy);
           ctx.lineTo(cx + cellSize, cy);
           ctx.stroke();
         }
+        const downCell = r + 1 < boardRows ? board.grid[r + 1][c] : null;
         if (
-          r + 1 < boardRows &&
-          board.grid[r + 1][c]?.chainMarked &&
-          board.grid[r + 1][c]?.color === cell.color
+          downCell?.chainMarked &&
+          (cell.isWild || downCell.isWild || downCell.color === cell.color)
         ) {
           ctx.beginPath();
           ctx.moveTo(cx, cy);
@@ -2466,16 +3029,30 @@ export class IluminadoCanvasRenderer {
       }
       const cx = x + (sq.x + 1) * cellSize;
       const cy = y + (sq.y + 1) * cellSize;
-      const pulse = 0.72 + 0.28 * Math.sin(timeSec * 5.2 + sq.x * 0.4);
-      const gemR = cellSize * (0.21 + beatPulse * 0.04);
+      const pulse = 0.78 + 0.22 * Math.sin(timeSec * 5.2 + sq.x * 0.4);
+      const gemR = cellSize * (0.21 + beatPulse * 0.06);
+      const rot = Math.sin(timeSec * 2.1 + sq.x * 0.5) * 0.22;
       ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(rot);
       ctx.globalAlpha = pulse;
       ctx.fillStyle = palette.squareHighlight;
-      this.drawDiamond(ctx, cx, cy, gemR);
-      ctx.strokeStyle =
-        sq.color === 0 ? palette.blockA.border : palette.blockB.border;
-      ctx.lineWidth = 1.2;
+      this.drawDiamond(ctx, 0, 0, gemR);
+      ctx.strokeStyle = getBlockStyle(palette, sq.color).border;
+      ctx.lineWidth = 1.25;
       ctx.stroke();
+      if (beatPulse > 0.25) {
+        ctx.strokeStyle = '#faf6ee';
+        ctx.globalAlpha = beatPulse * 0.72;
+        ctx.lineWidth = 1.1;
+        const flareR = gemR * (1.25 + beatPulse * 0.35);
+        ctx.beginPath();
+        ctx.moveTo(-flareR, 0);
+        ctx.lineTo(flareR, 0);
+        ctx.moveTo(0, -flareR);
+        ctx.lineTo(0, flareR);
+        ctx.stroke();
+      }
       ctx.restore();
     }
 
@@ -2526,17 +3103,86 @@ export class IluminadoCanvasRenderer {
     }
     ctx.restore();
 
+    if (board.shiftEffect && board.shiftEffect.life > 0) {
+      const fx = board.shiftEffect;
+      const frac = Math.min(1, Math.max(0, fx.life / Math.max(0.01, fx.maxLife)));
+      ctx.save();
+      if (fx.type === 'horizon_shear' && typeof fx.faultRow === 'number') {
+        const seamY = y + fx.faultRow * cellSize;
+        const beamH = Math.max(4, cellSize * 0.32);
+        const grad = ctx.createLinearGradient(0, seamY - beamH, 0, seamY + beamH);
+        grad.addColorStop(0, 'rgba(250, 246, 238, 0)');
+        grad.addColorStop(0.5, palette.hudAccent);
+        grad.addColorStop(1, 'rgba(250, 246, 238, 0)');
+        ctx.globalAlpha = frac * 0.85;
+        ctx.fillStyle = grad;
+        ctx.fillRect(x, seamY - beamH, width, beamH * 2);
+
+        ctx.strokeStyle = '#faf6ee';
+        ctx.lineWidth = 2;
+        ctx.globalAlpha = frac * 0.95;
+        ctx.beginPath();
+        ctx.moveTo(x, seamY);
+        ctx.lineTo(x + width, seamY);
+        ctx.stroke();
+      } else if (fx.type === 'line_color_shift' && fx.lineCells) {
+        ctx.strokeStyle = palette.squareHighlight;
+        ctx.lineWidth = 2.2;
+        ctx.globalAlpha = frac * 0.85;
+        for (const pos of fx.lineCells) {
+          const cx = x + pos.c * cellSize + 1.5;
+          const cy = y + pos.r * cellSize + 1.5;
+          ctx.strokeRect(cx, cy, Math.max(2, cellSize - 3), Math.max(2, cellSize - 3));
+        }
+      } else if (fx.type === 'mirror_flip') {
+        const mx = x + (fx.mirrorCol ?? boardCols * 0.5) * cellSize;
+        const grad = ctx.createLinearGradient(mx - 12, 0, mx + 12, 0);
+        grad.addColorStop(0, 'rgba(250, 246, 238, 0)');
+        grad.addColorStop(0.5, palette.squareHighlight);
+        grad.addColorStop(1, 'rgba(250, 246, 238, 0)');
+        ctx.globalAlpha = frac * 0.9;
+        ctx.fillStyle = grad;
+        ctx.fillRect(mx - 12, y, 24, height);
+        ctx.strokeStyle = palette.hudAccent;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(mx, y);
+        ctx.lineTo(mx, y + height);
+        ctx.stroke();
+      } else if (fx.type === 'vortex_swirl' || fx.type === 'cyclotron_flow') {
+        const cxB = x + width * 0.5;
+        const cyB = y + height * 0.5;
+        const rMax = Math.min(width, height) * 0.42;
+        const spin = (1 - frac) * Math.PI * 1.4;
+        ctx.strokeStyle = palette.hudAccent;
+        ctx.lineWidth = 2.5;
+        ctx.globalAlpha = frac * 0.72;
+        for (let k = 0; k < 3; k++) {
+          const arcR = rMax * (0.45 + k * 0.26);
+          ctx.beginPath();
+          ctx.arc(cxB, cyB, arcR, spin + k * 1.1, spin + k * 1.1 + Math.PI * 1.15);
+          ctx.stroke();
+        }
+      }
+      ctx.restore();
+    }
+
     ctx.restore(); // end clip
 
     // Beat top rhythm diamonds, measure labels & bottom equalizer ticks
-    const activeBeatCol = Math.floor(timelineNorm * boardCols) % boardCols;
+    const activeBeatCol = isRtlSweep
+      ? Math.max(0, boardCols - 1 - (Math.floor(timelineNorm * boardCols) % boardCols))
+      : Math.floor(timelineNorm * boardCols) % boardCols;
+    const activeBeatCol2 = isTwinSweep
+      ? Math.floor(twinNorm * boardCols) % boardCols
+      : -1;
     const isSkyDark = isHexColorDark(palette.skyMid);
     const barStride = boardCols >= 16 ? 4 : 2;
     ctx.save();
     for (let c = 0; c < boardCols; c++) {
       const dx = x + (c + 0.5) * cellSize;
       const dy = y - 13;
-      const isActiveCol = c === activeBeatCol;
+      const isActiveCol = c === activeBeatCol || c === activeBeatCol2;
       const isDownbeat = c % barStride === 0;
       ctx.fillStyle = isActiveCol ? palette.hudAccent : palette.timelineBeam;
       ctx.globalAlpha = isActiveCol ? 0.94 : isDownbeat ? 0.38 : 0.18;
@@ -2576,27 +3222,38 @@ export class IluminadoCanvasRenderer {
         boardCols - Math.abs(c - activeBeatCol)
       );
       const waveBar = Math.max(0, 1 - distCols / 3) * (0.45 + beatPulse * 0.55);
+      const bandIdx = bands && bands.length > 0
+        ? Math.min(bands.length - 1, Math.floor((c / Math.max(1, boardCols)) * bands.length))
+        : -1;
       const colSpectrum =
-        c < boardCols * 0.33 ? subBass : c < boardCols * 0.67 ? mid : high;
+        bandIdx >= 0 && bands
+          ? bands[bandIdx]
+          : c < boardCols * 0.33
+          ? subBass
+          : c < boardCols * 0.67
+          ? mid
+          : high;
       const tickH =
-        2.5 + (colHasMarks ? 3.5 : 0) + waveBar * 3.5 + colSpectrum * 5.2;
+        2.5 + (colHasMarks ? 3.8 : 0) + waveBar * 3.8 + colSpectrum * 7.2;
       ctx.fillStyle = colHasMarks || isActiveCol ? palette.hudAccent : palette.timelineBeam;
       ctx.globalAlpha = colHasMarks
-        ? 0.68 + colSpectrum * 0.22
+        ? 0.72 + colSpectrum * 0.24
         : isActiveCol
-        ? 0.78
-        : 0.18 + colSpectrum * 0.36;
+        ? 0.85
+        : 0.22 + colSpectrum * 0.44;
       ctx.fillRect(dx - cellSize * 0.22, y + height + 9, cellSize * 0.44, tickH);
     }
     ctx.restore();
 
-    // Active falling / staging 2x2 piece (same-color cells inside the piece also auto-tile!)
+    // Active falling / staging piece (supports all shapes, Peggle orb, and all 4 flow directions)
     if (activePiece) {
+      const pieceRows = activePiece.cells.length;
+      const pieceCols = activePiece.cells[0]?.length ?? 2;
       const lockProgress =
         board.lockTimer > 0 ? Math.min(1, board.lockTimer / LOCK_DELAY_SEC) : 0;
 
-      // Subtle architectural staging terrace guide above top board line when active piece is in staging row
-      if (visualPieceY < 0) {
+      // Subtle architectural staging terrace guide outside active entry edge
+      if (gravDir === 'down' && visualPieceY < 0) {
         ctx.save();
         ctx.strokeStyle = palette.boardFrame;
         ctx.globalAlpha = 0.24;
@@ -2611,8 +3268,8 @@ export class IluminadoCanvasRenderer {
         ctx.strokeStyle = palette.timelineBeam;
         ctx.globalAlpha = 0.34;
         ctx.lineWidth = 1.5;
-        const leftRailX = x + activePiece.x * cellSize;
-        const rightRailX = x + (activePiece.x + 2) * cellSize;
+        const leftRailX = x + visualPieceX * cellSize;
+        const rightRailX = x + (visualPieceX + pieceCols) * cellSize;
         const topRailY = y + visualPieceY * cellSize;
         ctx.beginPath();
         ctx.moveTo(leftRailX, topRailY);
@@ -2621,14 +3278,136 @@ export class IluminadoCanvasRenderer {
         ctx.lineTo(rightRailX, y);
         ctx.stroke();
         ctx.restore();
+      } else if (gravDir === 'up' && visualPieceY + pieceRows > boardRows) {
+        ctx.save();
+        ctx.strokeStyle = palette.timelineBeam;
+        ctx.globalAlpha = 0.34;
+        ctx.lineWidth = 1.5;
+        const leftRailX = x + visualPieceX * cellSize;
+        const rightRailX = x + (visualPieceX + pieceCols) * cellSize;
+        const botRailY = y + (visualPieceY + pieceRows) * cellSize;
+        ctx.beginPath();
+        ctx.moveTo(leftRailX, y + height);
+        ctx.lineTo(leftRailX, botRailY);
+        ctx.moveTo(rightRailX, y + height);
+        ctx.lineTo(rightRailX, botRailY);
+        ctx.stroke();
+        ctx.restore();
+      } else if (gravDir === 'right' && visualPieceX < 0) {
+        ctx.save();
+        ctx.strokeStyle = palette.timelineBeam;
+        ctx.globalAlpha = 0.34;
+        ctx.lineWidth = 1.5;
+        const topRailY = y + visualPieceY * cellSize;
+        const botRailY = y + (visualPieceY + pieceRows) * cellSize;
+        const leftRailX = x + visualPieceX * cellSize;
+        ctx.beginPath();
+        ctx.moveTo(leftRailX, topRailY);
+        ctx.lineTo(x, topRailY);
+        ctx.moveTo(leftRailX, botRailY);
+        ctx.lineTo(x, botRailY);
+        ctx.stroke();
+        ctx.restore();
+      } else if (gravDir === 'left' && visualPieceX + pieceCols > boardCols) {
+        ctx.save();
+        ctx.strokeStyle = palette.timelineBeam;
+        ctx.globalAlpha = 0.34;
+        ctx.lineWidth = 1.5;
+        const topRailY = y + visualPieceY * cellSize;
+        const botRailY = y + (visualPieceY + pieceRows) * cellSize;
+        const rightRailX = x + (visualPieceX + pieceCols) * cellSize;
+        ctx.beginPath();
+        ctx.moveTo(x + width, topRailY);
+        ctx.lineTo(rightRailX, topRailY);
+        ctx.moveTo(x + width, botRailY);
+        ctx.lineTo(rightRailX, botRailY);
+        ctx.stroke();
+        ctx.restore();
       }
 
-      for (let py = 0; py < 2; py++) {
-        for (let px = 0; px < 2; px++) {
-          const pCell = activePiece.cells[py][px];
-          const cx = x + (activePiece.x + px) * cellSize;
+      // Draw luminous bounce wake trail behind falling Peggle orb
+      if (activePiece.isPeggle && activePiece.peggleTrail && activePiece.peggleTrail.length > 0) {
+        const trail = activePiece.peggleTrail;
+        const pColor = activePiece.cells[0]?.[0]?.color ?? 0;
+        const pStyle = getBlockStyle(palette, pColor);
+        ctx.save();
+        ctx.strokeStyle = pStyle.highlight;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.lineWidth = Math.max(2, cellSize * 0.14);
+        ctx.globalAlpha = 0.38;
+        ctx.beginPath();
+        trail.forEach((pt, idx) => {
+          const tx = x + (pt.x + 0.5) * cellSize;
+          const ty = y + (pt.y + 0.5) * cellSize;
+          if (idx === 0) ctx.moveTo(tx, ty);
+          else ctx.lineTo(tx, ty);
+        });
+        ctx.lineTo(x + (visualPieceX + 0.5) * cellSize, y + (visualPieceY + 0.5) * cellSize);
+        ctx.stroke();
+        trail.forEach((pt, idx) => {
+          const frac = (idx + 1) / (trail.length + 1);
+          ctx.fillStyle = pStyle.highlight;
+          ctx.globalAlpha = 0.16 + frac * 0.34;
+          ctx.beginPath();
+          ctx.arc(
+            x + (pt.x + 0.5) * cellSize,
+            y + (pt.y + 0.5) * cellSize,
+            cellSize * (0.09 + frac * 0.09),
+            0,
+            Math.PI * 2
+          );
+          ctx.fill();
+        });
+        ctx.restore();
+      }
+
+      for (let py = 0; py < pieceRows; py++) {
+        for (let px = 0; px < pieceCols; px++) {
+          const pCell = activePiece.cells[py]?.[px];
+          if (!pCell) continue;
+          const cx = x + (visualPieceX + px) * cellSize;
           const cy = y + (visualPieceY + py) * cellSize;
-          const joins = this.getPieceCellJoins(activePiece, py, px);
+          if (pCell.isBlocked) {
+            this.drawBlockedObsidianTile(ctx, cx, cy, cellSize, lockProgress * 0.25);
+            continue;
+          }
+          if (pCell.isPeggle || activePiece.isPeggle) {
+            this.drawPeggleOrbCell(
+              ctx,
+              cx,
+              cy,
+              cellSize,
+              pCell.color,
+              pCell.isChain,
+              skin,
+              {
+                inSquare: false,
+                chainMarked: false,
+                pendingClear: false,
+                sweptCol: false,
+                landFlash: lockProgress * 0.25,
+                rippleGlow: 0,
+                beatPhase,
+                timeSec,
+                shimmerWave: 0,
+              }
+            );
+            continue;
+          }
+          this.writePieceCellJoins(activePiece, py, px, this.tmpJoins);
+          this.tmpBlockFx.row = py;
+          this.tmpBlockFx.col = Math.round(visualPieceX + px);
+          this.tmpBlockFx.inSquare = false;
+          this.tmpBlockFx.chainMarked = false;
+          this.tmpBlockFx.pendingClear = false;
+          this.tmpBlockFx.sweptCol = false;
+          this.tmpBlockFx.landFlash = lockProgress * 0.22;
+          this.tmpBlockFx.rippleGlow = 0;
+          this.tmpBlockFx.beatPhase = beatPhase;
+          this.tmpBlockFx.timeSec = timeSec;
+          this.tmpBlockFx.shimmerWave = 0;
+          this.tmpBlockFx.isWild = Boolean(pCell.isWild);
           this.drawBlockCell(
             ctx,
             cx,
@@ -2637,75 +3416,92 @@ export class IluminadoCanvasRenderer {
             pCell.color,
             pCell.isChain,
             skin,
-            joins,
-            {
-              row: py,
-              col: activePiece.x + px,
-              inSquare: false,
-              chainMarked: false,
-              pendingClear: false,
-              sweptCol: false,
-              landFlash: lockProgress * 0.22,
-              rippleGlow: 0,
-              beatPhase,
-              timeSec,
-              shimmerWave: 0,
-            }
+            this.tmpJoins,
+            this.tmpBlockFx
           );
         }
       }
 
-      // Crisp Lumines lock-delay bar underneath grounded active piece
+      // Crisp lock-delay bar along the leading grounded edge facing gravityDirection
       if (lockProgress > 0.04) {
-        const barW = cellSize * 2 * (1 - lockProgress);
-        const barX = x + activePiece.x * cellSize + (cellSize * 2 - barW) * 0.5;
-        const barY = y + (visualPieceY + 2) * cellSize + 2;
         ctx.save();
         ctx.fillStyle = palette.hudAccent;
         ctx.globalAlpha = 0.82;
-        ctx.fillRect(barX, barY, barW, 2.5);
+        if (gravDir === 'down') {
+          const barW = cellSize * pieceCols * (1 - lockProgress);
+          const barX = x + visualPieceX * cellSize + (cellSize * pieceCols - barW) * 0.5;
+          const barY = y + (visualPieceY + pieceRows) * cellSize + 2;
+          ctx.fillRect(barX, barY, barW, 2.5);
+        } else if (gravDir === 'up') {
+          const barW = cellSize * pieceCols * (1 - lockProgress);
+          const barX = x + visualPieceX * cellSize + (cellSize * pieceCols - barW) * 0.5;
+          const barY = y + visualPieceY * cellSize - 4.5;
+          ctx.fillRect(barX, barY, barW, 2.5);
+        } else if (gravDir === 'right') {
+          const barH = cellSize * pieceRows * (1 - lockProgress);
+          const barY = y + visualPieceY * cellSize + (cellSize * pieceRows - barH) * 0.5;
+          const barX = x + (visualPieceX + pieceCols) * cellSize + 2;
+          ctx.fillRect(barX, barY, 2.5, barH);
+        } else {
+          const barH = cellSize * pieceRows * (1 - lockProgress);
+          const barY = y + visualPieceY * cellSize + (cellSize * pieceRows - barH) * 0.5;
+          const barX = x + visualPieceX * cellSize - 4.5;
+          ctx.fillRect(barX, barY, 2.5, barH);
+        }
         ctx.restore();
       }
     }
 
-    // Prominent Vertical Timeline Sweep Bar
-    ctx.save();
-    ctx.strokeStyle = palette.timelineBeam;
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.moveTo(tlX, y - 8);
-    ctx.lineTo(tlX, y + height + 8);
-    ctx.stroke();
+    // Prominent Vertical Timeline Sweep Bar(s)
+    const drawSweepBeam = (beamX: number, showCounterBadge: boolean) => {
+      ctx.save();
+      ctx.strokeStyle = palette.timelineBeam;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.moveTo(beamX, y - 8);
+      ctx.lineTo(beamX, y + height + 8);
+      ctx.stroke();
 
-    // Inner bright sheen core on the timeline beam
-    ctx.strokeStyle = palette.squareHighlight;
-    ctx.globalAlpha = 0.45 + beatPulse * 0.25;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(tlX, y - 6);
-    ctx.lineTo(tlX, y + height + 6);
-    ctx.stroke();
-    ctx.globalAlpha = 1;
+      ctx.strokeStyle = palette.squareHighlight;
+      ctx.globalAlpha = 0.45 + beatPulse * 0.25;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(beamX, y - 6);
+      ctx.lineTo(beamX, y + height + 6);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
 
-    ctx.fillStyle = palette.timelineBeam;
-    this.drawDiamond(ctx, tlX, y - 9, 6 + beatPulse * 1.1);
-    this.drawDiamond(ctx, tlX, y + height + 9, 6 + beatPulse * 1.1);
-
-    if (board.sweepState.squaresThisSweep > 0) {
-      const badgeText = `${board.sweepState.squaresThisSweep}`;
-      const bx = Math.min(Math.max(tlX, x + 16), x + width - 16);
-      const by = y - 24;
       ctx.fillStyle = palette.timelineBeam;
-      this.roundRect(ctx, bx - 13, by - 10, 26, 20, 6);
-      ctx.fill();
-      ctx.fillStyle = '#faf6ee';
-      ctx.font = '700 12px "JetBrains Mono", monospace';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(badgeText, bx, by + 0.5);
+      this.drawDiamond(ctx, beamX, y - 9, 6 + beatPulse * 1.1);
+      this.drawDiamond(ctx, beamX, y + height + 9, 6 + beatPulse * 1.1);
+
+      if (showCounterBadge && board.sweepState.squaresThisSweep > 0) {
+        const badgeText = `${board.sweepState.squaresThisSweep}`;
+        const bx = Math.min(Math.max(beamX, x + 16), x + width - 16);
+        const by = y - 24;
+        ctx.save();
+        ctx.fillStyle = palette.squareHighlight;
+        ctx.globalAlpha = 0.28 + beatPulse * 0.22;
+        ctx.beginPath();
+        ctx.arc(bx, by, 16 + beatPulse * 3, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+        ctx.fillStyle = palette.timelineBeam;
+        this.roundRect(ctx, bx - 13, by - 10, 26, 20, 6);
+        ctx.fill();
+        ctx.fillStyle = '#faf6ee';
+        ctx.font = '700 12px "JetBrains Mono", monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(badgeText, bx, by + 0.5);
+      }
+      ctx.restore();
+    };
+    drawSweepBeam(tlX, true);
+    if (isTwinSweep) {
+      drawSweepBeam(tl2X, false);
     }
 
-    ctx.restore();
     ctx.restore();
   }
 
@@ -2717,127 +3513,486 @@ export class IluminadoCanvasRenderer {
     board: BoardState,
     piece: Piece,
     skin: SkinConfig,
+    visualPieceX: number,
     visualPieceY: number,
     beatPhase: number
   ): void {
     const landing = getPieceLandingColumns(board, piece);
-    const colBottomRows: [number, number] = [
-      landing.leftBottomRow,
-      landing.rightBottomRow,
-    ];
+    const pieceRows = piece.cells.length;
+    const pieceCols = piece.cells[0]?.length ?? 2;
+    const colBottomRows = landing.colBottomRows;
+    const dir = landing.gravityDirection ?? 'down';
     const beatPulse = Math.pow(1 - beatPhase, 2.5);
+    const boardRows = board.grid.length;
+    const boardCols = board.grid[0]?.length ?? board.cols ?? BOARD_COLS;
 
     ctx.save();
 
-    // Vertical Lumines-style drop-column beam flush with visualPieceY + 2
-    const topFillRow = Math.max(0, visualPieceY + 2);
-    for (let px = 0; px < 2; px++) {
-      const bottomRow = colBottomRows[px];
-      const colX = boardX + (piece.x + px) * cellSize;
-      if (bottomRow + 1 > topFillRow) {
-        const beamTop = boardY + topFillRow * cellSize;
-        const beamBot = boardY + (bottomRow + 1) * cellSize;
-        const grad = ctx.createLinearGradient(0, beamTop, 0, beamBot);
-        grad.addColorStop(0, 'rgba(250, 246, 238, 0.04)');
-        grad.addColorStop(1, skin.palette.timelineGlow);
-        ctx.globalAlpha = 0.28 + beatPulse * 0.06;
-        ctx.fillStyle = grad;
-        ctx.fillRect(colX, beamTop, cellSize, beamBot - beamTop);
+    if (dir === 'down') {
+      const colLowestPy: number[] = [];
+      for (let px = 0; px < pieceCols; px++) {
+        let lowPy = -1;
+        for (let py = pieceRows - 1; py >= 0; py--) {
+          if (piece.cells[py]?.[px] !== null) {
+            lowPy = py;
+            break;
+          }
+        }
+        colLowestPy.push(lowPy);
+        const bottomRow = colBottomRows[px] ?? -1;
+        if (lowPy < 0 || bottomRow < 0) continue;
+        const topFillRow = Math.max(0, visualPieceY + lowPy + 1);
+        const colX = boardX + (piece.x + px) * cellSize;
+        if (bottomRow + 1 > topFillRow) {
+          const beamTop = boardY + topFillRow * cellSize;
+          const beamBot = boardY + (bottomRow + 1) * cellSize;
+          const grad = ctx.createLinearGradient(0, beamTop, 0, beamBot);
+          grad.addColorStop(0, 'rgba(250, 246, 238, 0.04)');
+          grad.addColorStop(1, skin.palette.timelineGlow);
+          ctx.globalAlpha = 0.28 + beatPulse * 0.06;
+          ctx.fillStyle = grad;
+          ctx.fillRect(colX, beamTop, cellSize, beamBot - beamTop);
+        }
       }
-    }
 
-    // Crisp outer vertical drop rails flush with visualPieceY + 2
-    ctx.globalAlpha = 0.26;
-    ctx.strokeStyle = skin.palette.timelineBeam;
-    ctx.lineWidth = 1.25;
-    const leftBeamTop = boardY + topFillRow * cellSize;
-    const leftBeamBot = boardY + Math.max(0, landing.leftBottomRow + 1) * cellSize;
-    if (leftBeamBot > leftBeamTop) {
-      ctx.beginPath();
-      ctx.moveTo(boardX + piece.x * cellSize + 0.5, leftBeamTop);
-      ctx.lineTo(boardX + piece.x * cellSize + 0.5, leftBeamBot);
-      ctx.stroke();
-    }
-    const rightBeamBot = boardY + Math.max(0, landing.rightBottomRow + 1) * cellSize;
-    if (rightBeamBot > leftBeamTop) {
-      ctx.beginPath();
-      ctx.moveTo(boardX + (piece.x + 2) * cellSize - 0.5, leftBeamTop);
-      ctx.lineTo(boardX + (piece.x + 2) * cellSize - 0.5, rightBeamBot);
-      ctx.stroke();
-    }
-
-    // Subtle dashed split-seam indicator when columns land at different heights
-    if (landing.isSplit) {
-      const splitBottom = Math.max(leftBeamBot, rightBeamBot);
-      if (splitBottom > leftBeamTop) {
-        ctx.save();
-        ctx.setLineDash([4, 4]);
-        ctx.strokeStyle = skin.palette.hudAccent;
-        ctx.globalAlpha = 0.42;
+      ctx.globalAlpha = 0.26;
+      ctx.strokeStyle = skin.palette.timelineBeam;
+      ctx.lineWidth = 1.25;
+      const leftLowPy = colLowestPy[0] ?? pieceRows - 1;
+      const leftBeamTop = boardY + Math.max(0, visualPieceY + Math.max(0, leftLowPy) + 1) * cellSize;
+      const leftBeamBot = boardY + Math.max(0, (colBottomRows[0] ?? -1) + 1) * cellSize;
+      if (leftBeamBot > leftBeamTop) {
         ctx.beginPath();
-        ctx.moveTo(boardX + (piece.x + 1) * cellSize, leftBeamTop);
-        ctx.lineTo(boardX + (piece.x + 1) * cellSize, splitBottom);
+        ctx.moveTo(boardX + piece.x * cellSize + 0.5, leftBeamTop);
+        ctx.lineTo(boardX + piece.x * cellSize + 0.5, leftBeamBot);
         ctx.stroke();
-        ctx.restore();
+      }
+      const lastPx = Math.max(0, pieceCols - 1);
+      const rightLowPy = colLowestPy[lastPx] ?? pieceRows - 1;
+      const rightBeamTop = boardY + Math.max(0, visualPieceY + Math.max(0, rightLowPy) + 1) * cellSize;
+      const rightBeamBot = boardY + Math.max(0, (colBottomRows[lastPx] ?? -1) + 1) * cellSize;
+      if (rightBeamBot > rightBeamTop) {
+        ctx.beginPath();
+        ctx.moveTo(boardX + (piece.x + pieceCols) * cellSize - 0.5, rightBeamTop);
+        ctx.lineTo(boardX + (piece.x + pieceCols) * cellSize - 0.5, rightBeamBot);
+        ctx.stroke();
+      }
+    } else if (dir === 'up') {
+      for (let px = 0; px < pieceCols; px++) {
+        const topStopRow = colBottomRows[px] ?? -1;
+        if (topStopRow < 0) continue;
+        let highPy = pieceRows;
+        for (let py = 0; py < pieceRows; py++) {
+          if (piece.cells[py]?.[px] !== null) {
+            highPy = py;
+            break;
+          }
+        }
+        if (highPy >= pieceRows) continue;
+        const botEdge = boardY + Math.min(boardRows, visualPieceY + highPy) * cellSize;
+        const topEdge = boardY + topStopRow * cellSize;
+        if (botEdge > topEdge) {
+          const colX = boardX + (piece.x + px) * cellSize;
+          const grad = ctx.createLinearGradient(0, botEdge, 0, topEdge);
+          grad.addColorStop(0, 'rgba(250, 246, 238, 0.04)');
+          grad.addColorStop(1, skin.palette.timelineGlow);
+          ctx.globalAlpha = 0.26 + beatPulse * 0.06;
+          ctx.fillStyle = grad;
+          ctx.fillRect(colX, topEdge, cellSize, botEdge - topEdge);
+        }
+      }
+    } else if (dir === 'right') {
+      for (let py = 0; py < pieceRows; py++) {
+        const rightStopCol = colBottomRows[py] ?? -1;
+        if (rightStopCol < 0) continue;
+        let rightPx = -1;
+        for (let px = pieceCols - 1; px >= 0; px--) {
+          if (piece.cells[py]?.[px] !== null) {
+            rightPx = px;
+            break;
+          }
+        }
+        if (rightPx < 0) continue;
+        const leftEdge = boardX + Math.max(0, visualPieceX + rightPx + 1) * cellSize;
+        const rightEdge = boardX + (rightStopCol + 1) * cellSize;
+        if (rightEdge > leftEdge) {
+          const rowY = boardY + (piece.y + py) * cellSize;
+          const grad = ctx.createLinearGradient(leftEdge, 0, rightEdge, 0);
+          grad.addColorStop(0, 'rgba(250, 246, 238, 0.04)');
+          grad.addColorStop(1, skin.palette.timelineGlow);
+          ctx.globalAlpha = 0.26 + beatPulse * 0.06;
+          ctx.fillStyle = grad;
+          ctx.fillRect(leftEdge, rowY, rightEdge - leftEdge, cellSize);
+        }
+      }
+    } else if (dir === 'left') {
+      for (let py = 0; py < pieceRows; py++) {
+        const leftStopCol = colBottomRows[py] ?? -1;
+        if (leftStopCol < 0) continue;
+        let leftPx = pieceCols;
+        for (let px = 0; px < pieceCols; px++) {
+          if (piece.cells[py]?.[px] !== null) {
+            leftPx = px;
+            break;
+          }
+        }
+        if (leftPx >= pieceCols) continue;
+        const rightEdge = boardX + Math.min(boardCols, visualPieceX + leftPx) * cellSize;
+        const leftEdge = boardX + leftStopCol * cellSize;
+        if (rightEdge > leftEdge) {
+          const rowY = boardY + (piece.y + py) * cellSize;
+          const grad = ctx.createLinearGradient(rightEdge, 0, leftEdge, 0);
+          grad.addColorStop(0, 'rgba(250, 246, 238, 0.04)');
+          grad.addColorStop(1, skin.palette.timelineGlow);
+          ctx.globalAlpha = 0.26 + beatPulse * 0.06;
+          ctx.fillStyle = grad;
+          ctx.fillRect(leftEdge, rowY, rightEdge - leftEdge, cellSize);
+        }
       }
     }
 
-    // Per-column split ghost block outlines at exact landing rows
-    for (let px = 0; px < 2; px++) {
-      const colBottom = colBottomRows[px];
-      const boardRows = board.grid.length;
-      for (let py = 0; py < 2; py++) {
-        // py=1 lands at colBottom, py=0 lands at colBottom - 1
-        const gy = colBottom - (1 - py);
-        if (gy < 0 || gy >= boardRows) continue;
-        // Skip if overlapping the visual falling piece itself
-        if (gy <= Math.floor(visualPieceY + py + 0.25) && gy >= piece.y + py) continue;
-
-        const pCell = piece.cells[py][px];
-        const style =
-          pCell.color === 0 ? skin.palette.blockA : skin.palette.blockB;
-        const cx = boardX + (piece.x + px) * cellSize;
-        const cy = boardY + gy * cellSize;
-
-        const joinTop = py === 1 && piece.cells[0][px].color === pCell.color;
-        const joinBot = py === 0 && piece.cells[1][px].color === pCell.color;
-        const joinLeft =
-          !landing.isSplit && px === 1 && piece.cells[py][0].color === pCell.color;
-        const joinRight =
-          !landing.isSplit && px === 0 && piece.cells[py][1].color === pCell.color;
-
-        ctx.fillStyle = style.fill;
-        ctx.globalAlpha = 0.14 + beatPulse * 0.05;
-        ctx.fillRect(cx + 1, cy + 1, cellSize - 2, cellSize - 2);
-
-        ctx.globalAlpha = 0.42 + beatPulse * 0.12;
-        ctx.strokeStyle = style.border;
-        ctx.lineWidth = 1.5;
-        if (!joinTop) {
-          ctx.beginPath();
-          ctx.moveTo(cx + 2, cy + 2);
-          ctx.lineTo(cx + cellSize - 2, cy + 2);
-          ctx.stroke();
-        }
-        if (!joinBot) {
-          ctx.beginPath();
-          ctx.moveTo(cx + 2, cy + cellSize - 2);
-          ctx.lineTo(cx + cellSize - 2, cy + cellSize - 2);
-          ctx.stroke();
-        }
-        if (!joinLeft) {
-          ctx.beginPath();
-          ctx.moveTo(cx + 2, cy + 2);
-          ctx.lineTo(cx + 2, cy + cellSize - 2);
-          ctx.stroke();
-        }
-        if (!joinRight) {
-          ctx.beginPath();
-          ctx.moveTo(cx + cellSize - 2, cy + 2);
-          ctx.lineTo(cx + cellSize - 2, cy + cellSize - 2);
-          ctx.stroke();
+    // Draw directional ghost cell outlines from landing.ghostCells without Set allocations
+    const hasGhostAt = (gx: number, gy: number, color: CellColor): boolean => {
+      for (let i = 0; i < landing.ghostCells.length; i++) {
+        const o = landing.ghostCells[i];
+        if (!o.isBlocked && !o.isWild && o.x === gx && o.y === gy && o.color === color) {
+          return true;
         }
       }
+      return false;
+    };
+
+    for (const gc of landing.ghostCells) {
+      if (gc.x < 0 || gc.x >= boardCols || gc.y < 0 || gc.y >= boardRows) continue;
+      if (
+        Math.abs(gc.x - visualPieceX) < pieceCols &&
+        Math.abs(gc.y - visualPieceY) < pieceRows &&
+        gc.x >= piece.x &&
+        gc.x < piece.x + pieceCols &&
+        gc.y >= piece.y &&
+        gc.y < piece.y + pieceRows &&
+        piece.cells[gc.y - piece.y]?.[gc.x - piece.x] !== null
+      ) {
+        continue;
+      }
+
+      const cx = boardX + gc.x * cellSize;
+      const cy = boardY + gc.y * cellSize;
+
+      if (gc.isBlocked) {
+        ctx.fillStyle = '#221d2d';
+        ctx.globalAlpha = 0.34 + beatPulse * 0.08;
+        ctx.fillRect(cx + 1, cy + 1, cellSize - 2, cellSize - 2);
+        ctx.strokeStyle = '#6c6282';
+        ctx.globalAlpha = 0.72;
+        ctx.lineWidth = 1.6;
+        ctx.strokeRect(cx + 2, cy + 2, Math.max(2, cellSize - 4), Math.max(2, cellSize - 4));
+        const m = Math.max(4, cellSize * 0.32);
+        ctx.beginPath();
+        ctx.moveTo(cx + m, cy + m);
+        ctx.lineTo(cx + cellSize - m, cy + cellSize - m);
+        ctx.moveTo(cx + cellSize - m, cy + m);
+        ctx.lineTo(cx + m, cy + cellSize - m);
+        ctx.stroke();
+        continue;
+      }
+
+      const style = getBlockStyle(skin.palette, gc.color);
+
+      if (gc.isPeggle) {
+        const radius = cellSize * 0.42;
+        ctx.fillStyle = style.fill;
+        ctx.globalAlpha = 0.24 + beatPulse * 0.08;
+        ctx.beginPath();
+        ctx.arc(cx + cellSize * 0.5, cy + cellSize * 0.5, radius, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = style.border;
+        ctx.globalAlpha = 0.68 + beatPulse * 0.14;
+        ctx.lineWidth = 1.75;
+        ctx.setLineDash([3, 3]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        continue;
+      }
+
+      const joinTop = !gc.isWild && hasGhostAt(gc.x, gc.y - 1, gc.color);
+      const joinBot = !gc.isWild && hasGhostAt(gc.x, gc.y + 1, gc.color);
+      const joinLeft = !gc.isWild && hasGhostAt(gc.x - 1, gc.y, gc.color);
+      const joinRight = !gc.isWild && hasGhostAt(gc.x + 1, gc.y, gc.color);
+
+      ctx.fillStyle = gc.isWild ? skin.palette.squareHighlight : style.fill;
+      ctx.globalAlpha = 0.22 + beatPulse * 0.06;
+      ctx.fillRect(cx + 1, cy + 1, cellSize - 2, cellSize - 2);
+
+      ctx.globalAlpha = 0.64 + beatPulse * 0.14;
+      ctx.strokeStyle = gc.isWild ? skin.palette.hudAccent : style.border;
+      ctx.lineWidth = 1.75;
+      if (!joinTop) {
+        ctx.beginPath();
+        ctx.moveTo(cx + 2, cy + 2);
+        ctx.lineTo(cx + cellSize - 2, cy + 2);
+        ctx.stroke();
+      }
+      if (!joinBot) {
+        ctx.beginPath();
+        ctx.moveTo(cx + 2, cy + cellSize - 2);
+        ctx.lineTo(cx + cellSize - 2, cy + cellSize - 2);
+        ctx.stroke();
+      }
+      if (!joinLeft) {
+        ctx.beginPath();
+        ctx.moveTo(cx + 2, cy + 2);
+        ctx.lineTo(cx + 2, cy + cellSize - 2);
+        ctx.stroke();
+      }
+      if (!joinRight) {
+        ctx.beginPath();
+        ctx.moveTo(cx + cellSize - 2, cy + 2);
+        ctx.lineTo(cx + cellSize - 2, cy + cellSize - 2);
+        ctx.stroke();
+      }
+      if (gc.isWild) {
+        ctx.fillStyle = '#faf6ee';
+        ctx.globalAlpha = 0.62;
+        this.drawDiamond(ctx, cx + cellSize * 0.5, cy + cellSize * 0.5, cellSize * 0.22);
+      }
+    }
+    ctx.restore();
+  }
+
+  private drawObstacleCell(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    size: number,
+    cell: Cell,
+    board: BoardState,
+    skin: SkinConfig,
+    timeSec: number,
+    beatPhase: number
+  ): void {
+    const styleType = cell.obstacleStyle ?? 'stone';
+    const { palette } = skin;
+    const beatGlow = Math.pow(1 - beatPhase, 3);
+    const pad = 0.5;
+    const bx = x + pad;
+    const by = y + pad;
+    const bw = Math.max(2, size - pad * 2);
+    const bh = Math.max(2, size - pad * 2);
+
+    ctx.save();
+    if (styleType === 'blocked') {
+      this.drawBlockedObsidianTile(ctx, x, y, size, cell.landFlash);
+    } else if (styleType === 'chasm') {
+      ctx.fillStyle = '#181422';
+      ctx.fillRect(bx, by, bw, bh);
+      ctx.strokeStyle = 'rgba(250, 246, 238, 0.14)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(bx + bw * 0.5, by + 2);
+      ctx.lineTo(bx + bw * 0.38, by + bh * 0.5);
+      ctx.lineTo(bx + bw * 0.62, by + bh - 2);
+      ctx.stroke();
+      ctx.strokeStyle = palette.boardFrame;
+      ctx.strokeRect(bx + 0.5, by + 0.5, bw - 1, bh - 1);
+    } else if (styleType === 'girder') {
+      const grad = ctx.createLinearGradient(bx, by, bx, by + bh);
+      grad.addColorStop(0, '#5a556a');
+      grad.addColorStop(0.5, '#3b3648');
+      grad.addColorStop(1, '#292534');
+      ctx.fillStyle = grad;
+      ctx.fillRect(bx, by, bw, bh);
+      // Top & bottom girder flanges
+      ctx.fillStyle = '#8b839d';
+      ctx.fillRect(bx, by, bw, Math.max(2, size * 0.16));
+      ctx.fillStyle = '#201c2c';
+      ctx.fillRect(bx, by + bh - Math.max(2, size * 0.16), bw, Math.max(2, size * 0.16));
+      // Diagonal truss cross-brace
+      ctx.strokeStyle = 'rgba(250, 246, 238, 0.25)';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(bx + 2, by + bh * 0.25);
+      ctx.lineTo(bx + bw - 2, by + bh * 0.75);
+      ctx.moveTo(bx + bw - 2, by + bh * 0.25);
+      ctx.lineTo(bx + 2, by + bh * 0.75);
+      ctx.stroke();
+      // Corner rivets
+      ctx.fillStyle = palette.hudAccent;
+      const r = Math.max(1.2, size * 0.065);
+      ctx.fillRect(bx + 3, by + 3, r, r);
+      ctx.fillRect(bx + bw - 3 - r, by + 3, r, r);
+    } else if (styleType === 'bumper') {
+      const shimmer = 0.12 + beatGlow * 0.24;
+      const grad = ctx.createLinearGradient(bx, by, bx + bw, by + bh);
+      grad.addColorStop(0, '#6a657d');
+      grad.addColorStop(1, '#2c273b');
+      ctx.fillStyle = grad;
+      this.roundRect(ctx, bx + 0.5, by + 0.5, bw - 1, bh - 1, Math.max(2, size * 0.14));
+      ctx.fill();
+      ctx.strokeStyle = palette.hudAccent;
+      ctx.globalAlpha = 0.68 + shimmer;
+      ctx.lineWidth = 1.6;
+      this.roundRect(ctx, bx + 1.5, by + 1.5, bw - 3, bh - 3, Math.max(1.5, size * 0.1));
+      ctx.stroke();
+      // Patrol chevron arrow hint
+      const dir = board.patrollingBumper?.dir ?? 1;
+      const cx = bx + bw * 0.5;
+      const cy = by + bh * 0.5;
+      const tip = dir * size * 0.16;
+      ctx.strokeStyle = '#faf6ee';
+      ctx.globalAlpha = 0.8 + 0.2 * Math.sin(timeSec * 6);
+      ctx.lineWidth = 1.6;
+      ctx.beginPath();
+      ctx.moveTo(cx - tip, cy - size * 0.14);
+      ctx.lineTo(cx + tip, cy);
+      ctx.lineTo(cx - tip, cy + size * 0.14);
+      ctx.stroke();
+    } else if (styleType === 'spring') {
+      // Coiled trampoline pad with amber bounce plate
+      const compress = Math.min(4, cell.landFlash * 4);
+      ctx.fillStyle = '#2d2638';
+      ctx.fillRect(bx, by + bh * 0.72, bw, bh * 0.28);
+      ctx.strokeStyle = '#c5a572';
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      ctx.moveTo(bx + bw * 0.26, by + bh * 0.72);
+      ctx.lineTo(bx + bw * 0.72, by + bh * 0.56 + compress * 0.5);
+      ctx.lineTo(bx + bw * 0.26, by + bh * 0.4 + compress);
+      ctx.stroke();
+      ctx.fillStyle = palette.hudAccent;
+      this.roundRect(ctx, bx, by + compress, bw, Math.max(5, bh * 0.34), Math.max(2, size * 0.14));
+      ctx.fill();
+      ctx.fillStyle = '#faf6ee';
+      ctx.globalAlpha = 0.85;
+      const cx = bx + bw * 0.5;
+      const cy = by + compress + bh * 0.17;
+      ctx.beginPath();
+      ctx.moveTo(cx - size * 0.14, cy + 2);
+      ctx.lineTo(cx, cy - 3);
+      ctx.lineTo(cx + size * 0.14, cy + 2);
+      ctx.stroke();
+    } else if (styleType === 'crumble') {
+      // Brittle crystal ledge with HP fracture lines when cracked (hp <= 1)
+      const hp = cell.crumbleHp ?? 2;
+      const grad = ctx.createLinearGradient(bx, by, bx + bw, by + bh);
+      grad.addColorStop(0, hp <= 1 ? '#e2a3b7' : '#d5c7df');
+      grad.addColorStop(1, hp <= 1 ? '#8c536d' : '#6c5f82');
+      ctx.fillStyle = grad;
+      this.roundRect(ctx, bx, by, bw, bh, Math.max(2, size * 0.12));
+      ctx.fill();
+      ctx.strokeStyle = '#faf6ee';
+      ctx.lineWidth = 1.2;
+      ctx.globalAlpha = 0.55;
+      this.roundRect(ctx, bx + 1.5, by + 1.5, bw - 3, bh - 3, Math.max(1, size * 0.08));
+      ctx.stroke();
+      if (hp <= 1) {
+        ctx.strokeStyle = '#241b2c';
+        ctx.globalAlpha = 0.9;
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.moveTo(bx + bw * 0.2, by + 2);
+        ctx.lineTo(bx + bw * 0.48, by + bh * 0.45);
+        ctx.lineTo(bx + bw * 0.32, by + bh * 0.72);
+        ctx.lineTo(bx + bw * 0.65, by + bh - 2);
+        ctx.moveTo(bx + bw * 0.48, by + bh * 0.45);
+        ctx.lineTo(bx + bw * 0.84, by + bh * 0.36);
+        ctx.stroke();
+      }
+    } else {
+      // 'stone' or 'sawtooth': carved matte dark-granite neutral masonry block
+      const grad = ctx.createLinearGradient(bx, by, bx + bw, by + bh);
+      grad.addColorStop(0, '#4d465c');
+      grad.addColorStop(1, '#312b3d');
+      ctx.fillStyle = grad;
+      ctx.fillRect(bx, by, bw, bh);
+
+      ctx.strokeStyle = 'rgba(250, 246, 238, 0.2)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(bx + 1, by + bh - 1);
+      ctx.lineTo(bx + 1, by + 1);
+      ctx.lineTo(bx + bw - 1, by + 1);
+      ctx.stroke();
+
+      // Subtle diagonal architectural hatch so neutral blocks look carved and non-clearable
+      ctx.strokeStyle = 'rgba(250, 246, 238, 0.12)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(bx + bw * 0.22, by + bh * 0.78);
+      ctx.lineTo(bx + bw * 0.78, by + bh * 0.22);
+      ctx.stroke();
+
+      ctx.strokeStyle = '#1f1b29';
+      ctx.strokeRect(bx + 0.5, by + 0.5, bw - 1, bh - 1);
+    }
+
+    if (cell.landFlash > 0.05) {
+      ctx.fillStyle = '#faf6ee';
+      ctx.globalAlpha = Math.min(0.45, cell.landFlash * 0.45);
+      ctx.fillRect(bx, by, bw, bh);
+    }
+    ctx.restore();
+  }
+
+  private drawBlockedObsidianTile(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    size: number,
+    landFlash: number
+  ): void {
+    const pad = 0.6;
+    const bx = x + pad;
+    const by = y + pad;
+    const bw = Math.max(2, size - pad * 2);
+    const bh = Math.max(2, size - pad * 2);
+    const radius = Math.max(2, size * 0.14);
+
+    ctx.save();
+    const grad = ctx.createLinearGradient(bx, by, bx + bw, by + bh);
+    grad.addColorStop(0, '#2a2438');
+    grad.addColorStop(1, '#16121f');
+    ctx.fillStyle = grad;
+    this.roundRect(ctx, bx, by, bw, bh, radius);
+    ctx.fill();
+
+    // Carved obsidian rim bevel
+    ctx.strokeStyle = '#554b6e';
+    ctx.lineWidth = Math.max(1.1, size * 0.045);
+    this.roundRect(ctx, bx + 0.5, by + 0.5, bw - 1, bh - 1, radius);
+    ctx.stroke();
+
+    // Inner hairline recessed frame
+    const inset = Math.max(2.5, size * 0.13);
+    ctx.strokeStyle = 'rgba(250, 246, 238, 0.14)';
+    ctx.lineWidth = 1;
+    this.roundRect(
+      ctx,
+      bx + inset,
+      by + inset,
+      Math.max(2, bw - inset * 2),
+      Math.max(2, bh - inset * 2),
+      Math.max(1, radius * 0.5)
+    );
+    ctx.stroke();
+
+    // Crisp etched cross seal mark
+    const markPad = Math.max(4.5, size * 0.28);
+    ctx.strokeStyle = '#9287ad';
+    ctx.lineWidth = Math.max(1.6, size * 0.085);
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(x + markPad, y + markPad);
+    ctx.lineTo(x + size - markPad, y + size - markPad);
+    ctx.moveTo(x + size - markPad, y + markPad);
+    ctx.lineTo(x + markPad, y + size - markPad);
+    ctx.stroke();
+
+    if (landFlash > 0.05) {
+      ctx.fillStyle = '#faf6ee';
+      ctx.globalAlpha = Math.min(0.4, landFlash * 0.4);
+      this.roundRect(ctx, bx, by, bw, bh, radius);
+      ctx.fill();
     }
     ctx.restore();
   }
@@ -2847,7 +4002,7 @@ export class IluminadoCanvasRenderer {
     x: number,
     y: number,
     size: number,
-    color: 0 | 1,
+    color: CellColor,
     isChain: boolean,
     skin: SkinConfig,
     joins: NeighborJoins,
@@ -2863,10 +4018,10 @@ export class IluminadoCanvasRenderer {
       beatPhase: number;
       timeSec: number;
       shimmerWave: number;
+      isWild?: boolean;
     }
   ): void {
-    const style: BlockStyle =
-      color === 0 ? skin.palette.blockA : skin.palette.blockB;
+    const style: BlockStyle = getBlockStyle(skin.palette, color);
 
     // Soft landing compression -> tiny upward rebound overshoot anchored to bottom edge
     let squashOffset = 0;
@@ -2894,13 +4049,13 @@ export class IluminadoCanvasRenderer {
     const bw = Math.max(2, right - left);
     const bh = Math.max(2, bottom - top);
 
-    // Distinct silhouette language:
-    // Color 0 (Block A): Polished River Ceramic (generous organic curve)
-    // Color 1 (Block B): Etched Cut Slate / Crystal Prism (crisp architectural facet)
-    const baseR =
-      color === 0
-        ? Math.max(3, Math.floor(size * 0.24))
-        : Math.max(1, Math.floor(size * 0.05));
+    const baseR = fx.isWild
+      ? Math.max(3, Math.floor(size * 0.2))
+      : color === 0
+      ? Math.max(3, Math.floor(size * 0.24))
+      : color === 2
+      ? Math.max(2, Math.floor(size * 0.14))
+      : Math.max(1, Math.floor(size * 0.05));
     const rTL = !joins.top && !joins.left ? baseR : 0;
     const rTR = !joins.top && !joins.right ? baseR : 0;
     const rBR = !joins.bottom && !joins.right ? baseR : 0;
@@ -2912,20 +4067,29 @@ export class IluminadoCanvasRenderer {
 
     // Main block body path
     this.selectiveRoundRect(ctx, left, top, bw, bh, rTL, rTR, rBR, rBL);
-    const bodyGrad = ctx.createLinearGradient(left, top, right, bottom);
-    bodyGrad.addColorStop(0, style.fill);
-    bodyGrad.addColorStop(1, style.fillGradientEnd);
-    ctx.fillStyle = bodyGrad;
+    if (fx.isWild) {
+      const sA = getBlockStyle(skin.palette, 0);
+      const sB = getBlockStyle(skin.palette, 1);
+      const sC = getBlockStyle(skin.palette, 2);
+      const prismGrad = ctx.createLinearGradient(left, top, right, bottom);
+      prismGrad.addColorStop(0, sA.fill);
+      prismGrad.addColorStop(0.5, sC.highlight);
+      prismGrad.addColorStop(1, sB.fill);
+      ctx.fillStyle = prismGrad;
+    } else {
+      const bodyGrad = ctx.createLinearGradient(left, top, right, bottom);
+      bodyGrad.addColorStop(0, style.fill);
+      bodyGrad.addColorStop(1, style.fillGradientEnd);
+      ctx.fillStyle = bodyGrad;
+    }
     ctx.fill();
 
     // Per-skin fill variant layering while keeping Color 0 (rounded ceramic) vs Color 1 (cut slate) crisp
     const fillVar = style.fillVariant;
     if (fillVar === 'concentric') {
-      // Concentric color-field target rings inside the tile (Noland-inspired gallery blocks)
       const cxT = left + bw * 0.5;
       const cyT = top + bh * 0.5;
       const maxRingR = Math.min(bw, bh) * 0.42;
-      ctx.save();
       ctx.strokeStyle = style.highlight;
       ctx.globalAlpha = baseAlpha * (0.28 + breath * 0.06);
       ctx.lineWidth = Math.max(2, size * 0.11);
@@ -2939,10 +4103,8 @@ export class IluminadoCanvasRenderer {
       ctx.beginPath();
       ctx.arc(cxT, cyT, maxRingR * 0.52, 0, Math.PI * 2);
       ctx.stroke();
-      ctx.restore();
+      ctx.globalAlpha = baseAlpha;
     } else if (fillVar === 'split_plane') {
-      // Architectural dual-plane diagonal light & shade split
-      ctx.save();
       ctx.fillStyle = style.highlight;
       ctx.globalAlpha = baseAlpha * (0.16 + breath * 0.05);
       ctx.beginPath();
@@ -2960,10 +4122,8 @@ export class IluminadoCanvasRenderer {
       ctx.lineTo(left + 1.5, bottom - 1.5);
       ctx.closePath();
       ctx.fill();
-      ctx.restore();
+      ctx.globalAlpha = baseAlpha;
     } else if (fillVar === 'wash') {
-      // Soft watercolor / mineral wash glow pool
-      ctx.save();
       ctx.fillStyle = style.highlight;
       ctx.globalAlpha = baseAlpha * (0.18 + breath * 0.07);
       ctx.beginPath();
@@ -2974,10 +4134,8 @@ export class IluminadoCanvasRenderer {
       ctx.beginPath();
       ctx.ellipse(left + bw * 0.7, top + bh * 0.72, bw * 0.26, bh * 0.2, 0.35, 0, Math.PI * 2);
       ctx.fill();
-      ctx.restore();
+      ctx.globalAlpha = baseAlpha;
     } else if (fillVar === 'luminous') {
-      // Radiant soft center sheen core
-      ctx.save();
       const rad = ctx.createRadialGradient(
         left + bw * 0.45,
         top + bh * 0.4,
@@ -2991,23 +4149,19 @@ export class IluminadoCanvasRenderer {
       ctx.fillStyle = rad;
       ctx.globalAlpha = baseAlpha * (0.28 + breath * 0.08);
       ctx.fillRect(left + 1, top + 1, Math.max(1, bw - 2), Math.max(1, bh - 2));
-      ctx.restore();
+      ctx.globalAlpha = baseAlpha;
     } else if (fillVar === 'satin') {
-      // Subtle diagonal porcelain sheen
-      ctx.save();
       ctx.fillStyle = style.highlight;
       ctx.globalAlpha = baseAlpha * (0.15 + breath * 0.06);
       ctx.beginPath();
       ctx.ellipse(left + bw * 0.36, top + bh * 0.3, bw * 0.26, bh * 0.16, -0.38, 0, Math.PI * 2);
       ctx.fill();
-      ctx.restore();
+      ctx.globalAlpha = baseAlpha;
     } else {
-      // matte_flat: crisp paper warmth without glare
-      ctx.save();
       ctx.fillStyle = style.highlight;
       ctx.globalAlpha = baseAlpha * 0.07;
       ctx.fillRect(left + 1.5, top + 1.5, Math.max(1, bw - 3), Math.max(1, (bh - 3) * 0.45));
-      ctx.restore();
+      ctx.globalAlpha = baseAlpha;
     }
 
     // Formed 2x2 square living pearl wash & deepening anticipation
@@ -3075,7 +4229,6 @@ export class IluminadoCanvasRenderer {
     const strokeVar = style.strokeVariant;
     const inset = 0.6;
     if (strokeVar === 'offset_ink') {
-      ctx.save();
       ctx.strokeStyle = style.border;
       ctx.globalAlpha = baseAlpha * 0.34;
       ctx.lineWidth = 1.2;
@@ -3091,7 +4244,7 @@ export class IluminadoCanvasRenderer {
         ctx.lineTo(x + size - inset + 0.9, y + size - 0.5);
         ctx.stroke();
       }
-      ctx.restore();
+      ctx.globalAlpha = baseAlpha;
     }
 
     ctx.strokeStyle = style.border;
@@ -3100,6 +4253,8 @@ export class IluminadoCanvasRenderer {
         ? 1.85
         : color === 0
         ? 1.1
+        : color === 2
+        ? 1.25
         : 1.35;
     if (!joins.top) {
       ctx.beginPath();
@@ -3127,8 +4282,6 @@ export class IluminadoCanvasRenderer {
     }
 
     if (strokeVar === 'painterly') {
-      // Subtle expressive brush-ink secondary pass on exposed edges
-      ctx.save();
       ctx.strokeStyle = style.border;
       ctx.globalAlpha = baseAlpha * 0.42;
       ctx.lineWidth = 1.1;
@@ -3144,11 +4297,10 @@ export class IluminadoCanvasRenderer {
         ctx.lineTo(left + 1.4, y + size - rBL - 2);
         ctx.stroke();
       }
-      ctx.restore();
+      ctx.globalAlpha = baseAlpha;
     } else if (strokeVar === 'double') {
       const innerPad = Math.max(2.6, Math.floor(size * 0.11));
       if (bw > innerPad * 2 + 4 && bh > innerPad * 2 + 4) {
-        ctx.save();
         ctx.strokeStyle = style.emblemColor;
         ctx.globalAlpha = baseAlpha * 0.34;
         ctx.lineWidth = 1;
@@ -3164,10 +4316,9 @@ export class IluminadoCanvasRenderer {
           rBL > 0 ? Math.max(1, rBL - 2) : 0
         );
         ctx.stroke();
-        ctx.restore();
+        ctx.globalAlpha = baseAlpha;
       }
     } else if (strokeVar === 'recessed') {
-      ctx.save();
       ctx.strokeStyle = style.shade;
       ctx.globalAlpha = baseAlpha * 0.38;
       ctx.lineWidth = 1.1;
@@ -3183,11 +4334,10 @@ export class IluminadoCanvasRenderer {
         ctx.lineTo(left + 2.5, bottom - 2.5);
         ctx.stroke();
       }
-      ctx.restore();
+      ctx.globalAlpha = baseAlpha;
     } else if (strokeVar === 'corner_ticks') {
       const tick = Math.max(3, Math.floor(size * 0.16));
       const pad = 2.6;
-      ctx.save();
       ctx.strokeStyle = style.emblemColor;
       ctx.globalAlpha = baseAlpha * 0.48;
       ctx.lineWidth = 1.1;
@@ -3205,7 +4355,19 @@ export class IluminadoCanvasRenderer {
         ctx.lineTo(right - pad, bottom - pad - tick);
         ctx.stroke();
       }
-      ctx.restore();
+      ctx.globalAlpha = baseAlpha;
+    }
+
+    if (fx.isWild) {
+      const cx = left + bw * 0.5;
+      const cy = top + bh * 0.5;
+      ctx.fillStyle = '#faf6ee';
+      ctx.globalAlpha = baseAlpha * (0.78 + 0.18 * Math.sin(fx.timeSec * 5.2));
+      this.drawDiamond(ctx, cx, cy, size * 0.28);
+      ctx.strokeStyle = skin.palette.hudAccent;
+      ctx.lineWidth = 1.4;
+      ctx.stroke();
+      ctx.globalAlpha = baseAlpha;
     }
 
     // Keep tiles clean: draw center glyph ONLY for Chain enhancement blocks
@@ -3248,6 +4410,112 @@ export class IluminadoCanvasRenderer {
       ctx.fillStyle = style.highlight;
       ctx.globalAlpha = baseAlpha * totalWash;
       ctx.fillRect(left, top, bw, bh);
+    }
+
+    ctx.restore();
+  }
+
+  private drawPeggleOrbCell(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    size: number,
+    color: CellColor,
+    isChain: boolean,
+    skin: SkinConfig,
+    fx: {
+      inSquare: boolean;
+      chainMarked: boolean;
+      pendingClear: boolean;
+      sweptCol: boolean;
+      landFlash: number;
+      rippleGlow: number;
+      beatPhase: number;
+      timeSec: number;
+      shimmerWave: number;
+    }
+  ): void {
+    const style = getBlockStyle(skin.palette, color);
+    const dissolveWave = fx.pendingClear
+      ? 0.5 + 0.5 * Math.sin(fx.timeSec * 5.2)
+      : 0;
+    const scale = fx.pendingClear ? 0.9 - dissolveWave * 0.08 : 1;
+    const baseAlpha = fx.pendingClear ? 0.72 + dissolveWave * 0.22 : 1;
+    const cx = x + size * 0.5;
+    const cy = y + size * 0.5;
+    const r = Math.max(2, size * 0.44 * scale);
+
+    ctx.save();
+    ctx.globalAlpha = baseAlpha;
+
+    // Soft sphere radial body gradient
+    const orbGrad = ctx.createRadialGradient(
+      cx - r * 0.32,
+      cy - r * 0.32,
+      r * 0.1,
+      cx,
+      cy,
+      r
+    );
+    orbGrad.addColorStop(0, style.highlight);
+    orbGrad.addColorStop(0.55, style.fill);
+    orbGrad.addColorStop(1, style.fillGradientEnd);
+    ctx.fillStyle = orbGrad;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Subtle lower rim shade & square glow wash
+    if (fx.inSquare) {
+      ctx.fillStyle = skin.palette.squareHighlight;
+      ctx.globalAlpha = baseAlpha * (0.24 + fx.shimmerWave * 0.18);
+      ctx.beginPath();
+      ctx.arc(cx, cy, r * 0.92, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = baseAlpha;
+    }
+
+    // Glossy specular pearl highlight
+    ctx.fillStyle = '#faf6ee';
+    ctx.globalAlpha = baseAlpha * 0.72;
+    ctx.beginPath();
+    ctx.ellipse(cx - r * 0.34, cy - r * 0.34, r * 0.24, r * 0.14, -0.55, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.globalAlpha = baseAlpha;
+    ctx.strokeStyle = style.border;
+    ctx.lineWidth = Math.max(1.3, size * 0.055);
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.stroke();
+
+    if (isChain) {
+      const useDark =
+        getHexLuminance(style.fill) > 0.78 &&
+        getHexLuminance(style.emblemColor) < 0.45;
+      const arm = r * 0.55;
+      const thick = Math.max(2, r * 0.22);
+      ctx.fillStyle = useDark ? style.emblemColor : '#faf6ee';
+      ctx.fillRect(cx - arm, cy - thick * 0.5, arm * 2, thick);
+      ctx.fillRect(cx - thick * 0.5, cy - arm, thick, arm * 2);
+    }
+
+    if (fx.chainMarked || fx.sweptCol) {
+      ctx.strokeStyle = skin.palette.squareHighlight;
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = baseAlpha * 0.75;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r * 0.82, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    const wash = Math.min(0.45, fx.landFlash * 0.36 + fx.rippleGlow);
+    if (wash > 0.01) {
+      ctx.fillStyle = style.highlight;
+      ctx.globalAlpha = baseAlpha * wash;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, Math.PI * 2);
+      ctx.fill();
     }
 
     ctx.restore();
@@ -3576,6 +4844,22 @@ export class IluminadoCanvasRenderer {
         ctx.beginPath();
         ctx.ellipse(0, 0, p.size * 0.65, p.size * 0.35, 0, 0, Math.PI * 2);
         ctx.fill();
+      } else if (p.shape === 'star') {
+        ctx.fillStyle = p.color;
+        const outer = p.size * 0.72;
+        const inner = p.size * 0.24;
+        ctx.beginPath();
+        for (let k = 0; k < 8; k++) {
+          const r = k % 2 === 0 ? outer : inner;
+          const a = (k * Math.PI) / 4;
+          if (k === 0) ctx.moveTo(Math.cos(a) * r, Math.sin(a) * r);
+          else ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+        }
+        ctx.closePath();
+        ctx.fill();
+      } else if (p.shape === 'diamond') {
+        ctx.fillStyle = p.color;
+        this.drawDiamond(ctx, 0, 0, p.size * 0.55);
       } else {
         ctx.fillStyle = p.color;
         ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
@@ -3605,9 +4889,9 @@ export class IluminadoCanvasRenderer {
       ctx.fillText(pop.text, 0, 0);
       if (pop.subtext) {
         ctx.font = '700 11.5px "Plus Jakarta Sans", sans-serif';
-        ctx.lineWidth = 2.8;
-        ctx.strokeText(pop.subtext, 0, 18);
-        ctx.fillText(pop.subtext, 0, 18);
+        ctx.lineWidth = 2.4;
+        ctx.strokeText(pop.subtext, 0, 22);
+        ctx.fillText(pop.subtext, 0, 22);
       }
       ctx.restore();
     }

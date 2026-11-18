@@ -1,6 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GameHud } from './components/GameHud';
 import { GameModals } from './components/GameModals';
+import { ShiftSettingsModal } from './components/ShiftSettingsModal';
 import { TitleScreen } from './components/TitleScreen';
 import { IluminadoAudioEngine, computeStemLevels } from './game/audio';
 import { IluminadoCanvasRenderer } from './game/canvasRenderer';
@@ -14,18 +15,21 @@ import {
   StageProgressionState,
   advanceSweepStageProgression,
   advanceTimedStageProgression,
-  applyGarbageToBoard,
+  computeEncoreState,
   computeStageProgressMetrics,
+  computeTimeAttackPaceDelta,
   countBoardCells,
   createInitialBoardState,
   detectBoardMarks,
   finalizeSweep,
+  flushPendingGarbage,
   getDimensionsForOrientation,
+  getPieceLandingColumns,
   hardDropPiece,
-  movePieceHorizontal,
+  resolveBattleGarbageSwap,
   rotateActivePiece,
-  rotateBoard90,
   softDropStep,
+  steerPiece,
   stepPassiveGravity,
   stepTimelineColumn,
   transformBoardForOrientation,
@@ -39,6 +43,15 @@ import {
   CpuTargetPlan,
 } from './game/modes';
 import {
+  advanceShiftStageTurn,
+  applyBoardShift,
+  getShiftLabel,
+  pickNextShift,
+  stepConveyorFloor,
+  stepPatrollingBumper,
+  tickShiftEffects,
+} from './game/shifts';
+import {
   SKINS,
   advanceShuffledSkinDeck,
   createShuffledSkinDeck,
@@ -46,6 +59,7 @@ import {
 } from './game/skins';
 import {
   applyDailyResultToProgress,
+  applyTimeAttackSplitsToProgress,
   getEffectiveDailyStreak,
   isDailyCompletedForDate,
   loadProgress,
@@ -54,12 +68,15 @@ import {
 import {
   BoardOrientation,
   BoardState,
+  CellColor,
   ChallengeVariant,
   DailyChallengeSpec,
   GameMode,
   GameStatus,
   HudSnapshot,
+  Piece,
   SavedProgress,
+  ShiftType,
   SkinConfig,
 } from './game/types';
 
@@ -95,6 +112,11 @@ interface SimState {
   cpuRotationsDone: number;
   missionChainCleared: number;
   missionSingleColorAchieved: boolean;
+  worldsCleared: number;
+  timeAttackSplitsRecorded: number[];
+  encoreBonusBpm: number;
+  encoreIntensity: number;
+  preloadedNextKey: string | null;
   outcomeTitle: string;
   outcomeSubtitle: string;
   isVictory: boolean;
@@ -102,6 +124,38 @@ interface SimState {
 
 function getSkinByIndex(idx: number): SkinConfig {
   return SKINS[((idx % SKINS.length) + SKINS.length) % SKINS.length];
+}
+
+function injectStarterChainCell(piece: Piece | null): void {
+  if (!piece) return;
+  for (let py = piece.cells.length - 1; py >= 0; py--) {
+    for (let px = 0; px < (piece.cells[py]?.length ?? 0); px++) {
+      const cell = piece.cells[py]?.[px];
+      if (cell && !cell.isBlocked) {
+        cell.isChain = true;
+        cell.color = 0;
+        return;
+      }
+    }
+  }
+}
+
+function extractPieceColumnColors(piece: Piece): (CellColor | null)[] {
+  const rows = piece.cells.length;
+  const cols = piece.cells[0]?.length ?? 0;
+  const colors: (CellColor | null)[] = [];
+  for (let px = 0; px < cols; px++) {
+    let found: CellColor | null = null;
+    for (let py = rows - 1; py >= 0; py--) {
+      const cell = piece.cells[py]?.[px];
+      if (cell && !cell.isBlocked) {
+        found = cell.color;
+        break;
+      }
+    }
+    colors.push(found);
+  }
+  return colors;
 }
 
 export default function App() {
@@ -120,6 +174,9 @@ export default function App() {
   const [timeAttackDuration, setTimeAttackDuration] = useState<60 | 180 | 300>(180);
   const [selectedPuzzleIdx, setSelectedPuzzleIdx] = useState<number>(0);
   const [selectedMissionIdx, setSelectedMissionIdx] = useState<number>(0);
+  const [isShiftSettingsOpen, setIsShiftSettingsOpen] = useState<boolean>(false);
+  const isShiftSettingsOpenRef = useRef<boolean>(false);
+  isShiftSettingsOpenRef.current = isShiftSettingsOpen;
   const [previewSkinIdx, setPreviewSkinIdx] = useState<number>(() =>
     pickRandomSkinIndex()
   );
@@ -189,6 +246,11 @@ export default function App() {
     cpuRotationsDone: 0,
     missionChainCleared: 0,
     missionSingleColorAchieved: false,
+    worldsCleared: 0,
+    timeAttackSplitsRecorded: [],
+    encoreBonusBpm: 0,
+    encoreIntensity: 0,
+    preloadedNextKey: null,
     outcomeTitle: '',
     outcomeSubtitle: '',
     isVictory: false,
@@ -259,6 +321,25 @@ export default function App() {
       skin
     );
 
+    const pbSplits =
+      sim.mode === 'time_attack'
+        ? progressRef.current.timeAttackSplits?.[String(sim.timeAttackDuration)]
+        : undefined;
+    const pace =
+      sim.mode === 'time_attack'
+        ? computeTimeAttackPaceDelta(
+            pbSplits,
+            savedBest,
+            sim.timeElapsed,
+            sim.timeAttackDuration,
+            score
+          )
+        : { delta: null, pbFraction: null, currentFraction: null };
+
+    const hasNextStage =
+      (sim.mode === 'puzzle' && sim.puzzleIdx + 1 < PUZZLE_LEVELS.length) ||
+      (sim.mode === 'mission' && sim.missionIdx + 1 < MISSION_LEVELS.length);
+
     const fallbackDims = getDimensionsForOrientation(orientationRef.current);
     return {
       status: sim.status,
@@ -266,13 +347,18 @@ export default function App() {
       orientation: sim.board?.orientation ?? orientationRef.current,
       boardCols: sim.board?.cols ?? fallbackDims.cols,
       boardRows: sim.board?.rows ?? fallbackDims.rows,
+      activeShift: sim.board?.activeShift ?? null,
+      activeShiftLabel: getShiftLabel(sim.board?.activeShift ?? null),
+      pieceShapeMode: sim.board?.pieceShapeMode ?? 'standard_2x2',
+      colorCount: sim.board?.colorCount ?? 2,
+      enabledShiftCount: progressRef.current.enabledShifts.length,
       challengeVariant: sim.challengeVariant,
       score,
       highScore,
       level: sim.progression.level,
       skinIndex: sim.skinIndex,
       musicGenre: skin.music.genreLabel,
-      bpm: skin.bpm,
+      bpm: skin.bpm + sim.encoreBonusBpm,
       squaresThisSweep: sim.board?.sweepState.squaresThisSweep ?? 0,
       squaresTotal: sim.board?.squaresClearedTotal ?? 0,
       stageSquares,
@@ -295,11 +381,37 @@ export default function App() {
       p2Score: sim.board2?.score,
       p2Squares: sim.board2?.squaresClearedTotal,
       p2Combo: sim.board2?.comboLevel,
+      worldsCleared: sim.worldsCleared,
+      biggestSweep: sim.board?.biggestSweep ?? 0,
+      chainClears: sim.board?.chainClearsTotal ?? 0,
+      singleColorBonuses: sim.board?.singleColorCount ?? 0,
+      allClearBonuses: sim.board?.allClearCount ?? 0,
+      pendingGarbage: sim.board?.pendingGarbage ?? 0,
+      p2PendingGarbage: sim.board2?.pendingGarbage ?? 0,
+      encoreBonusBpm: sim.encoreBonusBpm,
+      timeAttackPaceDelta: pace.delta,
+      timeAttackPbFraction: pace.pbFraction,
+      timeAttackCurrentFraction: pace.currentFraction,
+      hasNextStage,
     };
   }, [dailyDateKey]);
 
   const [hud, setHud] = useState<HudSnapshot>(() =>
     buildHudSnapshot(simRef.current)
+  );
+
+  const handleChangeEnabledShifts = useCallback(
+    (nextShifts: ShiftType[]) => {
+      const updated: SavedProgress = {
+        ...progressRef.current,
+        enabledShifts: nextShifts,
+      };
+      progressRef.current = updated;
+      saveProgress(updated);
+      setProgress(updated);
+      setHud(buildHudSnapshot(simRef.current));
+    },
+    [buildHudSnapshot]
   );
 
   const syncBodyState = useCallback((status: GameStatus) => {
@@ -340,9 +452,16 @@ export default function App() {
       sim.outcomeTitle = title;
       sim.outcomeSubtitle = subtitle;
       sim.isVictory = isVictory;
+      if (
+        isVictory &&
+        (sim.mode === 'puzzle' || sim.mode === 'mission' || sim.mode === 'daily')
+      ) {
+        sim.worldsCleared = Math.max(1, sim.worldsCleared + 1);
+      }
       syncBodyState('gameover');
       heldKeysRef.current.clear();
 
+      audioRef.current.setPlaybackTempoScale(1);
       if (isVictory) {
         audioRef.current.playSkinTransition(getSkinByIndex(sim.skinIndex));
       } else {
@@ -363,6 +482,24 @@ export default function App() {
         progressRef.current = nextProg;
         saveProgress(nextProg);
         setProgress(nextProg);
+      } else if (sim.mode === 'time_attack') {
+        const finalSplits = [...sim.timeAttackSplitsRecorded];
+        const expectedTotalBuckets = Math.floor(sim.timeAttackDuration / 5);
+        const finalScore = Math.round(sim.board?.score ?? 0);
+        if (isVictory && finalSplits.length < expectedTotalBuckets) {
+          while (finalSplits.length < expectedTotalBuckets) {
+            finalSplits.push(finalScore);
+          }
+        }
+        const nextProg = applyTimeAttackSplitsToProgress(
+          progressRef.current,
+          sim.timeAttackDuration,
+          finalScore,
+          finalSplits
+        );
+        progressRef.current = nextProg;
+        saveProgress(nextProg);
+        setProgress(nextProg);
       } else {
         commitHighScoreAndUnlocks(
           sim.mode,
@@ -377,7 +514,11 @@ export default function App() {
   );
 
   const startNewGame = useCallback(
-    (overrideMode?: GameMode, fromUserGesture: boolean = true) => {
+    (
+      overrideMode?: GameMode,
+      fromUserGesture: boolean = true,
+      stageOverride?: { puzzleIdx?: number; missionIdx?: number }
+    ) => {
       if (document.activeElement instanceof HTMLElement) {
         document.activeElement.blur();
       }
@@ -386,9 +527,12 @@ export default function App() {
       }
       audioRef.current.setMuted(progressRef.current.muted);
       audioRef.current.setHapticsEnabled(progressRef.current.hapticsEnabled);
+      audioRef.current.setPlaybackTempoScale(1);
       audioRef.current.resetStepTrack();
 
       const mode = overrideMode ?? selectedMode;
+      const effectivePuzzleIdx = stageOverride?.puzzleIdx ?? selectedPuzzleIdx;
+      const effectiveMissionIdx = stageOverride?.missionIdx ?? selectedMissionIdx;
       const todayKey = getDailyDateKey();
       setDailyDateKey((curr) => (curr === todayKey ? curr : todayKey));
 
@@ -475,9 +619,9 @@ export default function App() {
       if (mode === 'time_attack') {
         timeRemaining = timeAttackDuration;
       } else if (mode === 'puzzle') {
-        timeRemaining = PUZZLE_LEVELS[selectedPuzzleIdx].timeLimit;
+        timeRemaining = PUZZLE_LEVELS[effectivePuzzleIdx].timeLimit;
       } else if (mode === 'mission') {
-        const mission = MISSION_LEVELS[selectedMissionIdx];
+        const mission = MISSION_LEVELS[effectiveMissionIdx];
         timeRemaining = mission.timeLimit;
         if (mission.presetGrid) {
           board.grid = buildMissionPresetGrid(
@@ -489,8 +633,7 @@ export default function App() {
         }
         if (mission.type === 'chain_cells' && board.activePiece) {
           // Ensure player gets a Chain Block early for Chain Sanctuary mission
-          board.activePiece.cells[1][0].isChain = true;
-          board.activePiece.cells[1][0].color = 0;
+          injectStarterChainCell(board.activePiece);
         }
       } else if (mode === 'daily' && activeDailySpec) {
         timeRemaining = activeDailySpec.mission.timeLimit;
@@ -499,13 +642,14 @@ export default function App() {
         );
         board.cols = board.grid[0]?.length ?? BOARD_COLS;
         board.rows = board.grid.length;
+        board.baseCols = board.cols;
+        board.baseRows = board.rows;
         board.squares = detectBoardMarks(board.grid);
         if (startOrientation === 'portrait') {
           transformBoardForOrientation(board, 'portrait', false);
         }
         if (activeDailySpec.mission.type === 'chain_cells' && board.activePiece) {
-          board.activePiece.cells[1][0].isChain = true;
-          board.activePiece.cells[1][0].color = 0;
+          injectStarterChainCell(board.activePiece);
         }
       }
 
@@ -514,13 +658,18 @@ export default function App() {
         board2 = createInitialBoardState(chainFreq, Math.random, startOrientation);
       }
 
+      const upcomingIdx =
+        startDeck.length > 1
+          ? startDeck[1]
+          : (startSkinIndex + 1) % SKINS.length;
+
       const sim = simRef.current;
       sim.status = 'playing';
       sim.mode = mode;
       sim.challengeVariant = challengeVariant;
       sim.timeAttackDuration = timeAttackDuration;
-      sim.puzzleIdx = selectedPuzzleIdx;
-      sim.missionIdx = selectedMissionIdx;
+      sim.puzzleIdx = effectivePuzzleIdx;
+      sim.missionIdx = effectiveMissionIdx;
       sim.dailySpec = activeDailySpec;
       sim.dailyRng = activeDailyRng;
       sim.skinEditEndless = false;
@@ -551,6 +700,11 @@ export default function App() {
       sim.cpuRotationsDone = 0;
       sim.missionChainCleared = 0;
       sim.missionSingleColorAchieved = false;
+      sim.worldsCleared = 0;
+      sim.timeAttackSplitsRecorded = [];
+      sim.encoreBonusBpm = 0;
+      sim.encoreIntensity = 0;
+      sim.preloadedNextKey = `${startSkinIndex}->${upcomingIdx}`;
       sim.outcomeTitle = '';
       sim.outcomeSubtitle = '';
       sim.isVictory = false;
@@ -560,10 +714,7 @@ export default function App() {
       p2DasRef.current = { dir: 0, hold: 0, repeat: 0 };
       syncBodyState('playing');
       audioRef.current.syncWorldMusic(startSkin, 'playing');
-      const upcomingIdx =
-        startDeck.length > 1
-          ? startDeck[1]
-          : (startSkinIndex + 1) % SKINS.length;
+      audioRef.current.preloadTrack(startSkin.music.audioTrackUrl);
       audioRef.current.preloadTrack(getSkinByIndex(upcomingIdx).music.audioTrackUrl);
       setHud(buildHudSnapshot(sim));
     },
@@ -578,6 +729,19 @@ export default function App() {
       timeAttackDuration,
     ]
   );
+
+  const handleNextStage = useCallback(() => {
+    const sim = simRef.current;
+    if (sim.mode === 'puzzle' && sim.puzzleIdx + 1 < PUZZLE_LEVELS.length) {
+      const nextPuzzle = sim.puzzleIdx + 1;
+      setSelectedPuzzleIdx(nextPuzzle);
+      startNewGame('puzzle', true, { puzzleIdx: nextPuzzle });
+    } else if (sim.mode === 'mission' && sim.missionIdx + 1 < MISSION_LEVELS.length) {
+      const nextMission = sim.missionIdx + 1;
+      setSelectedMissionIdx(nextMission);
+      startNewGame('mission', true, { missionIdx: nextMission });
+    }
+  }, [startNewGame]);
 
   // Support ?autostart=1 or ?autostart=daily on load
   useEffect(() => {
@@ -620,12 +784,14 @@ export default function App() {
       p1DasRef.current = { dir: 0, hold: 0, repeat: 0 };
       p2DasRef.current = { dir: 0, hold: 0, repeat: 0 };
       syncBodyState('paused');
+      audioRef.current.setPlaybackTempoScale(1);
       audioRef.current.syncWorldMusic(activeSkin, 'paused');
       setHud(buildHudSnapshot(sim));
     } else if (sim.status === 'paused') {
       audioRef.current.unlock();
       sim.status = 'playing';
       syncBodyState('playing');
+      audioRef.current.notifyClockReset();
       audioRef.current.syncWorldMusic(activeSkin, 'playing');
       setHud(buildHudSnapshot(sim));
     }
@@ -644,10 +810,14 @@ export default function App() {
     sim.skinIndex = nextPreview;
     sim.prevSkinIndex = null;
     sim.transitionAlpha = 1;
+    sim.encoreBonusBpm = 0;
+    sim.encoreIntensity = 0;
+    sim.preloadedNextKey = null;
     heldKeysRef.current.clear();
     p1DasRef.current = { dir: 0, hold: 0, repeat: 0 };
     p2DasRef.current = { dir: 0, hold: 0, repeat: 0 };
     syncBodyState('title');
+    audioRef.current.setPlaybackTempoScale(1);
     audioRef.current.resetStepTrack();
     audioRef.current.syncWorldMusic(getSkinByIndex(nextPreview), 'title');
     setHud(buildHudSnapshot(sim));
@@ -687,6 +857,29 @@ export default function App() {
     [buildHudSnapshot, dailySpec.skinIndex]
   );
 
+  const stepPreviewSkin = useCallback(
+    (delta: -1 | 1) => {
+      audioRef.current.unlock();
+      const sim = simRef.current;
+      const total = SKINS.length;
+      const nextIdx = (((sim.skinIndex + delta) % total) + total) % total;
+      setPreviewSkinIdx(nextIdx);
+      if (sim.status === 'title') {
+        sim.prevSkinIndex = sim.skinIndex;
+        sim.skinIndex = nextIdx;
+        sim.transitionAlpha = 0;
+        const nextSkin = getSkinByIndex(nextIdx);
+        audioRef.current.resetStepTrack();
+        audioRef.current.syncWorldMusic(nextSkin, 'title');
+        audioRef.current.preloadTrack(
+          getSkinByIndex((nextIdx + delta + total) % total).music.audioTrackUrl
+        );
+        setHud(buildHudSnapshot(sim));
+      }
+    },
+    [buildHudSnapshot]
+  );
+
   const getTitleSpectrumSnapshot = useCallback(
     () => audioRef.current.getSpectrumSnapshot(),
     []
@@ -705,12 +898,12 @@ export default function App() {
       const boardIdx: 0 | 1 = player === 1 ? 0 : 1;
 
       if (action === 'left') {
-        if (movePieceHorizontal(targetBoard, -1)) {
+        if (steerPiece(targetBoard, -1)) {
           audioRef.current.playMove(skin);
           if (player === 1) rendererRef.current.triggerMoveShift(-1);
         }
       } else if (action === 'right') {
-        if (movePieceHorizontal(targetBoard, 1)) {
+        if (steerPiece(targetBoard, 1)) {
           audioRef.current.playMove(skin);
           if (player === 1) rendererRef.current.triggerMoveShift(1);
         }
@@ -719,22 +912,64 @@ export default function App() {
           audioRef.current.playRotate(skin);
         }
       } else if (action === 'hard_drop') {
+        const gravDir = targetBoard.gravityDirection ?? 'down';
         const pieceRng =
           player === 1 && sim.mode === 'daily' && sim.dailyRng
             ? sim.dailyRng
             : Math.random;
-        const preX = targetBoard.activePiece?.x ?? 0;
-        const preY = targetBoard.activePiece?.y ?? 0;
-        const res = hardDropPiece(targetBoard, chainFreq, pieceRng);
+        const activePieceSnapshot = targetBoard.activePiece;
+        const preX = activePieceSnapshot?.x ?? 0;
+        const preY = activePieceSnapshot?.y ?? 0;
+        const landingInfo = activePieceSnapshot
+          ? getPieceLandingColumns(targetBoard, activePieceSnapshot)
+          : null;
+        const isZen = sim.mode === 'challenge' && sim.challengeVariant === 'zen';
+        const res = hardDropPiece(targetBoard, chainFreq, pieceRng, {
+          zenNoLoss: isZen && player === 1,
+        });
+        if (res.bouncePositions?.length) {
+          audioRef.current.playRotate(skin);
+          for (const pt of res.bouncePositions) {
+            rendererRef.current.spawnPeggleBounce(boardIdx, pt.x, pt.y, skin);
+          }
+        }
         if (res.landed) {
-          const landRow = Math.min(
-            targetBoard.rows - 1,
-            Math.max(0, preY + res.rowsDropped + 1)
-          );
-          rendererRef.current.triggerLandRipple(boardIdx, preX + 0.5, landRow);
+          const landCol =
+            gravDir === 'left' || gravDir === 'right'
+              ? res.finalPieceX ?? preX
+              : (res.finalPieceX ?? preX) + 0.5;
+          const landRow =
+            gravDir === 'down' || gravDir === 'up'
+              ? res.finalPieceY ??
+                Math.min(
+                  targetBoard.rows - 1,
+                  Math.max(0, preY + res.rowsDropped + 1)
+                )
+              : (res.finalPieceY ?? preY) + 0.5;
+          if (activePieceSnapshot && landingInfo) {
+            rendererRef.current.triggerHardDropBeam(
+              boardIdx,
+              preX,
+              Math.max(0, preY),
+              landingInfo.colBottomRows,
+              extractPieceColumnColors(activePieceSnapshot),
+              gravDir
+            );
+          }
+          rendererRef.current.triggerLandRipple(boardIdx, landCol, landRow);
           audioRef.current.playLand(skin);
           if (res.squaresFormed > 0) audioRef.current.playSquareFormed(skin);
           if (res.chainActivated) audioRef.current.playChainTrigger(skin);
+          if (res.zenTrimmed) {
+            rendererRef.current.spawnScorePopup(
+              boardIdx,
+              'ZEN FLOW',
+              'ROWS TRIMMED',
+              skin.palette.hudAccent
+            );
+          }
+          setHud(buildHudSnapshot(sim));
+        } else if (res.bouncePositions?.length) {
           setHud(buildHudSnapshot(sim));
         }
       }
@@ -745,6 +980,7 @@ export default function App() {
   // Keyboard bindings
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
+      if (isShiftSettingsOpenRef.current) return;
       const sim = simRef.current;
 
       if (sim.status === 'title') {
@@ -763,6 +999,12 @@ export default function App() {
           e.preventDefault();
           if (sim.mode === 'daily' && sim.isVictory) {
             returnToTitle();
+          } else if (
+            sim.isVictory &&
+            ((sim.mode === 'puzzle' && sim.puzzleIdx + 1 < PUZZLE_LEVELS.length) ||
+              (sim.mode === 'mission' && sim.missionIdx + 1 < MISSION_LEVELS.length))
+          ) {
+            handleNextStage();
           } else {
             startNewGame(sim.mode);
           }
@@ -847,7 +1089,13 @@ export default function App() {
         } else if (e.code === 'KeyZ') {
           e.preventDefault();
           if (!e.repeat) handlePlayerAction(1, 'rotate_ccw');
-        } else if (e.code === 'KeyC' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') {
+        } else if (
+          e.code === 'ArrowDown' ||
+          e.code === 'KeyS' ||
+          e.code === 'KeyC' ||
+          e.code === 'ShiftLeft' ||
+          e.code === 'ShiftRight'
+        ) {
           e.preventDefault();
           if (!e.repeat) handlePlayerAction(1, 'hard_drop');
         }
@@ -897,7 +1145,7 @@ export default function App() {
       window.removeEventListener('blur', clearHeld);
       document.removeEventListener('visibilitychange', clearHeld);
     };
-  }, [handlePlayerAction, returnToTitle, startNewGame, toggleMute, togglePause]);
+  }, [handleNextStage, handlePlayerAction, returnToTitle, startNewGame, toggleMute, togglePause]);
 
   // Mount Canvas once and drive 60Hz simulation & rendering loop
   useEffect(() => {
@@ -1054,15 +1302,88 @@ export default function App() {
         }
 
         if (sim.status === 'playing') {
+          if (sim.mode === 'time_attack' && sim.board) {
+            const expectedBuckets = Math.floor(sim.timeElapsed / 5);
+            while (sim.timeAttackSplitsRecorded.length < expectedBuckets) {
+              sim.timeAttackSplitsRecorded.push(Math.round(sim.board.score));
+            }
+          }
+
+          const isFinalWorld = Boolean(skin.finalStageTimerSec);
+          const encore = computeEncoreState(isFinalWorld, sim.board.comboLevel);
+          sim.encoreBonusBpm = encore.encoreBonusBpm;
+          sim.encoreIntensity = encore.encoreIntensity;
+          const effectiveBpm = skin.bpm + encore.encoreBonusBpm;
+          audioRef.current.setPlaybackTempoScale(
+            effectiveBpm / Math.max(1, skin.bpm)
+          );
+
+          // Preload the next world's MP3 cleanly ahead of stage transition
+          if (sim.mode === 'challenge' || sim.mode === 'skin_edit') {
+            const { stageSquares, stageGoal } = computeStageProgressMetrics(
+              sim.progression,
+              skin
+            );
+            if (stageSquares / Math.max(1, stageGoal) >= 0.6) {
+              let upcomingIdx: number | null = null;
+              if (sim.mode === 'challenge' && sim.challengeVariant !== 'shuffle') {
+                const loopForever =
+                  sim.challengeVariant === 'endless' || sim.challengeVariant === 'zen';
+                if (loopForever || sim.skinDeckPos + 1 < sim.skinDeck.length) {
+                  upcomingIdx =
+                    sim.skinDeck[(sim.skinDeckPos + 1) % sim.skinDeck.length];
+                }
+              } else if (sim.mode === 'skin_edit') {
+                if (sim.playlistPos + 1 < sim.playlistSkinIds.length) {
+                  const targetId = sim.playlistSkinIds[sim.playlistPos + 1];
+                  const found = SKINS.findIndex((s) => s.id === targetId);
+                  if (found >= 0) upcomingIdx = found;
+                } else if (sim.skinEditEndless && sim.playlistSkinIds.length > 0) {
+                  const targetId = sim.playlistSkinIds[0];
+                  const found = SKINS.findIndex((s) => s.id === targetId);
+                  if (found >= 0) upcomingIdx = found;
+                }
+              }
+              if (upcomingIdx !== null) {
+                const preloadKey = `${sim.skinIndex}->${upcomingIdx}`;
+                if (sim.preloadedNextKey !== preloadKey) {
+                  sim.preloadedNextKey = preloadKey;
+                  audioRef.current.preloadTrack(
+                    getSkinByIndex(upcomingIdx).music.audioTrackUrl
+                  );
+                }
+              }
+            }
+          }
+
           const chainFreq = sim.mode === 'puzzle' ? 0 : skin.chainFrequency;
           const prevBeat = sim.beatAccum;
-          sim.beatAccum += dt * (skin.bpm / 60);
+          sim.beatAccum += audioRef.current.consumeTimelineBeatDelta(dt, effectiveBpm);
+
+          // Beat-synced movement for patrolling 2x2 bumper & conveyor floor (steps every 2 beats)
+          if (Math.floor(sim.beatAccum / 2) > Math.floor(prevBeat / 2)) {
+            if (sim.board?.activeShift === 'patrolling_bumper') {
+              stepPatrollingBumper(sim.board);
+            } else if (sim.board?.activeShift === 'conveyor_floor') {
+              stepConveyorFloor(sim.board);
+            }
+            if (sim.board2?.activeShift === 'patrolling_bumper') {
+              stepPatrollingBumper(sim.board2);
+            } else if (sim.board2?.activeShift === 'conveyor_floor') {
+              stepConveyorFloor(sim.board2);
+            }
+          }
 
           const prevSweepIdx = Math.floor(prevBeat / 8);
           const currSweepIdx = Math.floor(sim.beatAccum / 8);
           const timelineNorm = (sim.beatAccum % 8) / 8;
           const liveCols = sim.board.cols || BOARD_COLS;
-          const targetCol = Math.floor(timelineNorm * liveCols) % liveCols;
+          const isRtlSweep = sim.board.activeShift === 'reverse_sweep';
+          const isTwinSweep = sim.board.activeShift === 'twin_sweep';
+          const targetCol = isRtlSweep
+            ? Math.max(0, liveCols - 1 - (Math.floor(timelineNorm * liveCols) % liveCols))
+            : Math.floor(timelineNorm * liveCols) % liveCols;
+          const twinOffset = Math.floor(liveCols / 2);
 
           // Step through every column crossed since last frame
           const processColumn = (col: number) => {
@@ -1071,32 +1392,90 @@ export default function App() {
             audioRef.current.syncStep(col, skin, stems);
             audioRef.current.updateMusicMix(skin, stems, sim.board.comboLevel);
 
-            const prevChainCount = sim.board.sweepState.chainClearedThisSweep;
-            const r1 = stepTimelineColumn(sim.board, col);
-            if (r1.cellsRemovedNow > 0) {
-              sim.hadClearsThisSweep = true;
-              const activeMission =
-                sim.mode === 'mission'
-                  ? MISSION_LEVELS[sim.missionIdx]
-                  : sim.mode === 'daily'
-                  ? sim.dailySpec?.mission
-                  : undefined;
-              if (activeMission?.type === 'chain_cells') {
-                sim.missionChainCleared += Math.max(
-                  0,
-                  sim.board.sweepState.chainClearedThisSweep - prevChainCount
+            const activeMission =
+              sim.mode === 'mission'
+                ? MISSION_LEVELS[sim.missionIdx]
+                : sim.mode === 'daily'
+                ? sim.dailySpec?.mission
+                : undefined;
+
+            const stepPrimaryCol = (sweepCol: number, dir: 'ltr' | 'rtl') => {
+              if (!sim.board) return;
+              const prevChainCount = sim.board.sweepState.chainClearedThisSweep;
+              const r1 = stepTimelineColumn(sim.board, sweepCol, dir);
+              if (r1.cellsRemovedNow > 0) {
+                sim.hadClearsThisSweep = true;
+                audioRef.current.playSweepColumnNote(
+                  skin,
+                  sim.board.sweepState.squaresThisSweep,
+                  r1.cellsRemovedNow
                 );
+                if (activeMission?.type === 'chain_cells') {
+                  sim.missionChainCleared += Math.max(
+                    0,
+                    sim.board.sweepState.chainClearedThisSweep - prevChainCount
+                  );
+                }
+                rendererRef.current.spawnClearBurst(0, r1.clearedPositions, skin);
               }
-              rendererRef.current.spawnClearBurst(0, r1.clearedPositions, skin);
+            };
+
+            stepPrimaryCol(col, isRtlSweep ? 'rtl' : 'ltr');
+            if (isTwinSweep) {
+              stepPrimaryCol((col + twinOffset) % liveCols, 'ltr');
             }
 
             if (sim.board2) {
-              const r2 = stepTimelineColumn(sim.board2, col);
+              const p2Rtl = sim.board2.activeShift === 'reverse_sweep';
+              const p2Cols = sim.board2.cols || BOARD_COLS;
+              const r2 = stepTimelineColumn(sim.board2, col % p2Cols, p2Rtl ? 'rtl' : 'ltr');
               if (r2.cellsRemovedNow > 0) {
                 sim.p2HadClearsThisSweep = true;
                 rendererRef.current.spawnClearBurst(1, r2.clearedPositions, skin);
               }
+              if (sim.board2.activeShift === 'twin_sweep') {
+                const r2b = stepTimelineColumn(
+                  sim.board2,
+                  (col + Math.floor(p2Cols / 2)) % p2Cols,
+                  'ltr'
+                );
+                if (r2b.cellsRemovedNow > 0) {
+                  sim.p2HadClearsThisSweep = true;
+                  rendererRef.current.spawnClearBurst(1, r2b.clearedPositions, skin);
+                }
+              }
             }
+          };
+
+          const applyNextSkinIndex = (nextIdx: number, preloadIdx: number) => {
+            if (!sim.board || nextIdx === sim.skinIndex) return;
+            sim.worldsCleared += 1;
+            advanceShiftStageTurn(sim.board);
+            advanceShiftStageTurn(sim.board2);
+            sim.prevSkinIndex = sim.skinIndex;
+            sim.skinIndex = nextIdx;
+            sim.transitionAlpha = 0;
+            sim.encoreBonusBpm = 0;
+            sim.encoreIntensity = 0;
+            sim.preloadedNextKey = null;
+            const nextSkin = getSkinByIndex(nextIdx);
+            audioRef.current.playSkinTransition(nextSkin);
+            audioRef.current.syncWorldMusic(nextSkin, 'playing');
+            rendererRef.current.spawnScorePopup(
+              0,
+              nextSkin.name,
+              `${nextSkin.music.genreLabel} · ${nextSkin.bpm} BPM`,
+              nextSkin.palette.hudAccent
+            );
+            audioRef.current.preloadTrack(
+              getSkinByIndex(preloadIdx).music.audioTrackUrl
+            );
+            commitHighScoreAndUnlocks(
+              sim.mode,
+              sim.timeAttackDuration,
+              sim.board.score,
+              nextIdx
+            );
           };
 
           const handleSweepWrap = () => {
@@ -1135,26 +1514,83 @@ export default function App() {
               if (ev1.singleColorBonus) {
                 sim.missionSingleColorAchieved = true;
               }
-              // Send VS pressure on >= 4 squares sweep
-              if (sim.board2 && ev1.squaresCleared >= 4) {
-                applyGarbageToBoard(sim.board2, ev1.squaresCleared);
+            }
+
+            const ev2 = sim.board2
+              ? finalizeSweep(sim.board2, sim.p2HadClearsThisSweep)
+              : null;
+            if (sim.board2) {
+              sim.p2HadClearsThisSweep = false;
+
+              // VS Counter-play: 4+ squares first cancel pending incoming garbage, then queue net pressure for the next sweep
+              const p1Out = ev1 && ev1.squaresCleared >= 4 ? ev1.squaresCleared : 0;
+              const p2Out = ev2 && ev2.squaresCleared >= 4 ? ev2.squaresCleared : 0;
+              const p1Countered = Math.min(sim.board.pendingGarbage, p1Out);
+              sim.board.pendingGarbage -= p1Countered;
+              const p2Countered = Math.min(sim.board2.pendingGarbage, p2Out);
+              sim.board2.pendingGarbage -= p2Countered;
+
+              const droppedOnP1 = flushPendingGarbage(sim.board);
+              const droppedOnP2 = flushPendingGarbage(sim.board2);
+              if (droppedOnP1 > 0) {
+                rendererRef.current.spawnScorePopup(
+                  0,
+                  `+${droppedOnP1} BLOCKS`,
+                  'GARBAGE DROPPED',
+                  skin.palette.hudAccent
+                );
+              }
+              if (droppedOnP2 > 0) {
                 rendererRef.current.spawnScorePopup(
                   1,
-                  `+${ev1.squaresCleared} BLOCKS`,
-                  'PRESSURE SENT',
+                  `+${droppedOnP2} BLOCKS`,
+                  'GARBAGE DROPPED',
                   skin.palette.hudInk
                 );
               }
-            }
 
-            if (sim.board2) {
-              const ev2 = finalizeSweep(sim.board2, sim.p2HadClearsThisSweep);
-              sim.p2HadClearsThisSweep = false;
-              if (ev2 && ev2.squaresCleared >= 4) {
-                applyGarbageToBoard(sim.board, ev2.squaresCleared);
+              const netP1Out = Math.max(0, p1Out - p1Countered);
+              const netP2Out = Math.max(0, p2Out - p2Countered);
+              const clashCancel = Math.min(netP1Out, netP2Out);
+              const swap1 = resolveBattleGarbageSwap(
+                sim.board,
+                sim.board2,
+                netP1Out - clashCancel
+              );
+              const swap2 = resolveBattleGarbageSwap(
+                sim.board2,
+                sim.board,
+                netP2Out - clashCancel
+              );
+
+              if (p1Countered + clashCancel > 0) {
                 rendererRef.current.spawnScorePopup(
                   0,
-                  `+${ev2.squaresCleared} BLOCKS`,
+                  `-${p1Countered + clashCancel} DEFENDED`,
+                  'COUNTERED!',
+                  skin.palette.hudAccent
+                );
+              }
+              if (p2Countered + clashCancel > 0) {
+                rendererRef.current.spawnScorePopup(
+                  1,
+                  `-${p2Countered + clashCancel} DEFENDED`,
+                  'COUNTERED!',
+                  skin.palette.hudAccent
+                );
+              }
+              if (swap1.netSent > 0) {
+                rendererRef.current.spawnScorePopup(
+                  1,
+                  `+${swap1.netSent} INCOMING`,
+                  'NEXT SWEEP',
+                  skin.palette.hudInk
+                );
+              }
+              if (swap2.netSent > 0) {
+                rendererRef.current.spawnScorePopup(
+                  0,
+                  `+${swap2.netSent} INCOMING`,
                   'RIVAL ATTACK',
                   skin.palette.hudAccent
                 );
@@ -1183,7 +1619,8 @@ export default function App() {
                   const res = advanceShuffledSkinDeck(
                     sim.skinDeck,
                     sim.skinDeckPos,
-                    sim.challengeVariant === 'endless'
+                    sim.challengeVariant === 'endless' ||
+                      sim.challengeVariant === 'zen'
                   );
                   sim.skinDeck = res.nextDeck;
                   sim.skinDeckPos = res.nextPos;
@@ -1206,6 +1643,7 @@ export default function App() {
               }
 
               if (completedLap) {
+                sim.worldsCleared += 1;
                 finishRun(
                   'Sanctuary Cleared',
                   `Completed all ${SKINS.length} stages!`,
@@ -1214,30 +1652,14 @@ export default function App() {
                 return;
               }
 
-              if (nextIdx !== sim.skinIndex) {
-                sim.prevSkinIndex = sim.skinIndex;
-                sim.skinIndex = nextIdx;
-                sim.transitionAlpha = 0;
-                const nextSkin = getSkinByIndex(nextIdx);
-                audioRef.current.playSkinTransition(nextSkin);
-                audioRef.current.syncWorldMusic(nextSkin, 'playing');
-                const preloadIdx =
-                  sim.skinDeck.length > 1
-                    ? sim.skinDeck[(sim.skinDeckPos + 1) % sim.skinDeck.length]
-                    : (nextIdx + 1) % SKINS.length;
-                audioRef.current.preloadTrack(
-                  getSkinByIndex(preloadIdx).music.audioTrackUrl
-                );
-                commitHighScoreAndUnlocks(
-                  sim.mode,
-                  sim.timeAttackDuration,
-                  sim.board.score,
-                  nextIdx
-                );
-              }
+              const preloadIdx =
+                sim.skinDeck.length > 1
+                  ? sim.skinDeck[(sim.skinDeckPos + 1) % sim.skinDeck.length]
+                  : (nextIdx + 1) % SKINS.length;
+              applyNextSkinIndex(nextIdx, preloadIdx);
             };
 
-            // Classic Lumines level-up (excess sweep overflow discarded) + multi-level skin transition
+            // Beat-sweep level-up (excess sweep overflow discarded) + multi-level skin transition
             const allowSkinTransition = sim.mode === 'challenge' || sim.mode === 'skin_edit';
             const progRes = advanceSweepStageProgression(
               sim.progression,
@@ -1247,26 +1669,42 @@ export default function App() {
             );
             sim.level = sim.progression.level;
             if (progRes.leveledUp && sim.mode !== 'puzzle') {
-              const rotDir: 'cw' | 'ccw' =
-                sim.progression.level % 2 === 0 ? 'cw' : 'ccw';
-              const rotRes = rotateBoard90(sim.board, rotDir, true);
-              if (sim.board2) {
-                rotateBoard90(sim.board2, rotDir, true);
-                if (sim.mode === 'vs_cpu') {
-                  sim.cpuPlan = computeCpuBestMove(sim.board2);
-                  sim.cpuRotationsDone = 0;
+              const chosenShift = pickNextShift(
+                progressRef.current.enabledShifts,
+                sim.board.activeShift,
+                Math.random,
+                sim.board
+              );
+              if (chosenShift) {
+                const shiftRes = applyBoardShift(sim.board, chosenShift, {
+                  animateBricks: true,
+                  level: sim.progression.level,
+                  chainFrequency: chainFreq,
+                });
+                if (sim.board2) {
+                  applyBoardShift(sim.board2, chosenShift, {
+                    animateBricks: true,
+                    level: sim.progression.level,
+                    chainFrequency: chainFreq,
+                  });
+                  if (sim.mode === 'vs_cpu') {
+                    sim.cpuPlan = computeCpuBestMove(sim.board2);
+                    sim.cpuRotationsDone = 0;
+                  }
                 }
-              }
-              if (rotRes.rotated) {
-                rendererRef.current.triggerBoardRotate90(rotDir);
-                const activeSkinForRot = getSkinByIndex(sim.skinIndex);
-                audioRef.current.playRotate(activeSkinForRot);
-                rendererRef.current.spawnScorePopup(
-                  0,
-                  `LEVEL ${sim.progression.level}`,
-                  `${sim.board.cols}×${sim.board.rows} ROTATED`,
-                  activeSkinForRot.palette.hudAccent
-                );
+                if (shiftRes.applied) {
+                  if (shiftRes.didRotate90) {
+                    rendererRef.current.triggerBoardRotate90(shiftRes.rotateDir);
+                  }
+                  const activeSkinForShift = getSkinByIndex(sim.skinIndex);
+                  audioRef.current.playShiftChord(activeSkinForShift);
+                  rendererRef.current.spawnScorePopup(
+                    0,
+                    `LEVEL ${sim.progression.level}`,
+                    shiftRes.label,
+                    activeSkinForShift.palette.hudAccent
+                  );
+                }
               }
             }
             if (progRes.shouldTransitionSkin) {
@@ -1293,9 +1731,11 @@ export default function App() {
               const res = advanceShuffledSkinDeck(
                 sim.skinDeck,
                 sim.skinDeckPos,
-                sim.challengeVariant === 'endless'
+                sim.challengeVariant === 'endless' ||
+                  sim.challengeVariant === 'zen'
               );
               if (res.completed) {
+                sim.worldsCleared += 1;
                 finishRun(
                   'Sanctuary Cleared',
                   `Completed all ${SKINS.length} stages!`,
@@ -1304,17 +1744,9 @@ export default function App() {
               } else {
                 sim.skinDeck = res.nextDeck;
                 sim.skinDeckPos = res.nextPos;
-                sim.prevSkinIndex = sim.skinIndex;
-                sim.skinIndex = res.nextIdx;
-                sim.transitionAlpha = 0;
-                const nextSkin = getSkinByIndex(res.nextIdx);
-                audioRef.current.playSkinTransition(nextSkin);
-                audioRef.current.syncWorldMusic(nextSkin, 'playing');
                 const preloadIdx =
                   sim.skinDeck[(sim.skinDeckPos + 1) % sim.skinDeck.length];
-                audioRef.current.preloadTrack(
-                  getSkinByIndex(preloadIdx).music.audioTrackUrl
-                );
+                applyNextSkinIndex(res.nextIdx, preloadIdx);
                 setHud(buildHudSnapshot(sim));
               }
             } else {
@@ -1322,15 +1754,7 @@ export default function App() {
                 sim.mode === 'challenge' && sim.challengeVariant === 'shuffle'
                   ? pickRandomSkinIndex(undefined, sim.skinIndex)
                   : (sim.skinIndex + 1) % SKINS.length;
-              sim.prevSkinIndex = sim.skinIndex;
-              sim.skinIndex = nextIdx;
-              sim.transitionAlpha = 0;
-              const nextSkin = getSkinByIndex(nextIdx);
-              audioRef.current.playSkinTransition(nextSkin);
-              audioRef.current.syncWorldMusic(nextSkin, 'playing');
-              audioRef.current.preloadTrack(
-                getSkinByIndex((nextIdx + 1) % SKINS.length).music.audioTrackUrl
-              );
+              applyNextSkinIndex(nextIdx, (nextIdx + 1) % SKINS.length);
               setHud(buildHudSnapshot(sim));
             }
           }
@@ -1339,23 +1763,31 @@ export default function App() {
             sim.lastStepCol = targetCol;
             processColumn(targetCol);
           } else if (currSweepIdx > prevSweepIdx || targetCol !== sim.lastStepCol) {
-            let c = sim.lastStepCol % liveCols;
+            let c = Math.max(0, Math.min(liveCols - 1, sim.lastStepCol));
             let safety = 0;
             while (c !== targetCol && safety < liveCols + 4) {
-              c = (c + 1) % liveCols;
-              processColumn(c);
-              if (c === 0) {
+              c = isRtlSweep
+                ? (c - 1 + liveCols) % liveCols
+                : (c + 1) % liveCols;
+              const wrapped = isRtlSweep
+                ? c === liveCols - 1
+                : c === 0 || (isTwinSweep && (c + twinOffset) % liveCols === 0);
+              if (wrapped) {
                 handleSweepWrap();
                 if (sim.status !== 'playing') break;
                 if ((sim.board?.cols || BOARD_COLS) !== liveCols) break;
               }
+              processColumn(c);
               safety++;
             }
             const latestCols = sim.board?.cols || BOARD_COLS;
-            sim.lastStepCol = Math.floor(timelineNorm * latestCols) % latestCols;
+            const latestRtl = sim.board?.activeShift === 'reverse_sweep';
+            sim.lastStepCol = latestRtl
+              ? Math.max(0, latestCols - 1 - (Math.floor(timelineNorm * latestCols) % latestCols))
+              : Math.floor(timelineNorm * latestCols) % latestCols;
           }
 
-          // Continuous held controls (DAS/ARR horizontal) & passive gravity + lock delay
+          // Continuous held controls (DAS/ARR directional) & passive gravity + lock delay
           if (sim.status === 'playing' && sim.board) {
             const p1LeftHeld =
               sim.mode === 'battle_2p'
@@ -1374,7 +1806,7 @@ export default function App() {
                 p1DasRef.current.repeat += dt;
                 while (p1DasRef.current.repeat >= 0.042) {
                   p1DasRef.current.repeat -= 0.042;
-                  if (movePieceHorizontal(sim.board, p1Dir)) {
+                  if (steerPiece(sim.board, p1Dir)) {
                     audioRef.current.playMove(skin);
                     rendererRef.current.triggerMoveShift(p1Dir);
                   } else {
@@ -1386,26 +1818,51 @@ export default function App() {
               p1DasRef.current = { dir: p1Dir, hold: 0, repeat: 0 };
             }
 
-            // Passive gravity & Lumines lock delay for Player 1
+            // Passive gravity & lock delay for Player 1
             if (sim.board.activePiece && !sim.board.isGameOver) {
               const pieceRng =
                 sim.mode === 'daily' && sim.dailyRng ? sim.dailyRng : Math.random;
               const preX = sim.board.activePiece.x;
               const preY = sim.board.activePiece.y;
+              const isZen = sim.mode === 'challenge' && sim.challengeVariant === 'zen';
               const res = stepPassiveGravity(
                 sim.board,
                 dt,
                 skin.gravitySpeed,
                 skin.spawnDelay,
                 chainFreq,
-                pieceRng
+                pieceRng,
+                { zenNoLoss: isZen }
               );
+              if (res.bouncePositions?.length) {
+                audioRef.current.playRotate(skin);
+                for (const pt of res.bouncePositions) {
+                  rendererRef.current.spawnPeggleBounce(0, pt.x, pt.y, skin);
+                }
+              }
               if (res.landed) {
-                const landRow = Math.min(sim.board.rows - 1, Math.max(0, preY + 1));
-                rendererRef.current.triggerLandRipple(0, preX + 0.5, landRow);
+                const gravDir = sim.board.gravityDirection ?? 'down';
+                const landCol =
+                  gravDir === 'left' || gravDir === 'right'
+                    ? res.finalPieceX ?? preX
+                    : (res.finalPieceX ?? preX) + 0.5;
+                const landRow =
+                  gravDir === 'down' || gravDir === 'up'
+                    ? res.finalPieceY ??
+                      Math.min(sim.board.rows - 1, Math.max(0, preY + 1))
+                    : (res.finalPieceY ?? preY) + 0.5;
+                rendererRef.current.triggerLandRipple(0, landCol, landRow);
                 audioRef.current.playLand(skin);
                 if (res.squaresFormed > 0) audioRef.current.playSquareFormed(skin);
                 if (res.chainActivated) audioRef.current.playChainTrigger(skin);
+                if (res.zenTrimmed) {
+                  rendererRef.current.spawnScorePopup(
+                    0,
+                    'ZEN FLOW',
+                    'ROWS TRIMMED',
+                    skin.palette.hudAccent
+                  );
+                }
                 setHud(buildHudSnapshot(sim));
               }
             }
@@ -1423,7 +1880,7 @@ export default function App() {
                     p2DasRef.current.repeat += dt;
                     while (p2DasRef.current.repeat >= 0.042) {
                       p2DasRef.current.repeat -= 0.042;
-                      if (!movePieceHorizontal(sim.board2, p2Dir)) break;
+                      if (!steerPiece(sim.board2, p2Dir)) break;
                     }
                   }
                 } else {
@@ -1437,13 +1894,28 @@ export default function App() {
                 sim.cpuMoveAccum += dt;
                 if (sim.cpuMoveAccum >= 0.14) {
                   sim.cpuMoveAccum = 0;
+                  const cpuGrav = sim.board2.gravityDirection ?? 'down';
+                  const isHorizGrav = cpuGrav === 'left' || cpuGrav === 'right';
                   if (sim.cpuRotationsDone < sim.cpuPlan.targetRotations) {
                     rotateActivePiece(sim.board2, 'cw');
                     sim.cpuRotationsDone++;
+                  } else if (isHorizGrav) {
+                    const targetY = sim.cpuPlan.targetY ?? sim.board2.activePiece.y;
+                    if (sim.board2.activePiece.y < targetY) {
+                      steerPiece(sim.board2, 1);
+                    } else if (sim.board2.activePiece.y > targetY) {
+                      steerPiece(sim.board2, -1);
+                    } else {
+                      const dropRes = softDropStep(sim.board2, chainFreq);
+                      if (dropRes.landed) {
+                        sim.cpuPlan = null;
+                        sim.cpuRotationsDone = 0;
+                      }
+                    }
                   } else if (sim.board2.activePiece.x < sim.cpuPlan.targetX) {
-                    movePieceHorizontal(sim.board2, 1);
+                    steerPiece(sim.board2, 1);
                   } else if (sim.board2.activePiece.x > sim.cpuPlan.targetX) {
-                    movePieceHorizontal(sim.board2, -1);
+                    steerPiece(sim.board2, -1);
                   } else {
                     const dropRes = softDropStep(sim.board2, chainFreq);
                     if (dropRes.landed) {
@@ -1553,7 +2025,9 @@ export default function App() {
         }
       }
 
-      // Update visual particles & cell settling interpolation
+      // Update visual particles, shift visual seams & cell settling interpolation
+      tickShiftEffects(sim.board, dt);
+      tickShiftEffects(sim.board2, dt);
       const activeGrids: ((typeof sim.board) extends infer B
         ? B extends { grid: infer G }
           ? G
@@ -1580,6 +2054,7 @@ export default function App() {
           isTitleScreen: sim.status === 'title',
           secondaryLabel: sim.mode === 'vs_cpu' ? 'CPU' : 'PLAYER 2',
           audioSpectrum: spectrum,
+          encoreIntensity: sim.encoreIntensity,
         });
       }
 
@@ -1591,7 +2066,8 @@ export default function App() {
         const b2 = sim.board2;
         const timeBucket = sim.timeRemaining !== null ? Math.ceil(sim.timeRemaining) : -1;
         const stageSecBucket = skin.finalStageTimerSec ? Math.floor(sim.progression.stageTimeSec) : 0;
-        const sig = `${sim.status}|${sim.skinIndex}|${sim.progression.level}|${sim.progression.levelSquaresCleared}|${sim.progression.skinLevelsCleared}|${stageSecBucket}|${b?.score ?? 0}|${b?.squaresClearedTotal ?? 0}|${b?.sweepState.squaresThisSweep ?? 0}|${b?.comboLevel ?? 0}|${b?.maxCombo ?? 0}|${timeBucket}|${b2?.score ?? 0}|${sim.missionChainCleared}`;
+        const taElapsedBucket = sim.mode === 'time_attack' ? Math.floor(sim.timeElapsed) : 0;
+        const sig = `${sim.status}|${sim.skinIndex}|${sim.progression.level}|${sim.progression.levelSquaresCleared}|${sim.progression.skinLevelsCleared}|${stageSecBucket}|${taElapsedBucket}|${b?.score ?? 0}|${b?.squaresClearedTotal ?? 0}|${b?.sweepState.squaresThisSweep ?? 0}|${b?.comboLevel ?? 0}|${b?.maxCombo ?? 0}|${b?.pendingGarbage ?? 0}|${b2?.pendingGarbage ?? 0}|${sim.encoreBonusBpm}|${timeBucket}|${b2?.score ?? 0}|${sim.missionChainCleared}|${b?.cols ?? 0}x${b?.rows ?? 0}|${b?.activeShift ?? ''}`;
         if (sig !== lastHudSignature) {
           lastHudSignature = sig;
           setHud(buildHudSnapshot(sim));
@@ -1620,7 +2096,6 @@ export default function App() {
         <TitleScreen
           selectedMode={selectedMode}
           onSelectMode={handleSelectMode}
-          orientation={viewportInfo.orientation}
           isCompactLandscape={viewportInfo.isCompactLandscape}
           challengeVariant={challengeVariant}
           onSelectChallengeVariant={setChallengeVariant}
@@ -1634,9 +2109,11 @@ export default function App() {
           muted={progress.muted}
           onToggleMute={toggleMute}
           previewSkin={getSkinByIndex(previewSkinIdx)}
+          onStepPreviewSkin={stepPreviewSkin}
           getSpectrumSnapshot={getTitleSpectrumSnapshot}
           dailySpec={dailySpec}
           onStart={() => startNewGame()}
+          onOpenShiftSettings={() => setIsShiftSettingsOpen(true)}
         />
       )}
 
@@ -1644,7 +2121,6 @@ export default function App() {
         <GameHud
           hud={hud}
           skin={activeSkin}
-          orientation={viewportInfo.orientation}
           isCompactLandscape={viewportInfo.isCompactLandscape}
           muted={progress.muted}
           onToggleMute={toggleMute}
@@ -1660,9 +2136,19 @@ export default function App() {
           skin={activeSkin}
           onResume={togglePause}
           onRestart={() => startNewGame(simRef.current.mode)}
+          onNextStage={handleNextStage}
+          onOpenShiftSettings={() => setIsShiftSettingsOpen(true)}
           onBackToMenu={returnToTitle}
         />
       )}
+
+      <ShiftSettingsModal
+        isOpen={isShiftSettingsOpen}
+        enabledShifts={progress.enabledShifts}
+        skin={hud.status === 'title' ? getSkinByIndex(previewSkinIdx) : activeSkin}
+        onChangeEnabledShifts={handleChangeEnabledShifts}
+        onClose={() => setIsShiftSettingsOpen(false)}
+      />
     </div>
   );
 }

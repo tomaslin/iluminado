@@ -4,10 +4,15 @@ import {
   Cell,
   CellColor,
   ClearEvent,
+  GravityDirection,
   Piece,
+  PieceCell,
+  PieceShapeMode,
+  ShiftSchedulerState,
   SkinConfig,
   SquareCoord,
   SweepState,
+  TetrominoKind,
 } from './types';
 
 export const BOARD_COLS = 16;
@@ -16,6 +21,20 @@ export const PORTRAIT_COLS = 10;
 export const PORTRAIT_ROWS = 14;
 export const LOCK_DELAY_SEC = 0.45;
 export const MAX_LOCK_RESETS = 6;
+export const MAX_PEGGLE_BOUNCES = 5;
+
+export function getGravityVector(dir?: GravityDirection): { gx: number; gy: number } {
+  switch (dir) {
+    case 'left':
+      return { gx: -1, gy: 0 };
+    case 'right':
+      return { gx: 1, gy: 0 };
+    case 'up':
+      return { gx: 0, gy: -1 };
+    default:
+      return { gx: 0, gy: 1 };
+  }
+}
 
 export function getDimensionsForOrientation(orientation: BoardOrientation): {
   cols: number;
@@ -26,14 +45,94 @@ export function getDimensionsForOrientation(orientation: BoardOrientation): {
     : { cols: BOARD_COLS, rows: BOARD_ROWS };
 }
 
-export function getSpawnColForWidth(cols: number): number {
-  return Math.max(0, Math.floor(cols / 2) - 1);
+export function getSpawnColForWidth(cols: number, pieceCols: number = 2): number {
+  return Math.max(0, Math.floor((cols - pieceCols) / 2));
+}
+
+export function getPieceDimensions(piece: Piece): { rows: number; cols: number } {
+  const rows = piece.cells.length;
+  const cols = piece.cells[0]?.length ?? 0;
+  return { rows, cols };
+}
+
+export function getPieceInitialY(piece: Piece): number {
+  return -Math.max(1, piece.cells.length);
+}
+
+export function getPieceInitialPos(
+  state: Pick<
+    BoardState,
+    'cols' | 'rows' | 'grid' | 'gravityDirection' | 'lockedColumnsLeft' | 'lockedColumnsRight'
+  >,
+  piece: Piece
+): { x: number; y: number } {
+  const rows = state.grid.length || state.rows || BOARD_ROWS;
+  const cols = state.grid[0]?.length ?? state.cols ?? BOARD_COLS;
+  const pRows = Math.max(1, piece.cells.length);
+  const pCols = Math.max(1, piece.cells[0]?.length ?? 1);
+  const dir = state.gravityDirection ?? 'down';
+  const minCol = state.lockedColumnsLeft;
+  const maxCol = Math.max(minCol, cols - pCols - state.lockedColumnsRight);
+
+  if (dir === 'right') {
+    return {
+      x: -pCols,
+      y: Math.max(0, Math.floor((rows - pRows) / 2)),
+    };
+  }
+  if (dir === 'left') {
+    return {
+      x: cols,
+      y: Math.max(0, Math.floor((rows - pRows) / 2)),
+    };
+  }
+  if (dir === 'up') {
+    return {
+      x: Math.max(minCol, Math.min(maxCol, getSpawnColForWidth(cols, pCols))),
+      y: rows,
+    };
+  }
+  return {
+    x: Math.max(minCol, Math.min(maxCol, getSpawnColForWidth(cols, pCols))),
+    y: -pRows,
+  };
+}
+
+export function isPieceInStaging(
+  state: Pick<BoardState, 'cols' | 'rows' | 'grid' | 'gravityDirection'>,
+  piece: Piece
+): boolean {
+  const rows = state.grid.length || state.rows || BOARD_ROWS;
+  const cols = state.grid[0]?.length ?? state.cols ?? BOARD_COLS;
+  const pRows = Math.max(1, piece.cells.length);
+  const pCols = Math.max(1, piece.cells[0]?.length ?? 1);
+  const dir = state.gravityDirection ?? 'down';
+  if (dir === 'right') return piece.x < 0;
+  if (dir === 'left') return piece.x + pCols > cols;
+  if (dir === 'up') return piece.y + pRows > rows;
+  return piece.y < 0;
+}
+
+export function createShiftSchedulerState(): ShiftSchedulerState {
+  return {
+    shiftTurnCount: 0,
+    stageTurnIndex: 0,
+    obstaclesInCurrentTurn: 0,
+    tileShiftsInCurrentTurn: 0,
+    usedTileTypesInCurrentTurn: [],
+    usedOneTimeShifts: [],
+    turnsSinceRotation: 0,
+    turnsSinceTileShift: 1,
+  };
 }
 
 let nextCellId = 1;
-function allocCellId(): number {
+export function allocCellId(): number {
   return nextCellId++;
 }
+
+let bfsVisited = new Uint8Array(256);
+let bfsQueue = new Int32Array(256);
 
 export function createEmptyGrid(
   cols: number = BOARD_COLS,
@@ -62,6 +161,7 @@ export function createPieceFromPattern(
   return {
     x: spawnX,
     y: -2,
+    shapeMode: 'standard_2x2',
     cells: [
       [
         { color: pattern[0], isChain: chainIndex === 0 },
@@ -101,11 +201,325 @@ const PIECE_PATTERNS: Array<{ pattern: [CellColor, CellColor, CellColor, CellCol
 
 const TOTAL_PATTERN_WEIGHT = PIECE_PATTERNS.reduce((acc, p) => acc + p.weight, 0);
 
+const TETROMINO_MASKS: Record<TetrominoKind, number[][]> = {
+  I: [[1, 1, 1, 1]],
+  O: [
+    [1, 1],
+    [1, 1],
+  ],
+  T: [
+    [0, 1, 0],
+    [1, 1, 1],
+  ],
+  S: [
+    [0, 1, 1],
+    [1, 1, 0],
+  ],
+  Z: [
+    [1, 1, 0],
+    [0, 1, 1],
+  ],
+  J: [
+    [1, 0, 0],
+    [1, 1, 1],
+  ],
+  L: [
+    [0, 0, 1],
+    [1, 1, 1],
+  ],
+};
+
+const TETROMINO_KINDS: TetrominoKind[] = ['I', 'O', 'T', 'S', 'Z', 'J', 'L'];
+
+function pickPieceColor(colorCount: 2 | 3, rng: () => number): CellColor {
+  if (colorCount === 3) {
+    const r = rng();
+    if (r < 0.34) return 0;
+    if (r < 0.68) return 1;
+    return 2;
+  }
+  return rng() < 0.5 ? 0 : 1;
+}
+
+export interface GeneratePieceOptions {
+  colorCount?: 2 | 3;
+  shapeMode?: PieceShapeMode;
+  boardCols?: number;
+  ensureBlocked?: boolean;
+  ensureWild?: boolean;
+}
+
 export function generateRandomPiece(
   chainFrequency: number = 0.05,
   rng: () => number = Math.random,
-  spawnX: number = 7
+  spawnX: number = 7,
+  options?: GeneratePieceOptions
 ): Piece {
+  const colorCount: 2 | 3 = options?.colorCount === 3 ? 3 : 2;
+  const shapeMode: PieceShapeMode = options?.shapeMode ?? 'standard_2x2';
+  const boardCols = options?.boardCols;
+
+  const resolveSpawnX = (pieceCols: number): number =>
+    typeof boardCols === 'number'
+      ? getSpawnColForWidth(boardCols, pieceCols)
+      : Math.max(0, spawnX - Math.floor((pieceCols - 2) / 2));
+
+  if (shapeMode === 'peggle_1x1') {
+    const color = pickPieceColor(colorCount, rng);
+    const isChain = rng() < chainFrequency;
+    return {
+      x: resolveSpawnX(1),
+      y: -1,
+      shapeMode: 'peggle_1x1',
+      isPeggle: true,
+      peggleVel: rng() < 0.5 ? -1 : 1,
+      peggleBounces: 0,
+      peggleTrail: [],
+      cells: [[{ color, isChain, isPeggle: true }]],
+    };
+  }
+
+  if (shapeMode === 'domino_2x1') {
+    const c0 = pickPieceColor(colorCount, rng);
+    const c1 = rng() < 0.35 ? c0 : pickPieceColor(colorCount, rng);
+    const hasChain = rng() < chainFrequency;
+    const chainPos = hasChain ? Math.floor(rng() * 2) : -1;
+    return {
+      x: resolveSpawnX(2),
+      y: -1,
+      shapeMode,
+      cells: [
+        [
+          { color: c0, isChain: chainPos === 0 },
+          { color: c1, isChain: chainPos === 1 },
+        ],
+      ],
+    };
+  }
+
+  if (shapeMode === 'trio_3x1') {
+    const cA = pickPieceColor(colorCount, rng);
+    let cB = pickPieceColor(colorCount, rng);
+    if (cB === cA && rng() < 0.72) {
+      cB = ((cA + 1) % colorCount) as CellColor;
+    }
+    const rollTrio = rng();
+    const rowColors: [CellColor, CellColor, CellColor] =
+      rollTrio < 0.22
+        ? [cA, cA, cA]
+        : rollTrio < 0.52
+        ? [cA, cA, cB]
+        : rollTrio < 0.82
+        ? [cB, cA, cA]
+        : [cA, cB, cA];
+    const hasChain = rng() < chainFrequency;
+    const chainPos = hasChain ? Math.floor(rng() * 3) : -1;
+    return {
+      x: resolveSpawnX(3),
+      y: -1,
+      shapeMode,
+      cells: [
+        [
+          { color: rowColors[0], isChain: chainPos === 0 },
+          { color: rowColors[1], isChain: chainPos === 1 },
+          { color: rowColors[2], isChain: chainPos === 2 },
+        ],
+      ],
+    };
+  }
+
+  if (shapeMode === 'rect_3x2') {
+    // 2 rows x 3 cols brick with balanced paired clusters so 2x2 squares form smoothly
+    const cMain = pickPieceColor(colorCount, rng);
+    const cAlt = pickPieceColor(colorCount, rng);
+    const cThird = colorCount === 3 && rng() < 0.5 ? (2 as CellColor) : pickPieceColor(colorCount, rng);
+    const templateRoll = rng();
+    const rawColors: CellColor[][] =
+      templateRoll < 0.25
+        ? [
+            [cMain, cMain, cAlt],
+            [cMain, cMain, cAlt],
+          ]
+        : templateRoll < 0.5
+        ? [
+            [cAlt, cMain, cMain],
+            [cAlt, cMain, cMain],
+          ]
+        : templateRoll < 0.75
+        ? [
+            [cMain, cMain, cMain],
+            [cAlt, cAlt, cThird],
+          ]
+        : [
+            [cMain, cAlt, cMain],
+            [cAlt, cMain, cThird],
+          ];
+    const hasChain = rng() < chainFrequency;
+    const chainSlot = hasChain ? Math.floor(rng() * 6) : -1;
+    let slotIdx = 0;
+    const cells: PieceCell[][] = rawColors.map((row) =>
+      row.map((col) => ({
+        color: col,
+        isChain: slotIdx++ === chainSlot,
+      }))
+    );
+    return {
+      x: resolveSpawnX(3),
+      y: -2,
+      shapeMode,
+      cells,
+    };
+  }
+
+  if (shapeMode === 'tetromino') {
+    const kind = TETROMINO_KINDS[Math.floor(rng() * TETROMINO_KINDS.length) % TETROMINO_KINDS.length];
+    const mask = TETROMINO_MASKS[kind];
+    const primary = pickPieceColor(colorCount, rng);
+    const secondary = pickPieceColor(colorCount, rng);
+    const mono = rng() < 0.32;
+    const occupiedCoords: Array<[number, number]> = [];
+    const cells: PieceCell[][] = mask.map((row, r) =>
+      row.map((val, c) => {
+        if (!val) return null;
+        occupiedCoords.push([r, c]);
+        const color: CellColor = mono
+          ? primary
+          : rng() < 0.58
+          ? primary
+          : secondary;
+        return { color, isChain: false };
+      })
+    );
+    if (rng() < chainFrequency && occupiedCoords.length > 0) {
+      const [cr, cc] = occupiedCoords[Math.floor(rng() * occupiedCoords.length)];
+      if (cells[cr][cc]) {
+        cells[cr][cc]!.isChain = true;
+      }
+    }
+    const pieceCols = mask[0]?.length ?? 2;
+    return {
+      x: resolveSpawnX(pieceCols),
+      y: -mask.length,
+      shapeMode,
+      tetrominoKind: kind,
+      cells,
+    };
+  }
+
+  if (shapeMode === 'l_trio_2x2') {
+    const cMain = pickPieceColor(colorCount, rng);
+    const cAlt = rng() < 0.45 ? cMain : pickPieceColor(colorCount, rng);
+    const missingIdx = Math.floor(rng() * 4) % 4;
+    const hasChain = rng() < chainFrequency;
+    let chainIdx = hasChain ? Math.floor(rng() * 4) % 4 : -1;
+    if (chainIdx === missingIdx) chainIdx = (chainIdx + 1) % 4;
+    const cells: PieceCell[][] = [[null, null], [null, null]];
+    for (let idx = 0; idx < 4; idx++) {
+      if (idx === missingIdx) continue;
+      const r = Math.floor(idx / 2);
+      const c = idx % 2;
+      const color = idx === 0 || idx === 3 ? cMain : cAlt;
+      cells[r][c] = { color, isChain: idx === chainIdx };
+    }
+    return {
+      x: resolveSpawnX(2),
+      y: -2,
+      shapeMode,
+      cells,
+    };
+  }
+
+  // Standard 2x2, blocked_2x2, or prism_wild_2x2 piece
+  if (shapeMode === 'prism_wild_2x2') {
+    let roll = rng() * TOTAL_PATTERN_WEIGHT;
+    let chosen = PIECE_PATTERNS[0].pattern;
+    for (const entry of PIECE_PATTERNS) {
+      roll -= entry.weight;
+      if (roll <= 0) {
+        chosen = entry.pattern;
+        break;
+      }
+    }
+    const piece = createPieceFromPattern(chosen, -1, resolveSpawnX(2));
+    piece.shapeMode = 'prism_wild_2x2';
+    const includeWild = options?.ensureWild || rng() < 0.62;
+    const wildIdx = includeWild ? Math.floor(rng() * 4) % 4 : -1;
+    if (wildIdx >= 0) {
+      const wr = Math.floor(wildIdx / 2);
+      const wc = wildIdx % 2;
+      const existing = piece.cells[wr][wc];
+      if (existing) {
+        piece.cells[wr][wc] = { color: existing.color, isChain: false, isWild: true };
+      }
+    } else if (rng() < chainFrequency) {
+      const ci = Math.floor(rng() * 4) % 4;
+      const cr = Math.floor(ci / 2);
+      const cc = ci % 2;
+      if (piece.cells[cr][cc]) {
+        piece.cells[cr][cc]!.isChain = true;
+      }
+    }
+    return piece;
+  }
+
+  if (shapeMode === 'blocked_2x2') {
+    let roll = rng() * TOTAL_PATTERN_WEIGHT;
+    let chosen = PIECE_PATTERNS[0].pattern;
+    for (const entry of PIECE_PATTERNS) {
+      roll -= entry.weight;
+      if (roll <= 0) {
+        chosen = entry.pattern;
+        break;
+      }
+    }
+    const includeBlocked = options?.ensureBlocked || rng() < 0.58;
+    const blockedIdx = includeBlocked ? Math.floor(rng() * 4) % 4 : -1;
+    const hasChain = rng() < chainFrequency;
+    let chainIdx = hasChain ? Math.floor(rng() * 4) % 4 : -1;
+    if (chainIdx === blockedIdx) chainIdx = (chainIdx + 1) % 4;
+    const piece = createPieceFromPattern(chosen, chainIdx, resolveSpawnX(2));
+    piece.shapeMode = 'blocked_2x2';
+    if (blockedIdx >= 0) {
+      const br = Math.floor(blockedIdx / 2);
+      const bc = blockedIdx % 2;
+      piece.cells[br][bc] = { color: 0, isChain: false, isBlocked: true };
+    }
+    return piece;
+  }
+
+  if (colorCount === 3) {
+    const cA = pickPieceColor(3, rng);
+    let cB = pickPieceColor(3, rng);
+    if (cB === cA && rng() < 0.75) {
+      cB = ((cA + (rng() < 0.5 ? 1 : 2)) % 3) as CellColor;
+    }
+    let roll = rng() * TOTAL_PATTERN_WEIGHT;
+    let basePat = PIECE_PATTERNS[0].pattern;
+    for (const entry of PIECE_PATTERNS) {
+      roll -= entry.weight;
+      if (roll <= 0) {
+        basePat = entry.pattern;
+        break;
+      }
+    }
+    const mapped: [CellColor, CellColor, CellColor, CellColor] = [
+      basePat[0] === 0 ? cA : cB,
+      basePat[1] === 0 ? cA : cB,
+      basePat[2] === 0 ? cA : cB,
+      basePat[3] === 0 ? cA : cB,
+    ];
+    // Occasionally introduce all 3 colors in a single 2x2 brick
+    if (rng() < 0.22) {
+      const cC = (3 - cA - cB) as CellColor;
+      if (cC === 0 || cC === 1 || cC === 2) {
+        mapped[Math.floor(rng() * 4)] = cC;
+      }
+    }
+    const hasChain = rng() < chainFrequency;
+    const chainIndex = hasChain ? Math.floor(rng() * 4) : -1;
+    return createPieceFromPattern(mapped, chainIndex, resolveSpawnX(2));
+  }
+
   let roll = rng() * TOTAL_PATTERN_WEIGHT;
   let chosen = PIECE_PATTERNS[0].pattern;
   for (const entry of PIECE_PATTERNS) {
@@ -117,7 +531,44 @@ export function generateRandomPiece(
   }
   const hasChain = rng() < chainFrequency;
   const chainIndex = hasChain ? Math.floor(rng() * 4) : -1;
-  return createPieceFromPattern(chosen, chainIndex, spawnX);
+  return createPieceFromPattern(chosen, chainIndex, resolveSpawnX(2));
+}
+
+export function refreshQueueForBoardRules(
+  state: BoardState,
+  chainFrequency: number = 0.05,
+  rng: () => number = Math.random
+): void {
+  const spawnX = getSpawnColForWidth(state.cols, 2);
+  const opts: GeneratePieceOptions = {
+    colorCount: state.colorCount,
+    shapeMode: state.pieceShapeMode,
+    boardCols: state.cols,
+  };
+  const queueLen = Math.max(3, state.nextQueue.length);
+  state.nextQueue = Array.from({ length: queueLen }, (_, i) => {
+    const p = generateRandomPiece(chainFrequency, rng, spawnX, {
+      ...opts,
+      ensureBlocked: i === 0 && state.pieceShapeMode === 'blocked_2x2',
+      ensureWild: i === 0 && state.pieceShapeMode === 'prism_wild_2x2',
+    });
+    const pos = getPieceInitialPos(state, p);
+    return { ...p, x: pos.x, y: pos.y };
+  });
+  // If current activePiece has not entered the main board yet (still hovering in staging), smoothly upgrade it too
+  if (state.activePiece && isPieceInStaging(state, state.activePiece)) {
+    const candidate = generateRandomPiece(chainFrequency, rng, spawnX, {
+      ...opts,
+      ensureBlocked: state.pieceShapeMode === 'blocked_2x2',
+      ensureWild: state.pieceShapeMode === 'prism_wild_2x2',
+    });
+    const pos = getPieceInitialPos(state, candidate);
+    candidate.x = pos.x;
+    candidate.y = pos.y;
+    if (canPlacePiece(state, candidate, 0, 0)) {
+      state.activePiece = candidate;
+    }
+  }
 }
 
 export function createInitialBoardState(
@@ -131,8 +582,17 @@ export function createInitialBoardState(
     grid: createEmptyGrid(cols, rows),
     cols,
     rows,
+    baseCols: cols,
+    baseRows: rows,
     orientation,
+    gravityDirection: 'down',
     orientationGraceTimer: 0,
+    activeShift: null,
+    pieceShapeMode: 'standard_2x2',
+    colorCount: 2,
+    shiftScheduler: createShiftSchedulerState(),
+    patrollingBumper: null,
+    shiftEffect: null,
     activePiece: generateRandomPiece(chainFrequency, rng, spawnX),
     spawnTimer: 0,
     gravityAccum: 0,
@@ -153,28 +613,59 @@ export function createInitialBoardState(
     isGameOver: false,
     lockedColumnsLeft: 0,
     lockedColumnsRight: 0,
+    pendingGarbage: 0,
+    biggestSweep: 0,
+    chainClearsTotal: 0,
+    singleColorCount: 0,
+    allClearCount: 0,
   };
 }
 
+function clonePieceCell(cell: PieceCell): PieceCell {
+  if (!cell) return null;
+  return cell.isBlocked
+    ? { color: cell.color, isChain: false, isBlocked: true }
+    : {
+        color: cell.color,
+        isChain: cell.isChain,
+        ...(cell.isPeggle ? { isPeggle: true } : {}),
+        ...(cell.isWild ? { isWild: true } : {}),
+      };
+}
+
 export function rotatePieceCellsCW(piece: Piece): Piece {
-  const [[tl, tr], [bl, br]] = piece.cells;
+  const rows = piece.cells.length;
+  const cols = piece.cells[0]?.length ?? 0;
+  if (rows === 0 || cols === 0) return piece;
+  const rotated: PieceCell[][] = Array.from({ length: cols }, () =>
+    Array<PieceCell>(rows).fill(null)
+  );
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      rotated[c][rows - 1 - r] = clonePieceCell(piece.cells[r][c]);
+    }
+  }
   return {
     ...piece,
-    cells: [
-      [{ ...bl }, { ...tl }],
-      [{ ...br }, { ...tr }],
-    ],
+    cells: rotated,
   };
 }
 
 export function rotatePieceCellsCCW(piece: Piece): Piece {
-  const [[tl, tr], [bl, br]] = piece.cells;
+  const rows = piece.cells.length;
+  const cols = piece.cells[0]?.length ?? 0;
+  if (rows === 0 || cols === 0) return piece;
+  const rotated: PieceCell[][] = Array.from({ length: cols }, () =>
+    Array<PieceCell>(rows).fill(null)
+  );
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      rotated[cols - 1 - c][r] = clonePieceCell(piece.cells[r][c]);
+    }
+  }
   return {
     ...piece,
-    cells: [
-      [{ ...tr }, { ...br }],
-      [{ ...tl }, { ...bl }],
-    ],
+    cells: rotated,
   };
 }
 
@@ -188,14 +679,33 @@ export function canPlacePiece(
   const cols = state.grid[0]?.length ?? state.cols ?? BOARD_COLS;
   const minCol = state.lockedColumnsLeft;
   const maxCol = cols - 1 - state.lockedColumnsRight;
+  const pieceRows = piece.cells.length;
+  const dir = state.gravityDirection ?? 'down';
 
-  for (let py = 0; py < 2; py++) {
-    for (let px = 0; px < 2; px++) {
+  for (let py = 0; py < pieceRows; py++) {
+    const rowCells = piece.cells[py];
+    for (let px = 0; px < rowCells.length; px++) {
+      if (rowCells[px] === null) continue;
       const gx = piece.x + px + dx;
       const gy = piece.y + py + dy;
-      if (gx < minCol || gx > maxCol) return false;
-      if (gy >= rows) return false;
-      if (gy >= 0 && state.grid[gy][gx] !== null) return false;
+      if (dir === 'down') {
+        if (gx < minCol || gx > maxCol) return false;
+        if (gy >= rows) return false;
+        if (gy >= 0 && state.grid[gy][gx] !== null) return false;
+      } else if (dir === 'up') {
+        if (gx < minCol || gx > maxCol) return false;
+        if (gy < 0) return false;
+        if (gy < rows && state.grid[gy][gx] !== null) return false;
+      } else if (dir === 'right') {
+        if (gy < 0 || gy >= rows) return false;
+        if (gx > maxCol) return false;
+        if (gx >= minCol && state.grid[gy][gx] !== null) return false;
+      } else {
+        // dir === 'left'
+        if (gy < 0 || gy >= rows) return false;
+        if (gx < minCol) return false;
+        if (gx <= maxCol && state.grid[gy][gx] !== null) return false;
+      }
     }
   }
   return true;
@@ -203,14 +713,27 @@ export function canPlacePiece(
 
 export function isActivePieceGrounded(state: BoardState): boolean {
   if (!state.activePiece) return false;
-  return !canPlacePiece(state, state.activePiece, 0, 1);
+  const { gx, gy } = getGravityVector(state.gravityDirection);
+  return !canPlacePiece(state, state.activePiece, gx, gy);
+}
+
+export interface GhostCellLanding {
+  x: number;
+  y: number;
+  color: CellColor;
+  isBlocked?: boolean;
+  isPeggle?: boolean;
+  isWild?: boolean;
 }
 
 export interface PieceLandingInfo {
   rigidDy: number;
   leftBottomRow: number;
   rightBottomRow: number;
+  colBottomRows: number[];
   isSplit: boolean;
+  gravityDirection: GravityDirection;
+  ghostCells: GhostCellLanding[];
 }
 
 export function getPieceLandingColumns(
@@ -218,49 +741,245 @@ export function getPieceLandingColumns(
   piece: Piece
 ): PieceLandingInfo {
   const rows = state.grid.length;
+  const cols = state.grid[0]?.length ?? state.cols ?? BOARD_COLS;
+  const dir = state.gravityDirection ?? 'down';
+  const { gx: vecX, gy: vecY } = getGravityVector(dir);
+
   let rigidDy = 0;
-  while (canPlacePiece(state, piece, 0, rigidDy + 1)) {
+  while (
+    rigidDy < cols + rows &&
+    canPlacePiece(state, piece, vecX * (rigidDy + 1), vecY * (rigidDy + 1))
+  ) {
     rigidDy++;
   }
 
-  const getColBottomRow = (col: number): number => {
-    const startRow = Math.max(0, piece.y + rigidDy + 2);
-    for (let r = startRow; r < rows; r++) {
-      if (state.grid[r][col] !== null) {
-        return r - 1;
+  const pieceRows = piece.cells.length;
+  const pieceCols = piece.cells[0]?.length ?? 0;
+  const ghostCells: GhostCellLanding[] = [];
+
+  if (dir === 'down') {
+    const colBottomRows: number[] = [];
+    const relativeOffsets: number[] = [];
+
+    for (let px = 0; px < pieceCols; px++) {
+      let lowestPy = -1;
+      const occRows: number[] = [];
+      for (let py = 0; py < pieceRows; py++) {
+        if (piece.cells[py]?.[px] !== null) {
+          occRows.push(py);
+          lowestPy = py;
+        }
+      }
+      if (lowestPy < 0) {
+        colBottomRows.push(-1);
+        continue;
+      }
+      const col = piece.x + px;
+      if (col < 0 || col >= cols) {
+        colBottomRows.push(rows - 1);
+        continue;
+      }
+      const startRow = Math.max(0, piece.y + rigidDy + lowestPy + 1);
+      let stopRow = rows;
+      for (let r = startRow; r < rows; r++) {
+        if (state.grid[r][col] !== null) {
+          stopRow = r;
+          break;
+        }
+      }
+      const bot = stopRow - 1;
+      colBottomRows.push(bot);
+      relativeOffsets.push(bot - lowestPy);
+
+      for (let idx = 0; idx < occRows.length; idx++) {
+        const py = occRows[idx];
+        const gy = bot - (occRows.length - 1 - idx);
+        const pCell = piece.cells[py]?.[px];
+        if (pCell && gy >= 0 && gy < rows) {
+          ghostCells.push({
+            x: col,
+            y: gy,
+            color: pCell.color,
+            isBlocked: pCell.isBlocked,
+            isPeggle: pCell.isPeggle || piece.isPeggle,
+            isWild: pCell.isWild,
+          });
+        }
       }
     }
-    return rows - 1;
-  };
 
-  // Check if rigid stop already hits a cell above startRow (at piece.y + rigidDy + 1)
-  const getTopOccupied = (col: number): number => {
-    for (let r = 0; r < rows; r++) {
-      if (state.grid[r][col] !== null) {
-        return r;
+    const leftBottomRow = colBottomRows[0] ?? rows - 1;
+    const rightBottomRow =
+      colBottomRows[Math.min(1, Math.max(0, colBottomRows.length - 1))] ?? leftBottomRow;
+    const isSplit =
+      relativeOffsets.length > 1 &&
+      relativeOffsets.some((off) => off !== relativeOffsets[0]);
+
+    return {
+      rigidDy,
+      leftBottomRow,
+      rightBottomRow,
+      colBottomRows,
+      isSplit,
+      gravityDirection: dir,
+      ghostCells,
+    };
+  }
+
+  if (dir === 'up') {
+    const colTopRows: number[] = [];
+    const relativeOffsets: number[] = [];
+    for (let px = 0; px < pieceCols; px++) {
+      const occRows: number[] = [];
+      for (let py = 0; py < pieceRows; py++) {
+        if (piece.cells[py]?.[px] !== null) occRows.push(py);
+      }
+      if (occRows.length === 0) {
+        colTopRows.push(-1);
+        continue;
+      }
+      const topPy = occRows[0];
+      const col = piece.x + px;
+      if (col < 0 || col >= cols) {
+        colTopRows.push(0);
+        continue;
+      }
+      const startRow = Math.min(rows - 1, piece.y - rigidDy + topPy - 1);
+      let stopRow = -1;
+      for (let r = startRow; r >= 0; r--) {
+        if (state.grid[r][col] !== null) {
+          stopRow = r;
+          break;
+        }
+      }
+      const topR = stopRow + 1;
+      colTopRows.push(topR);
+      relativeOffsets.push(topR - topPy);
+      for (let idx = 0; idx < occRows.length; idx++) {
+        const py = occRows[idx];
+        const gy = topR + idx;
+        const pCell = piece.cells[py]?.[px];
+        if (pCell && gy >= 0 && gy < rows) {
+          ghostCells.push({
+            x: col,
+            y: gy,
+            color: pCell.color,
+            isBlocked: pCell.isBlocked,
+            isPeggle: pCell.isPeggle || piece.isPeggle,
+            isWild: pCell.isWild,
+          });
+        }
       }
     }
-    return rows;
-  };
+    const isSplit =
+      relativeOffsets.length > 1 &&
+      relativeOffsets.some((off) => off !== relativeOffsets[0]);
+    return {
+      rigidDy,
+      leftBottomRow: colTopRows[0] ?? 0,
+      rightBottomRow: colTopRows[Math.min(1, Math.max(0, colTopRows.length - 1))] ?? 0,
+      colBottomRows: colTopRows,
+      isSplit,
+      gravityDirection: dir,
+      ghostCells,
+    };
+  }
 
-  const leftTopOcc = getTopOccupied(piece.x);
-  const rightTopOcc = getTopOccupied(piece.x + 1);
-  const leftBottomRow =
-    piece.y + rigidDy + 1 < leftTopOcc ? leftTopOcc - 1 : getColBottomRow(piece.x);
-  const rightBottomRow =
-    piece.y + rigidDy + 1 < rightTopOcc ? rightTopOcc - 1 : getColBottomRow(piece.x + 1);
+  // Horizontal gravity: 'right' or 'left'
+  const rowStopCols: number[] = [];
+  const relativeOffsets: number[] = [];
+  for (let py = 0; py < pieceRows; py++) {
+    const occCols: number[] = [];
+    for (let px = 0; px < pieceCols; px++) {
+      if (piece.cells[py]?.[px] !== null) occCols.push(px);
+    }
+    if (occCols.length === 0) {
+      rowStopCols.push(-1);
+      continue;
+    }
+    const row = piece.y + py;
+    if (row < 0 || row >= rows) {
+      rowStopCols.push(-1);
+      continue;
+    }
+    if (dir === 'right') {
+      const rightPx = occCols[occCols.length - 1];
+      const startCol = Math.max(0, piece.x + rigidDy + rightPx + 1);
+      let stopCol = cols;
+      for (let c = startCol; c < cols; c++) {
+        if (state.grid[row][c] !== null) {
+          stopCol = c;
+          break;
+        }
+      }
+      const anchorC = stopCol - 1;
+      rowStopCols.push(anchorC);
+      relativeOffsets.push(anchorC - rightPx);
+      for (let idx = 0; idx < occCols.length; idx++) {
+        const px = occCols[idx];
+        const gx = anchorC - (occCols.length - 1 - idx);
+        const pCell = piece.cells[py]?.[px];
+        if (pCell && gx >= 0 && gx < cols) {
+          ghostCells.push({
+            x: gx,
+            y: row,
+            color: pCell.color,
+            isBlocked: pCell.isBlocked,
+            isPeggle: pCell.isPeggle || piece.isPeggle,
+            isWild: pCell.isWild,
+          });
+        }
+      }
+    } else {
+      const leftPx = occCols[0];
+      const startCol = Math.min(cols - 1, piece.x - rigidDy + leftPx - 1);
+      let stopCol = -1;
+      for (let c = startCol; c >= 0; c--) {
+        if (state.grid[row][c] !== null) {
+          stopCol = c;
+          break;
+        }
+      }
+      const anchorC = stopCol + 1;
+      rowStopCols.push(anchorC);
+      relativeOffsets.push(anchorC - leftPx);
+      for (let idx = 0; idx < occCols.length; idx++) {
+        const px = occCols[idx];
+        const gx = anchorC + idx;
+        const pCell = piece.cells[py]?.[px];
+        if (pCell && gx >= 0 && gx < cols) {
+          ghostCells.push({
+            x: gx,
+            y: row,
+            color: pCell.color,
+            isBlocked: pCell.isBlocked,
+            isPeggle: pCell.isPeggle || piece.isPeggle,
+            isWild: pCell.isWild,
+          });
+        }
+      }
+    }
+  }
+
+  const isSplit =
+    relativeOffsets.length > 1 &&
+    relativeOffsets.some((off) => off !== relativeOffsets[0]);
 
   return {
     rigidDy,
-    leftBottomRow,
-    rightBottomRow,
-    isSplit: leftBottomRow !== rightBottomRow,
+    leftBottomRow: rowStopCols[0] ?? 0,
+    rightBottomRow: rowStopCols[Math.min(1, Math.max(0, rowStopCols.length - 1))] ?? 0,
+    colBottomRows: rowStopCols,
+    isSplit,
+    gravityDirection: dir,
+    ghostCells,
   };
 }
 
 function refreshLockResetOnManipulate(state: BoardState, wasGrounded: boolean): void {
   if (!state.activePiece) return;
-  const nowGrounded = !canPlacePiece(state, state.activePiece, 0, 1);
+  const { gx, gy } = getGravityVector(state.gravityDirection);
+  const nowGrounded = !canPlacePiece(state, state.activePiece, gx, gy);
   if (!nowGrounded) {
     state.lockTimer = 0;
   } else if (wasGrounded && state.lockResetCount < MAX_LOCK_RESETS) {
@@ -272,7 +991,8 @@ function refreshLockResetOnManipulate(state: BoardState, wasGrounded: boolean): 
 export function movePieceHorizontal(state: BoardState, dx: -1 | 1): boolean {
   if (!state.activePiece || state.isGameOver) return false;
   if (canPlacePiece(state, state.activePiece, dx, 0)) {
-    const wasGrounded = !canPlacePiece(state, state.activePiece, 0, 1);
+    const { gx, gy } = getGravityVector(state.gravityDirection);
+    const wasGrounded = !canPlacePiece(state, state.activePiece, gx, gy);
     state.activePiece = {
       ...state.activePiece,
       x: state.activePiece.x + dx,
@@ -280,54 +1000,273 @@ export function movePieceHorizontal(state: BoardState, dx: -1 | 1): boolean {
     refreshLockResetOnManipulate(state, wasGrounded);
     return true;
   }
-  return false;
-}
-
-export function rotateActivePiece(state: BoardState, direction: 'cw' | 'ccw' = 'cw'): boolean {
-  if (!state.activePiece || state.isGameOver) return false;
-  const rotated =
-    direction === 'cw'
-      ? rotatePieceCellsCW(state.activePiece)
-      : rotatePieceCellsCCW(state.activePiece);
-  if (canPlacePiece(state, rotated, 0, 0)) {
-    const wasGrounded = !canPlacePiece(state, state.activePiece, 0, 1);
-    state.activePiece = rotated;
-    refreshLockResetOnManipulate(state, wasGrounded);
-    return true;
+  const dir = state.gravityDirection ?? 'down';
+  if ((dir === 'down' || dir === 'up') && state.activeShift === 'portal_wrap') {
+    const cols = state.grid[0]?.length ?? state.cols ?? BOARD_COLS;
+    const pieceCols = state.activePiece.cells[0]?.length ?? 1;
+    const minCol = state.lockedColumnsLeft;
+    const maxCol = Math.max(minCol, cols - pieceCols - state.lockedColumnsRight);
+    let targetX: number | null = null;
+    if (dx < 0 && state.activePiece.x <= minCol) {
+      targetX = maxCol;
+    } else if (dx > 0 && state.activePiece.x >= maxCol) {
+      targetX = minCol;
+    }
+    if (targetX !== null && targetX !== state.activePiece.x) {
+      const wrapped: Piece = { ...state.activePiece, x: targetX };
+      if (canPlacePiece(state, wrapped, 0, 0)) {
+        const { gx, gy } = getGravityVector(state.gravityDirection);
+        const wasGrounded = !canPlacePiece(state, state.activePiece, gx, gy);
+        state.activePiece = wrapped;
+        refreshLockResetOnManipulate(state, wasGrounded);
+        return true;
+      }
+    }
   }
   return false;
 }
 
-export function settleBoard(grid: (Cell | null)[][]): boolean {
+export function movePieceVertical(state: BoardState, dy: -1 | 1): boolean {
+  if (!state.activePiece || state.isGameOver) return false;
+  if (canPlacePiece(state, state.activePiece, 0, dy)) {
+    const { gx, gy } = getGravityVector(state.gravityDirection);
+    const wasGrounded = !canPlacePiece(state, state.activePiece, gx, gy);
+    state.activePiece = {
+      ...state.activePiece,
+      y: state.activePiece.y + dy,
+    };
+    refreshLockResetOnManipulate(state, wasGrounded);
+    return true;
+  }
+  const dir = state.gravityDirection ?? 'down';
+  if ((dir === 'left' || dir === 'right') && state.activeShift === 'portal_wrap') {
+    const rows = state.grid.length || state.rows || BOARD_ROWS;
+    const pieceRows = Math.max(1, state.activePiece.cells.length);
+    const maxRow = Math.max(0, rows - pieceRows);
+    let targetY: number | null = null;
+    if (dy < 0 && state.activePiece.y <= 0) {
+      targetY = maxRow;
+    } else if (dy > 0 && state.activePiece.y >= maxRow) {
+      targetY = 0;
+    }
+    if (targetY !== null && targetY !== state.activePiece.y) {
+      const wrapped: Piece = { ...state.activePiece, y: targetY };
+      if (canPlacePiece(state, wrapped, 0, 0)) {
+        const { gx, gy } = getGravityVector(state.gravityDirection);
+        const wasGrounded = !canPlacePiece(state, state.activePiece, gx, gy);
+        state.activePiece = wrapped;
+        refreshLockResetOnManipulate(state, wasGrounded);
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+export function steerPiece(state: BoardState, delta: -1 | 1): boolean {
+  const dir = state.gravityDirection ?? 'down';
+  if (dir === 'left' || dir === 'right') {
+    return movePieceVertical(state, delta);
+  }
+  return movePieceHorizontal(state, delta);
+}
+
+export function rotateActivePiece(state: BoardState, direction: 'cw' | 'ccw' = 'cw'): boolean {
+  if (!state.activePiece || state.isGameOver) return false;
+  if (state.activePiece.isPeggle) {
+    const { gx, gy } = getGravityVector(state.gravityDirection);
+    const wasGrounded = !canPlacePiece(state, state.activePiece, gx, gy);
+    state.activePiece = {
+      ...state.activePiece,
+      peggleVel: state.activePiece.peggleVel === 1 ? -1 : 1,
+    };
+    refreshLockResetOnManipulate(state, wasGrounded);
+    return true;
+  }
+
+  const rotated =
+    direction === 'cw'
+      ? rotatePieceCellsCW(state.activePiece)
+      : rotatePieceCellsCCW(state.activePiece);
+  const { gx, gy } = getGravityVector(state.gravityDirection);
+  const px = Math.abs(gy); // 1 when vertical gravity, 0 when horizontal
+  const py = Math.abs(gx); // 0 when vertical gravity, 1 when horizontal
+  const kickOffsets: Array<[number, number]> = [
+    [0, 0],
+    [-px, -py],
+    [px, py],
+    [-2 * px, -2 * py],
+    [2 * px, 2 * py],
+    [-gx, -gy],
+    [-px - gx, -py - gy],
+    [px - gx, py - gy],
+    [-2 * gx, -2 * gy],
+  ];
+  const inStaging = isPieceInStaging(state, state.activePiece);
+  for (const [dx, dy] of kickOffsets) {
+    const movesBackIntoStaging = dx * -gx + dy * -gy > 0;
+    if (movesBackIntoStaging && inStaging) continue;
+    const candidate: Piece =
+      dx === 0 && dy === 0
+        ? rotated
+        : { ...rotated, x: rotated.x + dx, y: rotated.y + dy };
+    if (canPlacePiece(state, candidate, 0, 0)) {
+      const wasGrounded = !canPlacePiece(state, state.activePiece, gx, gy);
+      if (state.activeShift === 'chameleon_rotate') {
+        const cCount = state.colorCount ?? 2;
+        candidate.cells = candidate.cells.map((row) =>
+          row.map((cell) =>
+            cell && !cell.isBlocked
+              ? { ...cell, color: ((cell.color + 1) % cCount) as CellColor }
+              : cell
+          )
+        );
+      }
+      state.activePiece = candidate;
+      refreshLockResetOnManipulate(state, wasGrounded);
+      return true;
+    }
+  }
+  return false;
+}
+
+export function settleBoardForDirection(
+  grid: (Cell | null)[][],
+  dir: GravityDirection = 'down',
+  recordOffsets: boolean = true
+): boolean {
   const rows = grid.length;
   const cols = grid[0]?.length ?? BOARD_COLS;
   let moved = false;
-  for (let col = 0; col < cols; col++) {
-    let writeRow = rows - 1;
-    for (let row = rows - 1; row >= 0; row--) {
+
+  if (dir === 'down') {
+    for (let col = 0; col < cols; col++) {
+      let writeRow = rows - 1;
+      for (let row = rows - 1; row >= 0; row--) {
+        const cell = grid[row][col];
+        if (cell !== null) {
+          if (cell.isObstacle && cell.obstacleFixed) {
+            writeRow = row - 1;
+            continue;
+          }
+          if (row !== writeRow) {
+            if (recordOffsets) {
+              const dropDist = writeRow - row;
+              cell.fallOffset = Math.max(cell.fallOffset, dropDist);
+            }
+            grid[writeRow][col] = cell;
+            grid[row][col] = null;
+            moved = true;
+          }
+          writeRow--;
+        }
+      }
+    }
+    return moved;
+  }
+
+  if (dir === 'up') {
+    for (let col = 0; col < cols; col++) {
+      let writeRow = 0;
+      for (let row = 0; row < rows; row++) {
+        const cell = grid[row][col];
+        if (cell !== null) {
+          if (cell.isObstacle && cell.obstacleFixed) {
+            writeRow = row + 1;
+            continue;
+          }
+          if (row !== writeRow) {
+            if (recordOffsets) {
+              cell.animOffsetY = -(row - writeRow);
+            }
+            grid[writeRow][col] = cell;
+            grid[row][col] = null;
+            moved = true;
+          }
+          writeRow++;
+        }
+      }
+    }
+    return moved;
+  }
+
+  if (dir === 'left') {
+    for (let row = 0; row < rows; row++) {
+      let writeCol = 0;
+      for (let col = 0; col < cols; col++) {
+        const cell = grid[row][col];
+        if (cell !== null) {
+          if (cell.isObstacle && cell.obstacleFixed) {
+            writeCol = col + 1;
+            continue;
+          }
+          if (col !== writeCol) {
+            if (recordOffsets) {
+              cell.animOffsetX = col - writeCol;
+            }
+            grid[row][writeCol] = cell;
+            grid[row][col] = null;
+            moved = true;
+          }
+          writeCol++;
+        }
+      }
+    }
+    return moved;
+  }
+
+  // dir === 'right'
+  for (let row = 0; row < rows; row++) {
+    let writeCol = cols - 1;
+    for (let col = cols - 1; col >= 0; col--) {
       const cell = grid[row][col];
       if (cell !== null) {
-        if (row !== writeRow) {
-          const dropDist = writeRow - row;
-          cell.fallOffset = Math.max(cell.fallOffset, dropDist);
-          grid[writeRow][col] = cell;
+        if (cell.isObstacle && cell.obstacleFixed) {
+          writeCol = col - 1;
+          continue;
+        }
+        if (col !== writeCol) {
+          if (recordOffsets) {
+            cell.animOffsetX = -(writeCol - col);
+          }
+          grid[row][writeCol] = cell;
           grid[row][col] = null;
           moved = true;
         }
-        writeRow--;
+        writeCol--;
       }
     }
   }
   return moved;
 }
 
+export function settleBoard(grid: (Cell | null)[][]): boolean {
+  return settleBoardForDirection(grid, 'down', true);
+}
+
+const MARK_DIRS: ReadonlyArray<readonly [number, number]> = [
+  [0, 1],
+  [0, -1],
+  [1, 0],
+  [-1, 0],
+];
+
 export function detectBoardMarks(grid: (Cell | null)[][]): SquareCoord[] {
   const rows = grid.length;
   const cols = grid[0]?.length ?? BOARD_COLS;
+  const total = rows * cols;
+  if (total > bfsVisited.length) {
+    const nextCap = Math.max(total, bfsVisited.length * 2);
+    bfsVisited = new Uint8Array(nextCap);
+    bfsQueue = new Int32Array(nextCap);
+  }
+  bfsVisited.fill(0, 0, total);
+
   // Reset non-pending marks
   for (let r = 0; r < rows; r++) {
+    const rowArr = grid[r];
     for (let c = 0; c < cols; c++) {
-      const cell = grid[r][c];
+      const cell = rowArr[c];
       if (cell) {
         cell.inSquare = false;
         cell.chainMarked = false;
@@ -335,60 +1274,87 @@ export function detectBoardMarks(grid: (Cell | null)[][]): SquareCoord[] {
     }
   }
 
-  // 1. Chain Block detection (4-directional orthogonal BFS)
-  const visited = Array.from({ length: rows }, () =>
-    Array<boolean>(cols).fill(false)
-  );
-  const dirs = [
-    [0, 1],
-    [0, -1],
-    [1, 0],
-    [-1, 0],
-  ];
-
+  // 1. Chain Block detection (zero-alloc flat typed-array 4-directional orthogonal BFS)
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const start = grid[r][c];
-      if (!start || !start.isChain || visited[r][c]) continue;
+      const startIdx = r * cols + c;
+      if (!start || start.isObstacle || !start.isChain || bfsVisited[startIdx]) continue;
 
-      // Check if it touches at least one other block of its own color
+      let targetColor = start.color;
       let touchesSameColor = false;
-      for (const [dr, dc] of dirs) {
-        const nr = r + dr;
-        const nc = c + dc;
-        if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
-          const neighbor = grid[nr][nc];
-          if (neighbor && neighbor.color === start.color) {
-            touchesSameColor = true;
-            break;
+      if (start.isWild) {
+        for (let d = 0; d < 4; d++) {
+          const nr = r + MARK_DIRS[d][0];
+          const nc = c + MARK_DIRS[d][1];
+          if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
+            const neighbor = grid[nr][nc];
+            if (neighbor && !neighbor.isObstacle && !neighbor.isWild) {
+              targetColor = neighbor.color;
+              touchesSameColor = true;
+              break;
+            }
+          }
+        }
+        if (!touchesSameColor) {
+          for (let d = 0; d < 4; d++) {
+            const nr = r + MARK_DIRS[d][0];
+            const nc = c + MARK_DIRS[d][1];
+            if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
+              const neighbor = grid[nr][nc];
+              if (neighbor && !neighbor.isObstacle) {
+                touchesSameColor = true;
+                break;
+              }
+            }
+          }
+        }
+      } else {
+        for (let d = 0; d < 4; d++) {
+          const nr = r + MARK_DIRS[d][0];
+          const nc = c + MARK_DIRS[d][1];
+          if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
+            const neighbor = grid[nr][nc];
+            if (
+              neighbor &&
+              !neighbor.isObstacle &&
+              (neighbor.isWild || neighbor.color === targetColor)
+            ) {
+              touchesSameColor = true;
+              break;
+            }
           }
         }
       }
       if (!touchesSameColor) continue;
 
-      // BFS to mark connected component
-      const queue: Array<[number, number]> = [[r, c]];
-      visited[r][c] = true;
-      while (queue.length > 0) {
-        const [cr, cc] = queue.shift()!;
+      let head = 0;
+      let tail = 0;
+      bfsQueue[tail++] = startIdx;
+      bfsVisited[startIdx] = 1;
+      while (head < tail) {
+        const idx = bfsQueue[head++];
+        const cr = Math.floor(idx / cols);
+        const cc = idx - cr * cols;
         const curr = grid[cr][cc];
         if (curr) {
           curr.chainMarked = true;
         }
-        for (const [dr, dc] of dirs) {
-          const nr = cr + dr;
-          const nc = cc + dc;
-          if (
-            nr >= 0 &&
-            nr < rows &&
-            nc >= 0 &&
-            nc < cols &&
-            !visited[nr][nc]
-          ) {
-            const neighbor = grid[nr][nc];
-            if (neighbor && neighbor.color === start.color) {
-              visited[nr][nc] = true;
-              queue.push([nr, nc]);
+        for (let d = 0; d < 4; d++) {
+          const nr = cr + MARK_DIRS[d][0];
+          const nc = cc + MARK_DIRS[d][1];
+          if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
+            const nIdx = nr * cols + nc;
+            if (!bfsVisited[nIdx]) {
+              const neighbor = grid[nr][nc];
+              if (
+                neighbor &&
+                !neighbor.isObstacle &&
+                (neighbor.isWild || neighbor.color === targetColor)
+              ) {
+                bfsVisited[nIdx] = 1;
+                bfsQueue[tail++] = nIdx;
+              }
             }
           }
         }
@@ -396,33 +1362,53 @@ export function detectBoardMarks(grid: (Cell | null)[][]): SquareCoord[] {
     }
   }
 
-  // 2. Monochromatic 2x2 square detection (overlapping allowed; chain-marked excluded)
+  // 2. Monochromatic 2x2 square detection (supports chromatic Wild tiles; chain-marked & obstacles excluded)
   const squares: SquareCoord[] = [];
   for (let r = 0; r < rows - 1; r++) {
+    const row0 = grid[r];
+    const row1 = grid[r + 1];
     for (let c = 0; c < cols - 1; c++) {
-      const a = grid[r][c];
-      const b = grid[r][c + 1];
-      const d = grid[r + 1][c];
-      const e = grid[r + 1][c + 1];
+      const a = row0[c];
+      const b = row0[c + 1];
+      const d = row1[c];
+      const e = row1[c + 1];
       if (!a || !b || !d || !e) continue;
+      if (a.isObstacle || b.isObstacle || d.isObstacle || e.isObstacle) continue;
       if (
-        a.color === b.color &&
-        a.color === d.color &&
-        a.color === e.color &&
-        !a.chainMarked &&
-        !b.chainMarked &&
-        !d.chainMarked &&
-        !e.chainMarked &&
-        !a.isChain &&
-        !b.isChain &&
-        !d.isChain &&
-        !e.isChain
+        a.chainMarked ||
+        b.chainMarked ||
+        d.chainMarked ||
+        e.chainMarked ||
+        a.isChain ||
+        b.isChain ||
+        d.isChain ||
+        e.isChain
       ) {
+        continue;
+      }
+
+      let refColor: CellColor | null = null;
+      let match = true;
+      if (!a.isWild) refColor = a.color;
+      if (!b.isWild) {
+        if (refColor === null) refColor = b.color;
+        else if (b.color !== refColor) match = false;
+      }
+      if (match && !d.isWild) {
+        if (refColor === null) refColor = d.color;
+        else if (d.color !== refColor) match = false;
+      }
+      if (match && !e.isWild) {
+        if (refColor === null) refColor = e.color;
+        else if (e.color !== refColor) match = false;
+      }
+
+      if (match) {
         a.inSquare = true;
         b.inSquare = true;
         d.inSquare = true;
         e.inSquare = true;
-        squares.push({ x: c, y: r, color: a.color });
+        squares.push({ x: c, y: r, color: refColor ?? 0 });
       }
     }
   }
@@ -430,52 +1416,447 @@ export function detectBoardMarks(grid: (Cell | null)[][]): SquareCoord[] {
   return squares;
 }
 
-export function lockActivePiece(
-  state: BoardState,
-  chainFrequency: number = 0.05,
-  rng: () => number = Math.random
-): { landed: boolean; squaresFormed: number; chainActivated: boolean } {
-  const piece = state.activePiece;
-  if (!piece) return { landed: false, squaresFormed: 0, chainActivated: false };
+/**
+ * Gently trims upper rows when a stack overflows in Zen Flow mode so play continues
+ * smoothly without a Game Over screen.
+ */
+export function trimOverflowForZenFlow(state: BoardState): number {
   const rows = state.grid.length;
   const cols = state.grid[0]?.length ?? state.cols ?? BOARD_COLS;
+  const dir = state.gravityDirection ?? 'down';
   const spawnX = getSpawnColForWidth(cols);
+  const spawnY = Math.max(0, Math.floor((rows - 2) / 2));
+  let trimmed = 0;
 
-  // Compact existing columns first so each column's open write row is exact
-  settleBoard(state.grid);
-
-  let overflowed = false;
-  for (let px = 0; px < 2; px++) {
-    const gx = piece.x + px;
-    if (gx < 0 || gx >= cols) continue;
-
-    // Find lowest open row above existing blocks in this column
-    let writeRow = rows - 1;
-    while (writeRow >= 0 && state.grid[writeRow][gx] !== null) {
-      writeRow--;
-    }
-
-    // Settle bottom cell (py = 1) first, then top cell (py = 0) independently
-    for (let py = 1; py >= 0; py--) {
-      const pCell = piece.cells[py][px];
-      const sourceRow = piece.y + py;
-      if (writeRow < 0) {
-        overflowed = true;
-        continue;
+  if (dir === 'down') {
+    for (let c = 0; c < cols; c++) {
+      const maxClearRow = c === spawnX || c === spawnX + 1 ? 2 : 1;
+      for (let r = 0; r <= Math.min(rows - 1, maxClearRow); r++) {
+        const cell = state.grid[r][c];
+        if (cell !== null && !cell.isObstacle) {
+          state.grid[r][c] = null;
+          trimmed++;
+        }
       }
-      state.grid[writeRow][gx] = {
+    }
+  } else if (dir === 'up') {
+    for (let c = 0; c < cols; c++) {
+      const depth = c === spawnX || c === spawnX + 1 ? 3 : 2;
+      for (let r = Math.max(0, rows - depth); r < rows; r++) {
+        const cell = state.grid[r][c];
+        if (cell !== null && !cell.isObstacle) {
+          state.grid[r][c] = null;
+          trimmed++;
+        }
+      }
+    }
+  } else if (dir === 'right') {
+    for (let r = 0; r < rows; r++) {
+      const maxClearCol = r === spawnY || r === spawnY + 1 ? 2 : 1;
+      for (let c = 0; c <= Math.min(cols - 1, maxClearCol); c++) {
+        const cell = state.grid[r][c];
+        if (cell !== null && !cell.isObstacle) {
+          state.grid[r][c] = null;
+          trimmed++;
+        }
+      }
+    }
+  } else {
+    // 'left'
+    for (let r = 0; r < rows; r++) {
+      const depth = r === spawnY || r === spawnY + 1 ? 3 : 2;
+      for (let c = Math.max(0, cols - depth); c < cols; c++) {
+        const cell = state.grid[r][c];
+        if (cell !== null && !cell.isObstacle) {
+          state.grid[r][c] = null;
+          trimmed++;
+        }
+      }
+    }
+  }
+
+  settleBoardForDirection(state.grid, dir);
+  state.squares = detectBoardMarks(state.grid);
+  state.isGameOver = false;
+  return trimmed;
+}
+
+function buildPlacedGridCell(
+  pCell: Exclude<PieceCell, null>,
+  fallOffset: number,
+  animOffsetX: number,
+  animOffsetY: number
+): Cell {
+  return pCell.isBlocked
+    ? {
         id: allocCellId(),
-        color: pCell.color,
-        isChain: pCell.isChain,
+        color: 0,
+        isChain: false,
+        isObstacle: true,
+        obstacleFixed: false,
+        obstacleStyle: 'blocked',
         chainMarked: false,
         inSquare: false,
         pendingClear: false,
         sweptCol: false,
-        fallOffset: Math.max(0, writeRow - sourceRow),
+        fallOffset,
+        animOffsetX,
+        animOffsetY,
+        landFlash: 1,
+      }
+    : {
+        id: allocCellId(),
+        color: pCell.color,
+        isChain: pCell.isChain,
+        ...(pCell.isPeggle ? { isPeggle: true } : {}),
+        ...(pCell.isWild ? { isWild: true } : {}),
+        chainMarked: false,
+        inSquare: false,
+        pendingClear: false,
+        sweptCol: false,
+        fallOffset,
+        animOffsetX,
+        animOffsetY,
         landFlash: 1,
       };
-      writeRow--;
+}
+
+export function lockActivePiece(
+  state: BoardState,
+  chainFrequency: number = 0.05,
+  rng: () => number = Math.random,
+  options?: { zenNoLoss?: boolean }
+): { landed: boolean; squaresFormed: number; chainActivated: boolean; zenTrimmed: boolean } {
+  const piece = state.activePiece;
+  if (!piece) return { landed: false, squaresFormed: 0, chainActivated: false, zenTrimmed: false };
+  const rows = state.grid.length;
+  const cols = state.grid[0]?.length ?? state.cols ?? BOARD_COLS;
+  const pieceRows = piece.cells.length;
+  const pieceCols = piece.cells[0]?.length ?? 0;
+  const dir = state.gravityDirection ?? 'down';
+
+  // Compact existing rows/columns along active gravity vector first
+  settleBoardForDirection(state.grid, dir);
+
+  let overflowed = false;
+  let crumbleChanged = false;
+  if (dir === 'down') {
+    for (let px = 0; px < pieceCols; px++) {
+      const gx = piece.x + px;
+      if (gx < 0 || gx >= cols) continue;
+
+      let lowestPy = -1;
+      for (let py = pieceRows - 1; py >= 0; py--) {
+        if (piece.cells[py]?.[px] !== null) {
+          lowestPy = py;
+          break;
+        }
+      }
+      if (lowestPy < 0) continue;
+
+      const startScan = Math.max(0, piece.y + lowestPy);
+      let stopRow = rows;
+      for (let scan = startScan; scan < rows; scan++) {
+        if (state.grid[scan][gx] !== null) {
+          stopRow = scan;
+          break;
+        }
+      }
+      let writeRow = stopRow - 1;
+
+      for (let py = pieceRows - 1; py >= 0; py--) {
+        const pCell = piece.cells[py]?.[px];
+        if (!pCell) continue;
+        const sourceRow = piece.y + py;
+        if (writeRow < 0) {
+          overflowed = true;
+          continue;
+        }
+        state.grid[writeRow][gx] = buildPlacedGridCell(
+          pCell,
+          Math.max(0, writeRow - sourceRow),
+          0,
+          0
+        );
+        writeRow--;
+      }
+
+      if (stopRow < rows) {
+        const hitCell = state.grid[stopRow][gx];
+        if (hitCell && hitCell.isObstacle && hitCell.obstacleStyle === 'crumble') {
+          const nextHp = (hitCell.crumbleHp ?? 2) - 1;
+          if (nextHp <= 0) {
+            state.grid[stopRow][gx] = null;
+            crumbleChanged = true;
+          } else {
+            hitCell.crumbleHp = nextHp;
+            hitCell.landFlash = 0.85;
+          }
+        }
+      }
     }
+  } else if (dir === 'up') {
+    for (let px = 0; px < pieceCols; px++) {
+      const gx = piece.x + px;
+      if (gx < 0 || gx >= cols) continue;
+
+      let topPy = -1;
+      for (let py = 0; py < pieceRows; py++) {
+        if (piece.cells[py]?.[px] !== null) {
+          topPy = py;
+          break;
+        }
+      }
+      if (topPy < 0) continue;
+
+      const startScan = Math.min(rows - 1, piece.y + topPy);
+      let stopRow = -1;
+      for (let scan = startScan; scan >= 0; scan--) {
+        if (state.grid[scan][gx] !== null) {
+          stopRow = scan;
+          break;
+        }
+      }
+      let writeRow = stopRow + 1;
+
+      for (let py = 0; py < pieceRows; py++) {
+        const pCell = piece.cells[py]?.[px];
+        if (!pCell) continue;
+        const sourceRow = piece.y + py;
+        if (writeRow >= rows) {
+          overflowed = true;
+          continue;
+        }
+        state.grid[writeRow][gx] = buildPlacedGridCell(
+          pCell,
+          0,
+          0,
+          Math.min(0, writeRow - sourceRow)
+        );
+        writeRow++;
+      }
+    }
+  } else if (dir === 'right') {
+    for (let py = 0; py < pieceRows; py++) {
+      const gy = piece.y + py;
+      if (gy < 0 || gy >= rows) continue;
+
+      let rightPx = -1;
+      for (let px = pieceCols - 1; px >= 0; px--) {
+        if (piece.cells[py]?.[px] !== null) {
+          rightPx = px;
+          break;
+        }
+      }
+      if (rightPx < 0) continue;
+
+      const startScan = Math.max(0, piece.x + rightPx);
+      let stopCol = cols;
+      for (let scan = startScan; scan < cols; scan++) {
+        if (state.grid[gy][scan] !== null) {
+          stopCol = scan;
+          break;
+        }
+      }
+      let writeCol = stopCol - 1;
+
+      for (let px = pieceCols - 1; px >= 0; px--) {
+        const pCell = piece.cells[py]?.[px];
+        if (!pCell) continue;
+        const sourceCol = piece.x + px;
+        if (writeCol < 0) {
+          overflowed = true;
+          continue;
+        }
+        state.grid[gy][writeCol] = buildPlacedGridCell(
+          pCell,
+          0,
+          Math.min(0, sourceCol - writeCol),
+          0
+        );
+        writeCol--;
+      }
+    }
+  } else {
+    // dir === 'left'
+    for (let py = 0; py < pieceRows; py++) {
+      const gy = piece.y + py;
+      if (gy < 0 || gy >= rows) continue;
+
+      let leftPx = -1;
+      for (let px = 0; px < pieceCols; px++) {
+        if (piece.cells[py]?.[px] !== null) {
+          leftPx = px;
+          break;
+        }
+      }
+      if (leftPx < 0) continue;
+
+      const startScan = Math.min(cols - 1, piece.x + leftPx);
+      let stopCol = -1;
+      for (let scan = startScan; scan >= 0; scan--) {
+        if (state.grid[gy][scan] !== null) {
+          stopCol = scan;
+          break;
+        }
+      }
+      let writeCol = stopCol + 1;
+
+      for (let px = 0; px < pieceCols; px++) {
+        const pCell = piece.cells[py]?.[px];
+        if (!pCell) continue;
+        const sourceCol = piece.x + px;
+        if (writeCol >= cols) {
+          overflowed = true;
+          continue;
+        }
+        state.grid[gy][writeCol] = buildPlacedGridCell(
+          pCell,
+          0,
+          Math.max(0, sourceCol - writeCol),
+          0
+        );
+        writeCol++;
+      }
+    }
+  }
+
+  let zenTrimmed = false;
+  if (overflowed && options?.zenNoLoss) {
+    trimOverflowForZenFlow(state);
+    zenTrimmed = true;
+  }
+
+  if (crumbleChanged) {
+    settleBoardForDirection(state.grid, dir, true);
+  }
+
+  if (!overflowed && state.activeShift === 'cyclotron_flow') {
+    const cwOrder: GravityDirection[] = ['down', 'right', 'up', 'left'];
+    const nextDir = cwOrder[(cwOrder.indexOf(dir) + 1) % 4];
+    state.gravityDirection = nextDir;
+    settleBoardForDirection(state.grid, nextDir, true);
+
+    const marginDepth = 3;
+    const evicted: Cell[] = [];
+    if (nextDir === 'right') {
+      const limitC = Math.min(marginDepth, cols);
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < limitC; c++) {
+          const cell = state.grid[r][c];
+          if (cell && !cell.isObstacle) {
+            evicted.push(cell);
+            state.grid[r][c] = null;
+          }
+        }
+      }
+      for (const cell of evicted) {
+        let bestC = -1;
+        let bestR = -1;
+        for (let r = 0; r < rows; r++) {
+          for (let c = cols - 1; c >= limitC; c--) {
+            if (state.grid[r][c] === null) {
+              if (c > bestC) {
+                bestC = c;
+                bestR = r;
+              }
+              break;
+            }
+          }
+        }
+        if (bestC >= 0 && bestR >= 0) {
+          state.grid[bestR][bestC] = { ...cell, landFlash: 0.45 };
+        }
+      }
+    } else if (nextDir === 'left') {
+      const startC = Math.max(0, cols - marginDepth);
+      for (let r = 0; r < rows; r++) {
+        for (let c = startC; c < cols; c++) {
+          const cell = state.grid[r][c];
+          if (cell && !cell.isObstacle) {
+            evicted.push(cell);
+            state.grid[r][c] = null;
+          }
+        }
+      }
+      for (const cell of evicted) {
+        let bestC = cols;
+        let bestR = -1;
+        for (let r = 0; r < rows; r++) {
+          for (let c = 0; c < startC; c++) {
+            if (state.grid[r][c] === null) {
+              if (c < bestC) {
+                bestC = c;
+                bestR = r;
+              }
+              break;
+            }
+          }
+        }
+        if (bestC < cols && bestR >= 0) {
+          state.grid[bestR][bestC] = { ...cell, landFlash: 0.45 };
+        }
+      }
+    } else if (nextDir === 'up') {
+      const startR = Math.max(0, rows - marginDepth);
+      for (let r = startR; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          const cell = state.grid[r][c];
+          if (cell && !cell.isObstacle) {
+            evicted.push(cell);
+            state.grid[r][c] = null;
+          }
+        }
+      }
+      for (const cell of evicted) {
+        let bestR = rows;
+        let bestC = -1;
+        for (let c = 0; c < cols; c++) {
+          for (let r = 0; r < startR; r++) {
+            if (state.grid[r][c] === null) {
+              if (r < bestR) {
+                bestR = r;
+                bestC = c;
+              }
+              break;
+            }
+          }
+        }
+        if (bestR < rows && bestC >= 0) {
+          state.grid[bestR][bestC] = { ...cell, landFlash: 0.45 };
+        }
+      }
+    } else {
+      const limitR = Math.min(marginDepth, rows);
+      for (let r = 0; r < limitR; r++) {
+        for (let c = 0; c < cols; c++) {
+          const cell = state.grid[r][c];
+          if (cell && !cell.isObstacle) {
+            evicted.push(cell);
+            state.grid[r][c] = null;
+          }
+        }
+      }
+      for (const cell of evicted) {
+        let bestR = -1;
+        let bestC = -1;
+        for (let c = 0; c < cols; c++) {
+          for (let r = rows - 1; r >= limitR; r--) {
+            if (state.grid[r][c] === null) {
+              if (r > bestR) {
+                bestR = r;
+                bestC = c;
+              }
+              break;
+            }
+          }
+        }
+        if (bestR >= 0 && bestC >= 0) {
+          state.grid[bestR][bestC] = { ...cell, landFlash: 0.45 };
+        }
+      }
+    }
+    settleBoardForDirection(state.grid, nextDir, false);
   }
 
   const prevSquaresCount = state.squares.length;
@@ -484,15 +1865,36 @@ export function lockActivePiece(
     row.some((c) => c !== null && c.chainMarked)
   );
 
-  // Advance queue
-  const popped = state.nextQueue.shift() ?? generateRandomPiece(chainFrequency, rng, spawnX);
-  const next: Piece = { ...popped, x: spawnX, y: -2 };
-  state.nextQueue.push(generateRandomPiece(chainFrequency, rng, spawnX));
+  // Advance queue respecting active pieceShapeMode, colorCount & gravityDirection
+  const genOpts: GeneratePieceOptions = {
+    colorCount: state.colorCount,
+    shapeMode: state.pieceShapeMode,
+    boardCols: cols,
+  };
+  const fallbackSpawnX = getSpawnColForWidth(cols, 2);
+  const popped =
+    state.nextQueue.shift() ??
+    generateRandomPiece(chainFrequency, rng, fallbackSpawnX, genOpts);
+  const nextPos = getPieceInitialPos(state, popped);
+  const next: Piece = {
+    ...popped,
+    x: nextPos.x,
+    y: nextPos.y,
+    ...(popped.isPeggle ? { peggleBounces: 0, peggleTrail: [] } : {}),
+  };
+  const queuedPiece = generateRandomPiece(chainFrequency, rng, fallbackSpawnX, genOpts);
+  const queuedPos = getPieceInitialPos(state, queuedPiece);
+  state.nextQueue = state.nextQueue.map((q) => {
+    const qPos = getPieceInitialPos(state, q);
+    return { ...q, x: qPos.x, y: qPos.y };
+  });
+  state.nextQueue.push({
+    ...queuedPiece,
+    x: queuedPos.x,
+    y: queuedPos.y,
+  });
 
-  // Allow the next piece to spawn on the top staging row (y = -2) so the player can
-  // still move Left/Right and Rotate above row 0; Game Over only triggers if a locking
-  // piece itself overflows above the top line (`overflowed`).
-  if (overflowed) {
+  if (overflowed && !options?.zenNoLoss) {
     state.activePiece = null;
     state.isGameOver = true;
   } else {
@@ -507,65 +1909,367 @@ export function lockActivePiece(
     landed: true,
     squaresFormed: Math.max(0, state.squares.length - prevSquaresCount),
     chainActivated,
+    zenTrimmed,
   };
+}
+
+function stepPeggleOneStep(
+  state: BoardState,
+  piece: Piece,
+  rng: () => number
+): {
+  stepped: boolean;
+  bounced: boolean;
+  bouncePos: { x: number; y: number } | null;
+  nextPiece: Piece;
+} {
+  const dir = state.gravityDirection ?? 'down';
+  const { gx, gy } = getGravityVector(dir);
+  const perpX = gy !== 0 ? 1 : 0;
+  const perpY = gx !== 0 ? 1 : 0;
+  const bounces = piece.peggleBounces ?? 0;
+  const inActiveBoard = !isPieceInStaging(state, piece);
+  const rows = state.grid.length;
+  const cols = state.grid[0]?.length ?? state.cols ?? BOARD_COLS;
+
+  const appendTrail = (p: Piece): Array<{ x: number; y: number }> => [
+    ...(p.peggleTrail ?? []).slice(-6),
+    { x: p.x, y: p.y },
+  ];
+
+  const forwardX = piece.x + gx;
+  const forwardY = piece.y + gy;
+  const hitCellAhead =
+    inActiveBoard &&
+    forwardX >= 0 &&
+    forwardX < cols &&
+    forwardY >= 0 &&
+    forwardY < rows &&
+    state.grid[forwardY][forwardX] !== null;
+  const canMoveForward = canPlacePiece(state, piece, gx, gy);
+
+  // 1. Ricochet laterally off a block/obstacle peak ahead onto a lower open lane
+  if (!canMoveForward && hitCellAhead && bounces < MAX_PEGGLE_BOUNCES) {
+    const pref: -1 | 1 = piece.peggleVel ?? (rng() < 0.5 ? -1 : 1);
+    const sides: Array<-1 | 1> = [pref, pref === 1 ? -1 : 1];
+    for (const side of sides) {
+      const sx = side * perpX;
+      const sy = side * perpY;
+      if (canPlacePiece(state, piece, sx + gx, sy + gy)) {
+        const nextVel: -1 | 1 = rng() < 0.65 ? side : side === 1 ? -1 : 1;
+        return {
+          stepped: true,
+          bounced: true,
+          bouncePos: { x: piece.x, y: piece.y },
+          nextPiece: {
+            ...piece,
+            x: piece.x + sx + gx,
+            y: piece.y + sy + gy,
+            peggleVel: nextVel,
+            peggleBounces: bounces + 1,
+            peggleTrail: appendTrail(piece),
+          },
+        };
+      }
+      if (
+        canPlacePiece(state, piece, sx, sy) &&
+        canPlacePiece(state, { ...piece, x: piece.x + sx, y: piece.y + sy }, gx, gy)
+      ) {
+        return {
+          stepped: true,
+          bounced: true,
+          bouncePos: { x: piece.x, y: piece.y },
+          nextPiece: {
+            ...piece,
+            x: piece.x + sx + gx,
+            y: piece.y + sy + gy,
+            peggleVel: side,
+            peggleBounces: bounces + 1,
+            peggleTrail: appendTrail(piece),
+          },
+        };
+      }
+    }
+  }
+
+  // 2. Normal advance along gravity, with playful random mid-air Peggle ricochet & wall caroms
+  if (canMoveForward) {
+    const nextVel: -1 | 1 = piece.peggleVel ?? (rng() < 0.5 ? -1 : 1);
+    if (inActiveBoard && bounces < MAX_PEGGLE_BOUNCES - 1 && rng() < 0.36) {
+      const trySides: Array<{ s: -1 | 1; wallFlip: boolean }> = [
+        { s: nextVel, wallFlip: false },
+        { s: nextVel === 1 ? -1 : 1, wallFlip: true },
+      ];
+      for (const { s, wallFlip } of trySides) {
+        const dx = gx + s * perpX;
+        const dy = gy + s * perpY;
+        if (canPlacePiece(state, piece, dx, dy)) {
+          const flipped: -1 | 1 = wallFlip
+            ? s
+            : rng() < 0.28
+            ? (s === 1 ? -1 : 1)
+            : s;
+          return {
+            stepped: true,
+            bounced: true,
+            bouncePos: { x: piece.x, y: piece.y },
+            nextPiece: {
+              ...piece,
+              x: piece.x + dx,
+              y: piece.y + dy,
+              peggleVel: flipped,
+              peggleBounces: bounces + 1,
+              peggleTrail: appendTrail(piece),
+            },
+          };
+        }
+      }
+    }
+
+    return {
+      stepped: true,
+      bounced: false,
+      bouncePos: null,
+      nextPiece: {
+        ...piece,
+        x: forwardX,
+        y: forwardY,
+        peggleTrail: inActiveBoard ? appendTrail(piece) : piece.peggleTrail,
+      },
+    };
+  }
+
+  return { stepped: false, bounced: false, bouncePos: null, nextPiece: piece };
+}
+
+function trySpringBouncePiece(
+  state: BoardState,
+  bouncePositions?: Array<{ x: number; y: number }>
+): boolean {
+  const piece = state.activePiece;
+  if (
+    !piece ||
+    state.activeShift !== 'spring_bounce' ||
+    piece.springBounced ||
+    (state.gravityDirection ?? 'down') !== 'down'
+  ) {
+    return false;
+  }
+
+  const rows = state.grid.length;
+  const cols = state.grid[0]?.length ?? state.cols ?? BOARD_COLS;
+  let hitsSpring = false;
+  let padGX = piece.x;
+  let padGY = piece.y;
+
+  for (let py = 0; py < piece.cells.length && !hitsSpring; py++) {
+    for (let px = 0; px < (piece.cells[py]?.length ?? 0); px++) {
+      if (!piece.cells[py]?.[px]) continue;
+      const gx = piece.x + px;
+      const gy = piece.y + py + 1;
+      if (gx >= 0 && gx < cols && gy >= 0 && gy < rows) {
+        const below = state.grid[gy][gx];
+        if (below?.isObstacle && below.obstacleStyle === 'spring') {
+          hitsSpring = true;
+          padGX = gx;
+          padGY = gy;
+          below.landFlash = 1;
+          break;
+        }
+      }
+    }
+  }
+
+  if (!hitsSpring) return false;
+
+  const kickDir = padGX < cols / 2 ? 1 : -1;
+  const offsets: Array<[number, number]> = [
+    [kickDir * 2, -2],
+    [-kickDir * 2, -2],
+    [kickDir, -2],
+    [-kickDir, -2],
+    [0, -2],
+    [kickDir, -1],
+    [-kickDir, -1],
+    [0, -1],
+  ];
+
+  for (const [dx, dy] of offsets) {
+    const candidate: Piece = {
+      ...piece,
+      x: piece.x + dx,
+      y: piece.y + dy,
+      springBounced: true,
+    };
+    if (canPlacePiece(state, candidate, 0, 0)) {
+      state.activePiece = candidate;
+      state.lockTimer = 0;
+      state.gravityAccum = 0;
+      bouncePositions?.push({ x: padGX, y: Math.max(0, padGY - 1) });
+      return true;
+    }
+  }
+
+  return false;
 }
 
 export function softDropStep(
   state: BoardState,
   chainFrequency: number = 0.05,
-  rng: () => number = Math.random
-): { moved: boolean; landed: boolean; squaresFormed: number; chainActivated: boolean } {
+  rng: () => number = Math.random,
+  options?: { zenNoLoss?: boolean }
+): {
+  moved: boolean;
+  landed: boolean;
+  squaresFormed: number;
+  chainActivated: boolean;
+  zenTrimmed: boolean;
+  bouncePositions?: Array<{ x: number; y: number }>;
+} {
   if (!state.activePiece || state.isGameOver) {
-    return { moved: false, landed: false, squaresFormed: 0, chainActivated: false };
+    return { moved: false, landed: false, squaresFormed: 0, chainActivated: false, zenTrimmed: false };
   }
   state.orientationGraceTimer = 0;
-  if (canPlacePiece(state, state.activePiece, 0, 1)) {
+
+  if (state.activePiece.isPeggle) {
+    const step = stepPeggleOneStep(state, state.activePiece, rng);
+    if (step.stepped) {
+      state.activePiece = step.nextPiece;
+      state.gravityAccum = 0;
+      state.lockTimer = 0;
+      if (!isPieceInStaging(state, state.activePiece)) {
+        state.score += 1;
+      }
+      return {
+        moved: true,
+        landed: false,
+        squaresFormed: 0,
+        chainActivated: false,
+        zenTrimmed: false,
+        bouncePositions: step.bouncePos ? [step.bouncePos] : undefined,
+      };
+    }
+    const res = lockActivePiece(state, chainFrequency, rng, options);
+    return {
+      moved: false,
+      landed: res.landed,
+      squaresFormed: res.squaresFormed,
+      chainActivated: res.chainActivated,
+      zenTrimmed: res.zenTrimmed,
+    };
+  }
+
+  const { gx, gy } = getGravityVector(state.gravityDirection);
+  if (canPlacePiece(state, state.activePiece, gx, gy)) {
     state.activePiece = {
       ...state.activePiece,
-      y: state.activePiece.y + 1,
+      x: state.activePiece.x + gx,
+      y: state.activePiece.y + gy,
     };
     state.gravityAccum = 0;
     state.lockTimer = 0;
-    if (state.activePiece.y >= 0) {
-      state.score += 1; // 1 point per row soft-dropped
+    if (!isPieceInStaging(state, state.activePiece)) {
+      state.score += 1;
     }
-    return { moved: true, landed: false, squaresFormed: 0, chainActivated: false };
+    return { moved: true, landed: false, squaresFormed: 0, chainActivated: false, zenTrimmed: false };
   }
-  const res = lockActivePiece(state, chainFrequency, rng);
+  const bouncePositions: Array<{ x: number; y: number }> = [];
+  if (trySpringBouncePiece(state, bouncePositions)) {
+    return {
+      moved: true,
+      landed: false,
+      squaresFormed: 0,
+      chainActivated: false,
+      zenTrimmed: false,
+      bouncePositions,
+    };
+  }
+  const res = lockActivePiece(state, chainFrequency, rng, options);
   return {
     moved: false,
     landed: res.landed,
     squaresFormed: res.squaresFormed,
     chainActivated: res.chainActivated,
+    zenTrimmed: res.zenTrimmed,
   };
 }
 
 export function hardDropPiece(
   state: BoardState,
   chainFrequency: number = 0.05,
-  rng: () => number = Math.random
-): { rowsDropped: number; landed: boolean; squaresFormed: number; chainActivated: boolean } {
+  rng: () => number = Math.random,
+  options?: { zenNoLoss?: boolean }
+): {
+  rowsDropped: number;
+  landed: boolean;
+  squaresFormed: number;
+  chainActivated: boolean;
+  zenTrimmed: boolean;
+  bouncePositions?: Array<{ x: number; y: number }>;
+  finalPieceX?: number;
+  finalPieceY?: number;
+} {
   if (!state.activePiece || state.isGameOver) {
-    return { rowsDropped: 0, landed: false, squaresFormed: 0, chainActivated: false };
+    return { rowsDropped: 0, landed: false, squaresFormed: 0, chainActivated: false, zenTrimmed: false };
   }
   state.orientationGraceTimer = 0;
   let rowsDropped = 0;
-  while (canPlacePiece(state, state.activePiece, 0, 1)) {
-    state.activePiece = {
-      ...state.activePiece,
-      y: state.activePiece.y + 1,
-    };
-    rowsDropped++;
-    if (state.activePiece.y >= 0) {
-      state.score += 1;
+  const bouncePositions: Array<{ x: number; y: number }> = [];
+
+  if (state.activePiece.isPeggle) {
+    const maxSteps = (state.cols + state.rows) * 2 + 12;
+    for (let i = 0; i < maxSteps; i++) {
+      const step = stepPeggleOneStep(state, state.activePiece, rng);
+      if (!step.stepped) break;
+      state.activePiece = step.nextPiece;
+      rowsDropped++;
+      if (step.bouncePos) {
+        bouncePositions.push(step.bouncePos);
+      }
+      if (!isPieceInStaging(state, state.activePiece)) {
+        state.score += 1;
+      }
+    }
+  } else {
+    const { gx, gy } = getGravityVector(state.gravityDirection);
+    const maxSteps = state.cols + state.rows + 8;
+    while (rowsDropped < maxSteps && canPlacePiece(state, state.activePiece, gx, gy)) {
+      state.activePiece = {
+        ...state.activePiece,
+        x: state.activePiece.x + gx,
+        y: state.activePiece.y + gy,
+      };
+      rowsDropped++;
+      if (!isPieceInStaging(state, state.activePiece)) {
+        state.score += 1;
+      }
+    }
+    if (trySpringBouncePiece(state, bouncePositions)) {
+      return {
+        rowsDropped,
+        landed: false,
+        squaresFormed: 0,
+        chainActivated: false,
+        zenTrimmed: false,
+        bouncePositions,
+        finalPieceX: state.activePiece.x,
+        finalPieceY: state.activePiece.y,
+      };
     }
   }
-  const res = lockActivePiece(state, chainFrequency, rng);
+
+  const finalPieceX = state.activePiece.x;
+  const finalPieceY = state.activePiece.y;
+  const res = lockActivePiece(state, chainFrequency, rng, options);
   return {
     rowsDropped,
     landed: res.landed,
     squaresFormed: res.squaresFormed,
     chainActivated: res.chainActivated,
+    zenTrimmed: res.zenTrimmed,
+    bouncePositions: bouncePositions.length > 0 ? bouncePositions : undefined,
+    finalPieceX,
+    finalPieceY,
   };
 }
 
@@ -575,61 +2279,133 @@ export function stepPassiveGravity(
   gravitySpeed: number,
   spawnDelay: number,
   chainFrequency: number = 0.05,
-  rng: () => number = Math.random
-): { moved: boolean; landed: boolean; squaresFormed: number; chainActivated: boolean } {
+  rng: () => number = Math.random,
+  options?: { zenNoLoss?: boolean }
+): {
+  moved: boolean;
+  landed: boolean;
+  squaresFormed: number;
+  chainActivated: boolean;
+  zenTrimmed: boolean;
+  bouncePositions?: Array<{ x: number; y: number }>;
+  finalPieceX?: number;
+  finalPieceY?: number;
+} {
   if (!state.activePiece || state.isGameOver) {
-    return { moved: false, landed: false, squaresFormed: 0, chainActivated: false };
+    return { moved: false, landed: false, squaresFormed: 0, chainActivated: false, zenTrimmed: false };
   }
 
-  // Brief post-orientation grace pause so rotating a phone never causes sudden drop or top-out
   if (state.orientationGraceTimer > 0) {
     state.orientationGraceTimer = Math.max(0, state.orientationGraceTimer - dt);
-    return { moved: false, landed: false, squaresFormed: 0, chainActivated: false };
+    return { moved: false, landed: false, squaresFormed: 0, chainActivated: false, zenTrimmed: false };
   }
+
+  const { gx, gy } = getGravityVector(state.gravityDirection);
 
   if (state.spawnTimer < spawnDelay) {
     const nextSpawn = state.spawnTimer + dt;
     if (nextSpawn < spawnDelay) {
       state.spawnTimer = nextSpawn;
-      return { moved: false, landed: false, squaresFormed: 0, chainActivated: false };
+      return { moved: false, landed: false, squaresFormed: 0, chainActivated: false, zenTrimmed: false };
     }
     const leftoverDt = nextSpawn - spawnDelay;
     state.spawnTimer = spawnDelay;
-    // Begin descending into row -1 immediately once spawn hover ends
     state.gravityAccum = Math.max(state.gravityAccum, 1) + leftoverDt * gravitySpeed;
-  } else if (!canPlacePiece(state, state.activePiece, 0, 1)) {
-    // Grounded branch handled right below
   }
 
-  // If grounded on floor/stack, count lock delay before locking
-  if (!canPlacePiece(state, state.activePiece, 0, 1)) {
+  // If grounded (and for Peggle, cannot ricochet off a shoulder onto an open pocket)
+  const canContinueMoving = () => {
+    if (!state.activePiece) return false;
+    if (canPlacePiece(state, state.activePiece, gx, gy)) return true;
+    return false;
+  };
+
+  if (!canContinueMoving() && !(state.activePiece.isPeggle && state.gravityAccum >= 1)) {
+    // Check if Peggle ball sitting atop a shoulder can bounce sideways immediately
+    if (state.activePiece.isPeggle) {
+      const probe = stepPeggleOneStep(state, state.activePiece, rng);
+      if (probe.stepped) {
+        state.activePiece = probe.nextPiece;
+        state.lockTimer = 0;
+        state.gravityAccum = 0;
+        return {
+          moved: true,
+          landed: false,
+          squaresFormed: 0,
+          chainActivated: false,
+          zenTrimmed: false,
+          bouncePositions: probe.bouncePos ? [probe.bouncePos] : undefined,
+        };
+      }
+    }
+    const springBounce: Array<{ x: number; y: number }> = [];
+    if (trySpringBouncePiece(state, springBounce)) {
+      return {
+        moved: true,
+        landed: false,
+        squaresFormed: 0,
+        chainActivated: false,
+        zenTrimmed: false,
+        bouncePositions: springBounce,
+      };
+    }
     state.gravityAccum = 0;
     state.lockTimer += dt;
     if (state.lockTimer >= LOCK_DELAY_SEC) {
-      const res = lockActivePiece(state, chainFrequency, rng);
+      const fx = state.activePiece.x;
+      const fy = state.activePiece.y;
+      const res = lockActivePiece(state, chainFrequency, rng, options);
       return {
         moved: false,
         landed: res.landed,
         squaresFormed: res.squaresFormed,
         chainActivated: res.chainActivated,
+        zenTrimmed: res.zenTrimmed,
+        finalPieceX: fx,
+        finalPieceY: fy,
       };
     }
-    return { moved: false, landed: false, squaresFormed: 0, chainActivated: false };
+    return { moved: false, landed: false, squaresFormed: 0, chainActivated: false, zenTrimmed: false };
   }
 
   state.lockTimer = 0;
-  state.gravityAccum += dt * gravitySpeed;
+  // Slightly perkier passive cadence for Peggle balls so arcs read briskly
+  const speedMul = state.activePiece.isPeggle ? 1.28 : 1;
+  state.gravityAccum += dt * gravitySpeed * speedMul;
   let movedAny = false;
+  const bouncePositions: Array<{ x: number; y: number }> = [];
+
   while (state.gravityAccum >= 1) {
     state.gravityAccum -= 1;
-    if (canPlacePiece(state, state.activePiece, 0, 1)) {
+    if (state.activePiece.isPeggle) {
+      const step = stepPeggleOneStep(state, state.activePiece, rng);
+      if (step.stepped) {
+        state.activePiece = step.nextPiece;
+        movedAny = true;
+        if (step.bouncePos) {
+          bouncePositions.push(step.bouncePos);
+        }
+        if (!canPlacePiece(state, state.activePiece, gx, gy)) {
+          // Allow one immediate shoulder bounce check on next frame if still eligible, otherwise lock delay
+          const probeNext = stepPeggleOneStep(state, state.activePiece, rng);
+          if (!probeNext.stepped) {
+            state.gravityAccum = 0;
+            break;
+          }
+        }
+      } else {
+        state.gravityAccum = 0;
+        break;
+      }
+    } else if (canPlacePiece(state, state.activePiece, gx, gy)) {
       state.activePiece = {
         ...state.activePiece,
-        y: state.activePiece.y + 1,
+        x: state.activePiece.x + gx,
+        y: state.activePiece.y + gy,
       };
       movedAny = true;
-      if (!canPlacePiece(state, state.activePiece, 0, 1)) {
-        // Just touched down; enter lock delay cleanly on next frame
+      if (!canPlacePiece(state, state.activePiece, gx, gy)) {
+        trySpringBouncePiece(state, bouncePositions);
         state.gravityAccum = 0;
         break;
       }
@@ -644,6 +2420,8 @@ export function stepPassiveGravity(
     landed: false,
     squaresFormed: 0,
     chainActivated: false,
+    zenTrimmed: false,
+    bouncePositions: bouncePositions.length > 0 ? bouncePositions : undefined,
   };
 }
 
@@ -671,20 +2449,55 @@ function flushPendingClearCells(state: BoardState): {
   const cols = state.grid[0]?.length ?? state.cols ?? BOARD_COLS;
   let cellsRemoved = 0;
   const clearedPositions: Array<{ x: number; y: number; color: CellColor }> = [];
+  const pendingCoords: Array<[number, number]> = [];
 
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const cell = state.grid[r][c];
       if (cell && cell.pendingClear) {
-        clearedPositions.push({ x: c, y: r, color: cell.color });
-        state.grid[r][c] = null;
-        cellsRemoved++;
+        pendingCoords.push([r, c]);
       }
     }
   }
 
-  if (cellsRemoved > 0) {
-    settleBoard(state.grid);
+  // Shatter any orthogonally adjacent gravity-falling 'blocked' obsidian tiles when a square clears
+  const shatterDirs = [
+    [0, 1],
+    [0, -1],
+    [1, 0],
+    [-1, 0],
+  ];
+  for (const [r, c] of pendingCoords) {
+    const cell = state.grid[r][c];
+    if (cell) {
+      clearedPositions.push({ x: c, y: r, color: cell.color });
+      state.grid[r][c] = null;
+      cellsRemoved++;
+    }
+    for (const [dr, dc] of shatterDirs) {
+      const nr = r + dr;
+      const nc = c + dc;
+      if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
+        const adj = state.grid[nr][nc];
+        if (adj && adj.isObstacle && adj.obstacleStyle === 'blocked' && !adj.obstacleFixed) {
+          clearedPositions.push({ x: nc, y: nr, color: 0 });
+          state.grid[nr][nc] = null;
+        } else if (adj && adj.isObstacle && adj.obstacleStyle === 'crumble') {
+          const nextHp = (adj.crumbleHp ?? 2) - 1;
+          if (nextHp <= 0) {
+            clearedPositions.push({ x: nc, y: nr, color: 0 });
+            state.grid[nr][nc] = null;
+          } else {
+            adj.crumbleHp = nextHp;
+            adj.landFlash = 0.85;
+          }
+        }
+      }
+    }
+  }
+
+  if (clearedPositions.length > 0) {
+    settleBoardForDirection(state.grid, state.gravityDirection);
     state.squares = detectBoardMarks(state.grid);
   }
 
@@ -693,7 +2506,8 @@ function flushPendingClearCells(state: BoardState): {
 
 export function stepTimelineColumn(
   state: BoardState,
-  col: number
+  col: number,
+  direction: 'ltr' | 'rtl' = 'ltr'
 ): { cellsRemovedNow: number; clearedPositions: Array<{ x: number; y: number; color: CellColor }> } {
   const rows = state.grid.length;
   const cols = state.grid[0]?.length ?? state.cols ?? BOARD_COLS;
@@ -716,9 +2530,10 @@ export function stepTimelineColumn(
     }
   }
 
-  // Count completed squares whose right column is `col`
+  // Count completed squares whose trailing edge matches `col`
   for (const sq of state.squares) {
-    if (sq.x + 1 === col) {
+    const trailingMatch = direction === 'rtl' ? sq.x === col : sq.x + 1 === col;
+    if (trailingMatch) {
       const key = `${sq.x},${sq.y}`;
       if (!state.sweepState.countedSquareKeys.has(key)) {
         state.sweepState.countedSquareKeys.add(key);
@@ -735,21 +2550,48 @@ export function stepTimelineColumn(
     }
   }
 
-  // Check if any square or chain group bridges into `col + 1`
+  // Check if any square or chain group bridges into the next column along sweep direction
+  const minActiveCol = state.lockedColumnsLeft;
   const maxActiveCol = cols - 1 - state.lockedColumnsRight;
-  let bridgesRight = false;
-  if (col < maxActiveCol) {
-    // Any valid 2x2 square starting at `col` spans `col` and `col + 1`
-    if (state.squares.some((sq) => sq.x === col)) {
-      bridgesRight = true;
+  let bridgesNext = false;
+  if (direction === 'rtl') {
+    if (col > minActiveCol) {
+      if (state.squares.some((sq) => sq.x + 1 === col)) {
+        bridgesNext = true;
+      }
+      if (!bridgesNext) {
+        for (let r = 0; r < rows; r++) {
+          const cur = state.grid[r][col];
+          const nxt = state.grid[r][col - 1];
+          if (
+            cur &&
+            nxt &&
+            cur.chainMarked &&
+            nxt.chainMarked &&
+            (cur.isWild || nxt.isWild || cur.color === nxt.color)
+          ) {
+            bridgesNext = true;
+            break;
+          }
+        }
+      }
     }
-    // Any chain-marked cell in `col` touching a chain-marked cell of the same color in `col + 1`
-    if (!bridgesRight) {
+  } else if (col < maxActiveCol) {
+    if (state.squares.some((sq) => sq.x === col)) {
+      bridgesNext = true;
+    }
+    if (!bridgesNext) {
       for (let r = 0; r < rows; r++) {
         const cur = state.grid[r][col];
         const nxt = state.grid[r][col + 1];
-        if (cur && nxt && cur.chainMarked && nxt.chainMarked && cur.color === nxt.color) {
-          bridgesRight = true;
+        if (
+          cur &&
+          nxt &&
+          cur.chainMarked &&
+          nxt.chainMarked &&
+          (cur.isWild || nxt.isWild || cur.color === nxt.color)
+        ) {
+          bridgesNext = true;
           break;
         }
       }
@@ -758,7 +2600,7 @@ export function stepTimelineColumn(
 
   state.sweepState.lastCol = col;
 
-  if (!bridgesRight) {
+  if (!bridgesNext) {
     const flushed = flushPendingClearCells(state);
     state.sweepState.cellsClearedThisSweep += flushed.cellsRemoved;
     return {
@@ -813,9 +2655,11 @@ export function finalizeSweep(state: BoardState, hadClearsDuringSweep: boolean):
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
         const cell = state.grid[r][c];
-        if (cell) {
+        if (cell && !cell.isObstacle) {
           remaining++;
-          seenColors.add(cell.color);
+          if (!cell.isWild) {
+            seenColors.add(cell.color);
+          }
         }
       }
     }
@@ -823,7 +2667,7 @@ export function finalizeSweep(state: BoardState, hadClearsDuringSweep: boolean):
     if (remaining === 0) {
       allDeletedBonus = true;
       bonusPoints += 10000;
-    } else if (seenColors.size === 1) {
+    } else if (seenColors.size <= 1) {
       singleColorBonus = true;
       bonusPoints += 1000;
     }
@@ -833,6 +2677,10 @@ export function finalizeSweep(state: BoardState, hadClearsDuringSweep: boolean):
   state.score += totalAwarded;
   state.squaresClearedTotal += totalSquares;
   state.stageSquaresCleared += totalSquares;
+  state.biggestSweep = Math.max(state.biggestSweep, totalSquares);
+  state.chainClearsTotal += totalChainCells;
+  if (singleColorBonus) state.singleColorCount += 1;
+  if (allDeletedBonus) state.allClearCount += 1;
 
   state.sweepState = createSweepState();
 
@@ -873,19 +2721,19 @@ export function applyGarbageToBoard(
     // Prefer alternating color from top cell below to create real pressure rather than free squares
     let topExisting: CellColor | null = null;
     for (let r = 1; r < rows; r++) {
-      if (state.grid[r][col] !== null) {
-        topExisting = state.grid[r][col]!.color;
+      const existing = state.grid[r][col];
+      if (existing !== null && !existing.isObstacle) {
+        topExisting = existing.color;
         break;
       }
     }
-    const color: CellColor =
-      topExisting !== null && rng() < 0.72
-        ? topExisting === 0
-          ? 1
-          : 0
-        : rng() < 0.5
-        ? 0
-        : 1;
+    const colorPoolSize = state.colorCount === 3 ? 3 : 2;
+    let color: CellColor;
+    if (topExisting !== null && rng() < 0.72) {
+      color = (((topExisting + 1 + (colorPoolSize === 3 && rng() < 0.5 ? 1 : 0)) % colorPoolSize) as CellColor);
+    } else {
+      color = (Math.floor(rng() * colorPoolSize) % colorPoolSize) as CellColor;
+    }
     state.grid[0][col] = {
       id: allocCellId(),
       color,
@@ -898,8 +2746,38 @@ export function applyGarbageToBoard(
       landFlash: 0.6,
     };
   }
-  settleBoard(state.grid);
+  settleBoardForDirection(state.grid, state.gravityDirection);
   state.squares = detectBoardMarks(state.grid);
+}
+
+/**
+ * Resolves outgoing VS battle pressure with counter-play:
+ * first cancels incoming pendingGarbage on the attacker, then queues remaining blocks onto defender.
+ */
+export function resolveBattleGarbageSwap(
+  attacker: BoardState,
+  defender: BoardState,
+  outgoingCount: number
+): { countered: number; netSent: number } {
+  if (outgoingCount <= 0) return { countered: 0, netSent: 0 };
+  const countered = Math.min(attacker.pendingGarbage, outgoingCount);
+  attacker.pendingGarbage = Math.max(0, attacker.pendingGarbage - countered);
+  const netSent = outgoingCount - countered;
+  if (netSent > 0) {
+    defender.pendingGarbage = Math.min(24, defender.pendingGarbage + netSent);
+  }
+  return { countered, netSent };
+}
+
+export function flushPendingGarbage(
+  state: BoardState,
+  rng: () => number = Math.random
+): number {
+  if (state.pendingGarbage <= 0 || state.isGameOver) return 0;
+  const count = state.pendingGarbage;
+  state.pendingGarbage = 0;
+  applyGarbageToBoard(state, count, rng);
+  return count;
 }
 
 export function countBoardCells(grid: (Cell | null)[][]): number {
@@ -908,7 +2786,8 @@ export function countBoardCells(grid: (Cell | null)[][]): number {
   let count = 0;
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
-      if (grid[r][c] !== null) count++;
+      const cell = grid[r][c];
+      if (cell !== null && !cell.isObstacle) count++;
     }
   }
   return count;
@@ -932,6 +2811,8 @@ export function transformBoardForOrientation(
 
   if (oldCols === newCols && oldRows === newRows) {
     state.orientation = targetOrientation;
+    state.baseCols = newCols;
+    state.baseRows = newRows;
     return { transformed: false, displacedBonusPoints: 0 };
   }
 
@@ -953,17 +2834,17 @@ export function transformBoardForOrientation(
   // Track write row (next empty row from bottom) per column in newGrid
   const colWriteRow = Array<number>(newCols).fill(newRows - 1);
 
-  // Pass 1: Translate the central columns directly, retaining formed blocks & silhouette
+  // Pass 1: Translate the central columns directly, retaining formed blocks & silhouette (strip transient obstacles)
   for (let oldC = 0; oldC < oldCols; oldC++) {
     const dstC = oldC + centerShift;
     const isOuterWing = dstC < 0 || dstC >= newCols;
     const side: -1 | 1 = oldC < oldCols / 2 ? -1 : 1;
 
-    // Collect non-null cells in this column from bottom to top
+    // Collect non-null player cells in this column from bottom to top
     const colEntries: Array<{ cell: Cell; oldR: number }> = [];
     for (let oldR = oldRows - 1; oldR >= 0; oldR--) {
       const cell = state.grid[oldR][oldC];
-      if (cell) {
+      if (cell && !cell.isObstacle) {
         colEntries.push({ cell: { ...cell, pendingClear: false, sweptCol: false, fallOffset: 0 }, oldR });
       }
     }
@@ -1059,7 +2940,13 @@ export function transformBoardForOrientation(
   state.grid = newGrid;
   state.cols = newCols;
   state.rows = newRows;
+  state.baseCols = newCols;
+  state.baseRows = newRows;
   state.orientation = targetOrientation;
+  state.gravityDirection = 'down';
+  state.activeShift = null;
+  state.patrollingBumper = null;
+  state.shiftEffect = null;
   state.score += displacedBonusPoints;
   state.isGameOver = false;
 
@@ -1090,20 +2977,28 @@ export function transformBoardForOrientation(
 
   // Reposition & lift active piece into clean upper headroom, plus pause gravity briefly
   if (state.activePiece) {
+    const pieceDim = getPieceDimensions(state.activePiece);
     const minPlayCol = state.lockedColumnsLeft;
-    const maxPlayCol = newCols - 2 - state.lockedColumnsRight;
+    const maxPlayCol = Math.max(
+      minPlayCol,
+      newCols - pieceDim.cols - state.lockedColumnsRight
+    );
     const nextX = Math.max(
       minPlayCol,
       Math.min(maxPlayCol, state.activePiece.x + centerShift)
     );
     let highestInPath = newRows;
     for (let r = 0; r < newRows; r++) {
-      if (state.grid[r][nextX] !== null || state.grid[r][nextX + 1] !== null) {
-        highestInPath = r;
-        break;
+      for (let px = 0; px < pieceDim.cols; px++) {
+        if (nextX + px < newCols && state.grid[r][nextX + px] !== null) {
+          highestInPath = r;
+          break;
+        }
       }
+      if (highestInPath < newRows) break;
     }
-    const safeY = Math.max(-2, Math.min(0, highestInPath - 4));
+    const initY = getPieceInitialY(state.activePiece);
+    const safeY = Math.max(initY, Math.min(0, highestInPath - pieceDim.rows - 2));
     state.activePiece = {
       ...state.activePiece,
       x: nextX,
@@ -1116,11 +3011,14 @@ export function transformBoardForOrientation(
     state.orientationGraceTimer = animateBricks ? 1.25 : 0;
   }
 
-  state.nextQueue = state.nextQueue.map((p) => ({
-    ...p,
-    x: newSpawnX,
-    y: -2,
-  }));
+  state.nextQueue = state.nextQueue.map((p) => {
+    const pCols = p.cells[0]?.length ?? 2;
+    return {
+      ...p,
+      x: getSpawnColForWidth(newCols, pCols),
+      y: getPieceInitialY(p),
+    };
+  });
 
   return { transformed: true, displacedBonusPoints };
 }
@@ -1147,7 +3045,7 @@ export function rotateBoard90(
   for (let r = 0; r < oldRows; r++) {
     for (let c = 0; c < oldCols; c++) {
       const cell = state.grid[r][c];
-      if (!cell) continue;
+      if (!cell || cell.isObstacle) continue;
       const rotR = direction === 'cw' ? c : oldCols - 1 - c;
       const rotC = direction === 'cw' ? oldRows - 1 - r : r;
       newGrid[rotR][rotC] = {
@@ -1185,6 +3083,9 @@ export function rotateBoard90(
   state.cols = newCols;
   state.rows = newRows;
   state.orientation = newCols >= newRows ? 'landscape' : 'portrait';
+  state.gravityDirection = 'down';
+  state.activeShift = 'rotate_90';
+  state.patrollingBumper = null;
   state.isGameOver = false;
 
   const maxEachSide = Math.max(0, Math.floor((newCols - 6) / 2));
@@ -1194,19 +3095,19 @@ export function rotateBoard90(
   state.squares = detectBoardMarks(state.grid);
   state.sweepState = createSweepState();
 
-  const newSpawnX = getSpawnColForWidth(newCols);
   if (state.activePiece) {
     const rotatedPiece =
       direction === 'cw'
         ? rotatePieceCellsCW(state.activePiece)
         : rotatePieceCellsCCW(state.activePiece);
+    const rotCols = rotatedPiece.cells[0]?.length ?? 2;
     const minPlayCol = state.lockedColumnsLeft;
-    const maxPlayCol = Math.max(minPlayCol, newCols - 2 - state.lockedColumnsRight);
-    const safeX = Math.max(minPlayCol, Math.min(maxPlayCol, newSpawnX));
+    const maxPlayCol = Math.max(minPlayCol, newCols - rotCols - state.lockedColumnsRight);
+    const safeX = Math.max(minPlayCol, Math.min(maxPlayCol, getSpawnColForWidth(newCols, rotCols)));
     state.activePiece = {
       ...rotatedPiece,
       x: safeX,
-      y: -2,
+      y: getPieceInitialY(rotatedPiece),
     };
     state.spawnTimer = 0;
     state.gravityAccum = 0;
@@ -1215,11 +3116,14 @@ export function rotateBoard90(
     state.orientationGraceTimer = animateBricks ? 1.15 : 0;
   }
 
-  state.nextQueue = state.nextQueue.map((p) => ({
-    ...p,
-    x: newSpawnX,
-    y: -2,
-  }));
+  state.nextQueue = state.nextQueue.map((p) => {
+    const pCols = p.cells[0]?.length ?? 2;
+    return {
+      ...p,
+      x: getSpawnColForWidth(newCols, pCols),
+      y: getPieceInitialY(p),
+    };
+  });
 
   return { rotated: true, settledMoves };
 }
@@ -1237,11 +3141,11 @@ export interface StageProgressionResult {
 }
 
 /**
- * Classic Lumines + Journey progression:
+ * Beat-sweep stage progression:
  * - Every skin has a hidden `squaresPerLevel` threshold (e.g., 16-22 squares).
  * - Reaching the threshold increments Level by 1 and DISCARDS any excess squares cleared in that sweep
  *   (no overflow carry-over into the next level).
- * - Normal skins transition every 4-5 levels (`levelsPerSkin`), totaling ~64-90 squares.
+ * - Normal skins transition every 3 levels (`levelsPerSkin`), totaling ~48-66 squares.
  * - A final timed stage (`finalStageTimerSec`) ignores square count for transitioning and instead
  *   advances/finishes via `advanceTimedStageProgression` on a flat timer.
  */
@@ -1310,6 +3214,57 @@ export function computeStageProgressMetrics(
   return {
     stageSquares: Math.min(req * levelsReq, completedSteps * req + currentStepSquares),
     stageGoal: req * levelsReq,
+  };
+}
+
+export function computeEncoreState(
+  isFinalWorld: boolean,
+  comboLevel: number
+): { encoreBonusBpm: number; encoreIntensity: number } {
+  if (!isFinalWorld || comboLevel <= 0) {
+    return { encoreBonusBpm: 0, encoreIntensity: 0 };
+  }
+  return {
+    encoreBonusBpm: Math.min(20, comboLevel * 4),
+    encoreIntensity: Math.min(1, comboLevel / 4),
+  };
+}
+
+export function computeTimeAttackPaceDelta(
+  pbSplits: number[] | undefined,
+  pbBestScore: number,
+  elapsedSec: number,
+  durationSec: number,
+  currentScore: number,
+  splitIntervalSec: number = 5
+): {
+  delta: number | null;
+  pbFraction: number | null;
+  currentFraction: number | null;
+} {
+  if (!pbSplits || pbSplits.length === 0 || pbBestScore <= 0 || durationSec <= 0) {
+    return { delta: null, pbFraction: null, currentFraction: null };
+  }
+  const clampedElapsed = Math.max(0, Math.min(durationSec, elapsedSec));
+  const exactBucket = clampedElapsed / splitIntervalSec;
+  const lowerIdx = Math.floor(exactBucket);
+  const frac = exactBucket - lowerIdx;
+
+  const getSplitAt = (bucketIdx: number): number => {
+    if (bucketIdx <= 0) return 0;
+    const arrIdx = bucketIdx - 1;
+    if (arrIdx >= pbSplits.length) return pbSplits[pbSplits.length - 1] ?? pbBestScore;
+    return pbSplits[arrIdx];
+  };
+
+  const s0 = getSplitAt(lowerIdx);
+  const s1 = getSplitAt(lowerIdx + 1);
+  const expectedPb = s0 + (s1 - s0) * frac;
+
+  return {
+    delta: Math.round(currentScore - expectedPb),
+    pbFraction: Math.max(0, Math.min(1, expectedPb / pbBestScore)),
+    currentFraction: Math.max(0, Math.min(1.5, currentScore / pbBestScore)),
   };
 }
 

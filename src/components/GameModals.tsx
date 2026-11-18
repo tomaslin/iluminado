@@ -1,4 +1,5 @@
 import React from 'react';
+import { ALL_SHIFT_TYPES } from '../game/shifts';
 import { HudSnapshot, SkinConfig } from '../game/types';
 
 interface GameModalsProps {
@@ -6,6 +7,8 @@ interface GameModalsProps {
   skin: SkinConfig;
   onResume: () => void;
   onRestart: () => void;
+  onNextStage?: () => void;
+  onOpenShiftSettings?: () => void;
   onBackToMenu: () => void;
 }
 
@@ -14,6 +17,8 @@ export const GameModals: React.FC<GameModalsProps> = ({
   skin,
   onResume,
   onRestart,
+  onNextStage,
+  onOpenShiftSettings,
   onBackToMenu,
 }) => {
   const { palette } = skin;
@@ -28,30 +33,30 @@ export const GameModals: React.FC<GameModalsProps> = ({
         aria-label="Game Paused"
       >
         <div
-          className="w-full max-w-sm rounded-2xl p-7 shadow-xl animate-modal-in"
+          className="w-full max-w-xs rounded-3xl p-7 shadow-xl animate-modal-in"
           style={{
             backgroundColor: palette.hudCardBg,
             color: palette.hudInk,
-            border: `1px solid ${palette.boardFrame}`,
+            border: `2px solid ${palette.boardFrame}`,
           }}
         >
           <div className="text-center mb-6">
-            <p
-              className="text-xs font-medium tracking-wide mb-1 capitalize"
-              style={{ color: palette.hudMuted }}
-            >
-              {hud.mode.replace('_', ' ')} · Level {hud.level}
-            </p>
             <h2 className="font-display text-3xl font-semibold tracking-tight">
               Paused
             </h2>
+            <p
+              className="text-xs font-medium mt-1 capitalize"
+              style={{ color: palette.hudMuted }}
+            >
+              {hud.mode.replace('_', ' ')} · {skin.name}
+            </p>
           </div>
 
-          <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-2.5">
             <button
               type="button"
               onClick={onResume}
-              className="w-full py-3 px-5 rounded-xl font-semibold text-sm text-[#faf6ee] transition-transform active:scale-[0.99] cursor-pointer whitespace-nowrap"
+              className="w-full py-3 px-5 rounded-2xl font-semibold text-sm text-[#faf6ee] transition-transform hover:scale-[1.01] active:scale-[0.99] cursor-pointer whitespace-nowrap"
               style={{ backgroundColor: palette.hudAccent }}
             >
               Resume
@@ -59,23 +64,37 @@ export const GameModals: React.FC<GameModalsProps> = ({
             <button
               type="button"
               onClick={onRestart}
-              className="w-full py-3 px-5 rounded-xl font-semibold text-sm transition-colors cursor-pointer whitespace-nowrap"
+              className="w-full py-3 px-5 rounded-2xl font-semibold text-sm transition-colors cursor-pointer whitespace-nowrap"
               style={{
-                backgroundColor: 'rgba(32, 28, 44, 0.05)',
+                backgroundColor: 'rgba(32, 28, 44, 0.055)',
                 color: palette.hudInk,
               }}
             >
               Restart
             </button>
+            {onOpenShiftSettings && (
+              <button
+                type="button"
+                data-testid="open-shift-settings-pause"
+                onClick={onOpenShiftSettings}
+                className="w-full py-2.5 px-5 rounded-2xl font-medium text-sm transition-colors cursor-pointer whitespace-nowrap"
+                style={{
+                  backgroundColor: 'rgba(32, 28, 44, 0.04)',
+                  color: palette.hudInk,
+                }}
+              >
+                Shifts ({hud.enabledShiftCount}/{ALL_SHIFT_TYPES.length})
+              </button>
+            )}
             <button
               type="button"
               onClick={onBackToMenu}
-              className="w-full py-3 px-5 rounded-xl font-medium text-sm transition-colors cursor-pointer whitespace-nowrap"
+              className="w-full py-2.5 px-5 rounded-2xl font-medium text-sm transition-colors cursor-pointer whitespace-nowrap"
               style={{
                 color: palette.hudMuted,
               }}
             >
-              Main Menu
+              Title Screen
             </button>
           </div>
         </div>
@@ -84,6 +103,9 @@ export const GameModals: React.FC<GameModalsProps> = ({
   }
 
   if (hud.status === 'gameover') {
+    const isNewBest = hud.score > 0 && hud.score >= hud.highScore;
+    const maxComboMult = hud.maxCombo > 0 ? Math.min(16, hud.maxCombo * 4) : 1;
+
     return (
       <div
         className="fixed inset-0 z-30 flex items-center justify-center p-6 pointer-events-auto"
@@ -93,88 +115,155 @@ export const GameModals: React.FC<GameModalsProps> = ({
         aria-label={hud.outcomeTitle}
       >
         <div
-          className="w-full max-w-md rounded-2xl p-8 shadow-2xl animate-modal-in"
+          className="w-full max-w-sm rounded-3xl p-7 sm:p-8 shadow-2xl animate-modal-in text-center"
           style={{
             backgroundColor: palette.hudCardBg,
             color: palette.hudInk,
-            border: `1px solid ${palette.boardFrame}`,
+            border: `2px solid ${palette.boardFrame}`,
           }}
         >
-          <div className="text-center mb-6">
-            <p
-              className="text-xs font-semibold tracking-wider uppercase mb-1"
-              style={{ color: palette.hudAccent }}
+          {/* Welcoming 2x2 Tile Crest */}
+          <div className="flex justify-center mb-3">
+            <svg
+              width="48"
+              height="48"
+              viewBox="0 0 48 48"
+              aria-hidden="true"
+              className={hud.isVictory ? 'drop-shadow-md' : ''}
             >
-              {hud.isVictory ? 'Completed' : 'Finished'}
-            </p>
-            <h2 className="font-display text-3xl font-semibold tracking-tight">
-              {hud.outcomeTitle}
-            </h2>
-            {hud.outcomeSubtitle && (
-              <p className="text-sm mt-1.5" style={{ color: palette.hudMuted }}>
-                {hud.outcomeSubtitle}
-              </p>
-            )}
+              <rect
+                x="4"
+                y="4"
+                width="18"
+                height="18"
+                rx="5"
+                fill={hud.isVictory ? palette.hudAccent : palette.blockA.fill}
+                stroke={palette.boardFrame}
+                strokeWidth="1.5"
+              />
+              <rect
+                x="26"
+                y="4"
+                width="18"
+                height="18"
+                rx="3"
+                fill={palette.blockB.fill}
+                stroke={palette.boardFrame}
+                strokeWidth="1.5"
+              />
+              <rect
+                x="4"
+                y="26"
+                width="18"
+                height="18"
+                rx="3"
+                fill={palette.blockB.fill}
+                stroke={palette.boardFrame}
+                strokeWidth="1.5"
+              />
+              <rect
+                x="26"
+                y="26"
+                width="18"
+                height="18"
+                rx="5"
+                fill={hud.isVictory ? palette.hudAccent : palette.blockA.fill}
+                stroke={palette.boardFrame}
+                strokeWidth="1.5"
+              />
+            </svg>
           </div>
 
+          <h2 className="font-display text-3xl font-semibold tracking-tight leading-tight">
+            {hud.outcomeTitle}
+          </h2>
+          {hud.outcomeSubtitle && (
+            <p className="text-sm mt-1" style={{ color: palette.hudMuted }}>
+              {hud.outcomeSubtitle}
+            </p>
+          )}
+
+          {/* Hero Score */}
+          <div className="mt-5 mb-5">
+            {isNewBest && (
+              <div
+                className="text-xs font-semibold mb-0.5"
+                style={{ color: palette.hudAccent }}
+              >
+                New High Score!
+              </div>
+            )}
+            <div className="font-display text-4xl font-semibold tabular-nums leading-none">
+              {Math.round(hud.score).toLocaleString()}
+            </div>
+            <div
+              className="text-xs font-mono-tabular mt-1.5"
+              style={{ color: palette.hudMuted }}
+            >
+              {hud.mode === 'daily' && hud.isVictory
+                ? `Daily Streak ${hud.dailyStreak ?? 1}`
+                : `Best ${Math.round(hud.highScore).toLocaleString()}`}
+            </div>
+          </div>
+
+          {/* 3 Clean Game Highlights (No SaaS Spreadsheet Boxes) */}
           <div
-            className="grid grid-cols-3 gap-3 py-4 px-4 rounded-xl mb-6"
-            style={{ backgroundColor: 'rgba(32, 28, 44, 0.04)' }}
+            className="grid grid-cols-3 gap-2 py-4 border-t border-b border-[#201c2c]/10 mb-6"
+            data-testid="postgame-breakdown"
           >
             <div>
-              <div
-                className="text-[11px] font-semibold uppercase tracking-wider"
-                style={{ color: palette.hudMuted }}
-              >
-                Score
-              </div>
-              <div className="font-mono-tabular text-xl font-semibold mt-0.5">
-                {Math.round(hud.score).toLocaleString()}
-              </div>
-            </div>
-            <div>
-              <div
-                className="text-[11px] font-semibold uppercase tracking-wider"
-                style={{ color: palette.hudMuted }}
-              >
-                Best
-              </div>
-              <div className="font-mono-tabular text-xl font-semibold mt-0.5">
-                {Math.round(hud.highScore).toLocaleString()}
-              </div>
-            </div>
-            <div>
-              <div
-                className="text-[11px] font-semibold uppercase tracking-wider"
-                style={{ color: palette.hudMuted }}
-              >
-                Squares
-              </div>
-              <div className="font-mono-tabular text-xl font-semibold mt-0.5">
+              <div className="font-mono-tabular text-lg font-semibold">
                 {hud.squaresTotal}
               </div>
+              <div className="text-xs mt-0.5" style={{ color: palette.hudMuted }}>
+                Squares
+              </div>
+            </div>
+            <div>
+              <div className="font-mono-tabular text-lg font-semibold">
+                {hud.worldsCleared > 0 ? hud.worldsCleared : hud.level}
+              </div>
+              <div className="text-xs mt-0.5" style={{ color: palette.hudMuted }}>
+                {hud.worldsCleared > 0 ? 'Worlds' : 'Level'}
+              </div>
+            </div>
+            <div>
+              <div className="font-mono-tabular text-lg font-semibold">
+                {maxComboMult}×
+              </div>
+              <div className="text-xs mt-0.5" style={{ color: palette.hudMuted }}>
+                Max Combo
+              </div>
             </div>
           </div>
 
-          <div className="flex items-center justify-between text-xs mb-6 px-1" style={{ color: palette.hudMuted }}>
-            <span>
-              {hud.mode === 'daily' && hud.isVictory
-                ? `Daily ${hud.activeDailyDateKey ?? ''} · Streak ${hud.dailyStreak ?? 1}`
-                : `Level ${hud.level} · ${hud.squaresTotal} Squares`}
-            </span>
-            <span className="font-mono-tabular">
-              Max Combo {hud.maxCombo > 0 ? Math.min(16, hud.maxCombo * 4) : 1}×
-            </span>
-          </div>
-
-          <div className="flex gap-3">
-            {!(hud.mode === 'daily' && hud.isVictory) && (
+          {/* Action Buttons */}
+          <div className="flex gap-2.5">
+            {hud.isVictory && hud.hasNextStage && onNextStage && (
               <button
                 type="button"
                 data-start="true"
-                onClick={onRestart}
-                className="flex-1 py-3 px-5 rounded-xl font-semibold text-sm text-[#faf6ee] transition-transform active:scale-[0.99] cursor-pointer whitespace-nowrap"
+                onClick={onNextStage}
+                className="flex-1 py-3 px-5 rounded-2xl font-semibold text-sm text-[#faf6ee] transition-transform hover:scale-[1.01] active:scale-[0.99] cursor-pointer whitespace-nowrap"
                 style={{ backgroundColor: palette.hudAccent }}
+              >
+                Next Stage
+              </button>
+            )}
+            {!(hud.mode === 'daily' && hud.isVictory) && (
+              <button
+                type="button"
+                data-start={!(hud.isVictory && hud.hasNextStage) ? 'true' : undefined}
+                onClick={onRestart}
+                className="flex-1 py-3 px-5 rounded-2xl font-semibold text-sm transition-transform hover:scale-[1.01] active:scale-[0.99] cursor-pointer whitespace-nowrap"
+                style={{
+                  backgroundColor:
+                    hud.isVictory && hud.hasNextStage
+                      ? 'rgba(32, 28, 44, 0.07)'
+                      : palette.hudAccent,
+                  color:
+                    hud.isVictory && hud.hasNextStage ? palette.hudInk : '#faf6ee',
+                }}
               >
                 {hud.mode === 'daily' ? 'Try Again' : 'Play Again'}
               </button>
@@ -183,8 +272,8 @@ export const GameModals: React.FC<GameModalsProps> = ({
               type="button"
               onClick={onBackToMenu}
               className={`${
-                hud.mode === 'daily' && hud.isVictory ? 'flex-1 text-[#faf6ee]' : ''
-              } py-3 px-5 rounded-xl font-semibold text-sm transition-colors cursor-pointer whitespace-nowrap`}
+                hud.mode === 'daily' && hud.isVictory ? 'flex-1 text-[#faf6ee]' : 'px-5'
+              } py-3 rounded-2xl font-semibold text-sm transition-colors cursor-pointer whitespace-nowrap`}
               style={{
                 backgroundColor:
                   hud.mode === 'daily' && hud.isVictory
@@ -196,7 +285,7 @@ export const GameModals: React.FC<GameModalsProps> = ({
                     : palette.hudInk,
               }}
             >
-              Main Menu
+              Title Screen
             </button>
           </div>
         </div>

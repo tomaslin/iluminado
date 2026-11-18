@@ -30,7 +30,8 @@ export function computeStemLevels(
   let occupied = 0;
   for (let r = 0; r < board.grid.length; r++) {
     for (let c = 0; c < board.grid[r].length; c++) {
-      if (board.grid[r][c] !== null) occupied++;
+      const cell = board.grid[r][c];
+      if (cell !== null && !cell.isObstacle) occupied++;
     }
   }
 
@@ -154,6 +155,18 @@ export class IluminadoAudioEngine {
   private attachedSourceEls = new WeakSet<HTMLAudioElement>();
   private fadingOutEls = new Set<HTMLAudioElement>();
 
+  // Decoded AudioBuffer cache + gapless AudioBufferSourceNode playback
+  private rawTrackCache = new Map<string, ArrayBuffer>();
+  private rawFetchPromises = new Map<string, Promise<ArrayBuffer | null>>();
+  private audioBuffers = new Map<string, AudioBuffer>();
+  private decodePromises = new Map<string, Promise<AudioBuffer | null>>();
+  private activeBufferNode: AudioBufferSourceNode | null = null;
+  private activeBufferGain: GainNode | null = null;
+  private activeBufferUrl: string | null = null;
+  private fadingBufferNodes = new Set<{ node: AudioBufferSourceNode; gain: GainNode }>();
+  private currentTempoScale = 1;
+  private lastClockCtxTime: number | null = null;
+
   private unlockedByUser = false;
   private muted = false;
   private hapticsEnabled = true;
@@ -252,6 +265,9 @@ export class IluminadoAudioEngine {
     if (this.ctx.state === 'suspended') {
       this.ctx.resume().catch(() => {});
     }
+    if (this.desiredTrackUrl) {
+      void this.ensureBufferDecoded(this.desiredTrackUrl);
+    }
     this.ensureDesiredMusicPlaying();
     this.applyDynamicMusicShaping();
   }
@@ -288,6 +304,13 @@ export class IluminadoAudioEngine {
   }
 
   public isExternalMusicActive(): boolean {
+    const bufferPlaying = Boolean(
+      this.desiredTrackUrl &&
+        this.activeBufferNode &&
+        this.activeBufferUrl === this.desiredTrackUrl &&
+        (this.desiredMode === 'playing' || this.desiredMode === 'title')
+    );
+    if (bufferPlaying) return true;
     return Boolean(
       this.desiredTrackUrl &&
         this.musicAudio &&
@@ -298,8 +321,135 @@ export class IluminadoAudioEngine {
     );
   }
 
-  public preloadTrack(_url?: string): void {
-    // HTMLAudio streams natively via HTTP range requests; no eager full decode needed.
+  public notifyClockReset(): void {
+    this.lastClockCtxTime = this.ctx && this.ctx.state === 'running' ? this.ctx.currentTime : null;
+  }
+
+  public setPlaybackTempoScale(scale: number): void {
+    const clamped = clamp(scale, 0.85, 1.25);
+    if (Math.abs(clamped - this.currentTempoScale) < 0.002) return;
+    this.currentTempoScale = clamped;
+    if (this.activeBufferNode && this.ctx) {
+      try {
+        this.activeBufferNode.playbackRate.setTargetAtTime(clamped, this.ctx.currentTime, 0.12);
+      } catch {
+        // Ignore on stopped node
+      }
+    }
+    if (this.musicAudio) {
+      try {
+        this.musicAudio.playbackRate = clamped;
+      } catch {
+        // Ignore unsupported playbackRate
+      }
+    }
+  }
+
+  /**
+   * Advances timeline beat progress locked directly to AudioContext's hardware sample clock
+   * whenever audio playback is running, falling back to clamped frame dt otherwise.
+   */
+  public consumeTimelineBeatDelta(fallbackDt: number, effectiveBpm: number): number {
+    const safeDt = Math.max(0, Math.min(0.05, fallbackDt));
+    if (
+      this.ctx &&
+      this.ctx.state === 'running' &&
+      this.desiredMode === 'playing' &&
+      (this.activeBufferNode !== null || this.isExternalMusicActive())
+    ) {
+      const nowCtx = this.ctx.currentTime;
+      if (this.lastClockCtxTime === null) {
+        this.lastClockCtxTime = nowCtx;
+        return safeDt * (effectiveBpm / 60);
+      }
+      const hwDt = Math.max(0, Math.min(0.08, nowCtx - this.lastClockCtxTime));
+      this.lastClockCtxTime = nowCtx;
+      return hwDt * (effectiveBpm / 60);
+    }
+    this.lastClockCtxTime = null;
+    return safeDt * (effectiveBpm / 60);
+  }
+
+  private trimBufferCaches(keepUrl?: string): void {
+    while (this.audioBuffers.size > 4) {
+      const oldestKey = this.audioBuffers.keys().next().value;
+      if (!oldestKey || oldestKey === keepUrl || oldestKey === this.desiredTrackUrl) break;
+      this.audioBuffers.delete(oldestKey);
+    }
+    while (this.rawTrackCache.size > 5) {
+      const oldestKey = this.rawTrackCache.keys().next().value;
+      if (!oldestKey || oldestKey === keepUrl || oldestKey === this.desiredTrackUrl) break;
+      this.rawTrackCache.delete(oldestKey);
+    }
+  }
+
+  private fetchTrackBytes(url: string): Promise<ArrayBuffer | null> {
+    if (typeof window === 'undefined' || typeof fetch !== 'function') {
+      return Promise.resolve(null);
+    }
+    const existing = this.rawTrackCache.get(url);
+    if (existing) return Promise.resolve(existing);
+    const inflight = this.rawFetchPromises.get(url);
+    if (inflight) return inflight;
+
+    const promise = fetch(url)
+      .then((res) => (res.ok ? res.arrayBuffer() : null))
+      .then((buf) => {
+        if (buf && buf.byteLength > 0) {
+          this.rawTrackCache.set(url, buf);
+          this.trimBufferCaches(url);
+          return buf;
+        }
+        return null;
+      })
+      .catch(() => null)
+      .finally(() => {
+        this.rawFetchPromises.delete(url);
+      });
+
+    this.rawFetchPromises.set(url, promise);
+    return promise;
+  }
+
+  private ensureBufferDecoded(url: string): Promise<AudioBuffer | null> {
+    if (!this.ctx || typeof window === 'undefined') {
+      return Promise.resolve(null);
+    }
+    const cached = this.audioBuffers.get(url);
+    if (cached) return Promise.resolve(cached);
+    const inflight = this.decodePromises.get(url);
+    if (inflight) return inflight;
+
+    const ctx = this.ctx;
+    const promise = this.fetchTrackBytes(url)
+      .then((raw) => {
+        if (!raw) return null;
+        return ctx.decodeAudioData(raw.slice(0));
+      })
+      .then((decoded) => {
+        if (decoded) {
+          this.audioBuffers.set(url, decoded);
+          this.trimBufferCaches(url);
+          return decoded;
+        }
+        return null;
+      })
+      .catch(() => null)
+      .finally(() => {
+        this.decodePromises.delete(url);
+      });
+
+    this.decodePromises.set(url, promise);
+    return promise;
+  }
+
+  public preloadTrack(url?: string): void {
+    if (!url || typeof window === 'undefined') return;
+    if (this.ctx) {
+      void this.ensureBufferDecoded(url);
+    } else {
+      void this.fetchTrackBytes(url);
+    }
   }
 
   private attachAudioElementToGraph(
@@ -401,7 +551,50 @@ export class IluminadoAudioEngine {
     }
   }
 
+  private stopActiveBufferSource(fadeMs: number): void {
+    const node = this.activeBufferNode;
+    const gain = this.activeBufferGain;
+    this.activeBufferNode = null;
+    this.activeBufferGain = null;
+    this.activeBufferUrl = null;
+    if (!node || !gain) return;
+
+    if (!this.ctx || fadeMs <= 0) {
+      try {
+        node.stop();
+        node.disconnect();
+        gain.disconnect();
+      } catch {
+        // Ignore already stopped
+      }
+      return;
+    }
+
+    const entry = { node, gain };
+    this.fadingBufferNodes.add(entry);
+    const now = this.ctx.currentTime;
+    const fadeSec = Math.max(0.05, fadeMs / 1000);
+    try {
+      gain.gain.cancelScheduledValues(now);
+      gain.gain.setValueAtTime(Math.max(0.0001, gain.gain.value), now);
+      gain.gain.linearRampToValueAtTime(0.0001, now + fadeSec);
+      node.stop(now + fadeSec + 0.04);
+    } catch {
+      // Ignore already stopped
+    }
+    node.onended = () => {
+      this.fadingBufferNodes.delete(entry);
+      try {
+        node.disconnect();
+        gain.disconnect();
+      } catch {
+        // Ignore
+      }
+    };
+  }
+
   private stopActiveMusic(fadeMs: number): void {
+    this.stopActiveBufferSource(fadeMs);
     const oldEl = this.musicAudio;
     this.musicAudio = null;
     this.activeMusicUrl = null;
@@ -427,7 +620,8 @@ export class IluminadoAudioEngine {
   private applyDynamicMusicShaping(): void {
     if (!this.ctx) return;
     const now = this.ctx.currentTime;
-    const trim = getTrackTrimGain(this.activeMusicUrl);
+    const activeUrl = this.activeBufferUrl ?? this.activeMusicUrl;
+    const trim = getTrackTrimGain(activeUrl);
     this.musicTrimGain?.gain.setTargetAtTime(trim, now, 0.06);
 
     let targetCutoff = 7200;
@@ -469,11 +663,44 @@ export class IluminadoAudioEngine {
     this.musicBusGain?.gain.setTargetAtTime(targetBusGain, now, 0.12);
   }
 
+  private startDecodedBufferTrack(
+    url: string,
+    buffer: AudioBuffer,
+    fadeMs: number,
+    startOffsetSec = 0
+  ): void {
+    if (!this.ctx || !this.musicTrimGain) return;
+    const now = this.ctx.currentTime;
+    const src = this.ctx.createBufferSource();
+    src.buffer = buffer;
+    src.loop = true;
+    src.playbackRate.setValueAtTime(this.currentTempoScale, now);
+
+    const gain = this.ctx.createGain();
+    const safeOffset =
+      buffer.duration > 0.1
+        ? ((startOffsetSec % buffer.duration) + buffer.duration) % buffer.duration
+        : 0;
+    const fadeSec = Math.max(0.05, fadeMs / 1000);
+    gain.gain.setValueAtTime(0.0005, now);
+    gain.gain.linearRampToValueAtTime(1, now + fadeSec);
+
+    src.connect(gain);
+    gain.connect(this.musicTrimGain);
+    src.start(now, safeOffset);
+
+    this.activeBufferNode = src;
+    this.activeBufferGain = gain;
+    this.activeBufferUrl = url;
+    this.activeMusicUrl = url;
+    this.applyDynamicMusicShaping();
+  }
+
   private ensureDesiredMusicPlaying(): void {
     if (typeof window === 'undefined' || typeof Audio === 'undefined') return;
 
     if (this.desiredMode === 'gameover' || !this.desiredTrackUrl) {
-      if (this.musicAudio) {
+      if (this.musicAudio || this.activeBufferNode) {
         this.stopActiveMusic(this.desiredMode === 'gameover' ? 420 : 280);
       }
       return;
@@ -496,8 +723,44 @@ export class IluminadoAudioEngine {
 
     this.applyDynamicMusicShaping();
 
+    // 1. Prefer gapless pre-decoded AudioBufferSourceNode whenever ready
+    const decoded = isWebAudioRouted ? this.audioBuffers.get(targetUrl) : undefined;
+    if (decoded && this.ctx && this.musicTrimGain) {
+      if (this.activeBufferNode && this.activeBufferUrl === targetUrl) {
+        this.activeBufferGain?.gain.setTargetAtTime(1, this.ctx.currentTime, 0.08);
+        return;
+      }
+      const crossfadeMs = this.desiredMode === 'playing' ? 4800 : 750;
+      let handoffOffset = 0;
+      let actualFadeMs = crossfadeMs;
+      if (this.musicAudio && this.activeMusicUrl === targetUrl) {
+        // Seamless short handoff from initial streaming <audio> into decoded buffer
+        handoffOffset = this.musicAudio.currentTime || 0;
+        actualFadeMs = 260;
+      }
+      this.stopActiveMusic(actualFadeMs);
+      this.startDecodedBufferTrack(targetUrl, decoded, actualFadeMs, handoffOffset);
+      return;
+    }
+
+    // Trigger background fetch + decode so next loop / handoff upgrades to gapless AudioBuffer
+    if (isWebAudioRouted) {
+      void this.ensureBufferDecoded(targetUrl).then((buf) => {
+        if (
+          buf &&
+          this.desiredTrackUrl === targetUrl &&
+          this.desiredMode !== 'gameover' &&
+          this.activeBufferUrl !== targetUrl
+        ) {
+          this.ensureDesiredMusicPlaying();
+        }
+      });
+    }
+
+    // 2. Immediate HTMLAudioElement playback while buffer downloads/decodes (or when unattached)
     if (this.musicAudio && this.activeMusicUrl === targetUrl) {
       this.musicAudio.muted = this.muted;
+      this.musicAudio.playbackRate = this.currentTempoScale;
       if (isWebAudioRouted) {
         this.attachAudioElementToGraph(
           this.musicAudio,
@@ -514,7 +777,7 @@ export class IluminadoAudioEngine {
     }
 
     const crossfadeMs = this.desiredMode === 'playing' ? 4800 : 750;
-    if (this.musicAudio) {
+    if (this.musicAudio || this.activeBufferNode) {
       this.stopActiveMusic(crossfadeMs);
     }
 
@@ -522,6 +785,7 @@ export class IluminadoAudioEngine {
     el.loop = true;
     el.preload = 'auto';
     el.muted = this.muted;
+    el.playbackRate = this.currentTempoScale;
     this.setElementVolume(el, 0.005);
 
     if (isWebAudioRouted) {
@@ -549,6 +813,9 @@ export class IluminadoAudioEngine {
   ): void {
     this.desiredTrackUrl = skin.music.audioTrackUrl ?? null;
     this.desiredMode = mode;
+    if (mode === 'playing') {
+      this.notifyClockReset();
+    }
     this.ensureDesiredMusicPlaying();
   }
 
@@ -1307,6 +1574,122 @@ export class IluminadoAudioEngine {
     );
   }
 
+  public playSweepColumnNote(
+    skin: SkinConfig,
+    sweepSquareCount: number,
+    cellsCleared: number
+  ): void {
+    if (!this.canSchedule() || !this.ctx) return;
+    const now = this.ctx.currentTime;
+    const { music } = skin;
+    const scale = music.scale.length > 0 ? music.scale : [0, 2, 4, 7, 9];
+    const stepIdx = Math.max(0, sweepSquareCount);
+    const octaveShift = Math.floor(stepIdx / scale.length) * 12;
+    const semi = scale[stepIdx % scale.length];
+    const freq = midiToFreq(music.rootMidi + 12 + Math.min(24, octaveShift) + semi);
+
+    this.scheduleTone(
+      now,
+      this.stemLeadGain,
+      freq,
+      0.16,
+      music.waveform === 'sawtooth' ? 'triangle' : music.waveform,
+      0.085,
+      0.004,
+      3200,
+      music.distortion * 0.2
+    );
+    if (cellsCleared >= 4) {
+      this.scheduleTone(
+        now + 0.015,
+        this.stemLeadGain,
+        freq * 1.5,
+        0.18,
+        'sine',
+        0.055,
+        0.006,
+        3600
+      );
+    }
+  }
+
+  public playShiftChord(skin: SkinConfig): void {
+    if (!this.canSchedule() || !this.ctx) return;
+    const now = this.ctx.currentTime;
+    const { music } = skin;
+    const chord = music.chords[0] ?? [0, 4, 7];
+    chord.slice(0, 3).forEach((semi, idx) => {
+      this.scheduleTone(
+        now + idx * 0.035,
+        this.stemLeadGain,
+        midiToFreq(music.rootMidi + 12 + semi),
+        0.26,
+        music.waveform,
+        0.085,
+        0.006,
+        3200,
+        music.distortion * 0.25
+      );
+    });
+    if (this.musicFilter) {
+      this.musicFilter.frequency.setTargetAtTime(14000, now, 0.08);
+    }
+  }
+
+  public playPeggleBounce(skin: SkinConfig, bounceIdx: number = 0): void {
+    if (!this.canSchedule() || !this.ctx) return;
+    const now = this.ctx.currentTime;
+    const { music } = skin;
+    const scale = music.scale.length > 0 ? music.scale : [0, 2, 4, 7, 9];
+    const semi = scale[Math.abs(bounceIdx) % scale.length];
+    const octaveBonus = Math.min(12, Math.floor(Math.max(0, bounceIdx) / scale.length) * 12);
+    const freq = midiToFreq(music.rootMidi + 12 + octaveBonus + semi);
+    this.scheduleTone(
+      now,
+      this.stemLeadGain,
+      freq,
+      0.13,
+      'sine',
+      0.095,
+      0.002,
+      4800,
+      0,
+      freq * 1.18
+    );
+    this.scheduleTone(
+      now + 0.014,
+      this.stemLeadGain,
+      freq * 2,
+      0.09,
+      'triangle',
+      0.042,
+      0.002,
+      5400
+    );
+    this.triggerHaptic(6);
+  }
+
+  public playFlowShift(skin: SkinConfig): void {
+    if (!this.canSchedule() || !this.ctx) return;
+    const now = this.ctx.currentTime;
+    const { music } = skin;
+    const intervals = [0, 7, 12, 19];
+    intervals.forEach((semi, i) => {
+      const t = now + i * 0.04;
+      this.scheduleTone(
+        t,
+        this.stemLeadGain,
+        midiToFreq(music.rootMidi + 12 + semi),
+        0.24,
+        'triangle',
+        0.072,
+        0.008,
+        3600
+      );
+    });
+    this.triggerHaptic([10, 14]);
+  }
+
   public playSweepClear(squares: number, comboLevel: number, skin: SkinConfig): void {
     if (!this.canSchedule() || !this.ctx) return;
     const now = this.ctx.currentTime;
@@ -1333,6 +1716,13 @@ export class IluminadoAudioEngine {
       if (idx === stepCount - 1) {
         this.scheduleVocalPad(t, root + interval, 0.42, 0.12);
       }
+    }
+    if (squares >= 2 && this.musicFilter) {
+      this.musicFilter.frequency.setTargetAtTime(
+        Math.min(19500, 11000 + squares * 1400),
+        now,
+        0.06
+      );
     }
     this.triggerHaptic(squares >= 4 ? [14, 24, 18] : 12);
   }
