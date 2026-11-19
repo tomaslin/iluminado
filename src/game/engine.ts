@@ -2504,6 +2504,33 @@ function flushPendingClearCells(state: BoardState): {
   return { cellsRemoved, clearedPositions };
 }
 
+export function getDiagonalSlantSpan(cols: number): number {
+  return Math.max(2, Math.min(6, Math.floor(cols * 0.375)));
+}
+
+export function getSweepColumnForRow(
+  state: Pick<BoardState, 'activeShift' | 'cols' | 'rows' | 'grid'>,
+  row: number,
+  col: number
+): number {
+  const rows = state.grid.length || state.rows;
+  const cols = state.grid[0]?.length ?? state.cols ?? BOARD_COLS;
+  if (cols <= 0) return 0;
+  const wrappedBase = ((col % cols) + cols) % cols;
+  if (state.activeShift === 'split_half_sweep') {
+    const midRow = Math.floor(rows / 2);
+    if (row < midRow) return wrappedBase;
+    return (wrappedBase + Math.floor(cols / 2)) % cols;
+  }
+  if (state.activeShift === 'diagonal_slant_sweep') {
+    const slantCols = getDiagonalSlantSpan(cols);
+    const clampedRow = Math.max(0, Math.min(rows - 1, row));
+    const lag = Math.round((clampedRow * slantCols) / Math.max(1, rows - 1));
+    return (((wrappedBase - lag) % cols) + cols) % cols;
+  }
+  return wrappedBase;
+}
+
 export function stepTimelineColumn(
   state: BoardState,
   col: number,
@@ -2518,21 +2545,36 @@ export function stepTimelineColumn(
   // Re-detect marks on non-pending cells before sweeping this column
   state.squares = detectBoardMarks(state.grid);
 
-  // Mark swept cells in this column
+  const isModifiedLineSweep =
+    direction === 'ltr' &&
+    (state.activeShift === 'split_half_sweep' ||
+      state.activeShift === 'diagonal_slant_sweep');
+
+  // Mark swept cells per row (respecting modified beam shapes)
   for (let r = 0; r < rows; r++) {
-    const cell = state.grid[r][col];
+    const rowCol = isModifiedLineSweep ? getSweepColumnForRow(state, r, col) : col;
+    const cell = state.grid[r][rowCol];
     if (cell && (cell.inSquare || cell.chainMarked)) {
       cell.sweptCol = true;
     }
-    if (cell && cell.chainMarked) {
+    if (cell && cell.chainMarked && !cell.pendingClear) {
       cell.pendingClear = true;
       state.sweepState.chainClearedThisSweep++;
     }
   }
 
-  // Count completed squares whose trailing edge matches `col`
+  // Helper returning which row controls a 2x2 square's sweep timing
+  const getSquareOwnerRow = (sqY: number): number =>
+    state.activeShift === 'diagonal_slant_sweep'
+      ? Math.min(rows - 1, sqY + 1)
+      : sqY;
+
+  // Count completed squares whose trailing edge matches the active beam column for that square's rows
   for (const sq of state.squares) {
-    const trailingMatch = direction === 'rtl' ? sq.x === col : sq.x + 1 === col;
+    const sqCol = isModifiedLineSweep
+      ? getSweepColumnForRow(state, getSquareOwnerRow(sq.y), col)
+      : col;
+    const trailingMatch = direction === 'rtl' ? sq.x === sqCol : sq.x + 1 === sqCol;
     if (trailingMatch) {
       const key = `${sq.x},${sq.y}`;
       if (!state.sweepState.countedSquareKeys.has(key)) {
@@ -2554,7 +2596,59 @@ export function stepTimelineColumn(
   const minActiveCol = state.lockedColumnsLeft;
   const maxActiveCol = cols - 1 - state.lockedColumnsRight;
   let bridgesNext = false;
-  if (direction === 'rtl') {
+
+  if (isModifiedLineSweep) {
+    // Only delay flushing if currently-pending cells touch another un-swept adjacent/overlapping square or chain
+    const hasPendingCells = state.grid.some((row) =>
+      row.some((c) => c !== null && c.pendingClear)
+    );
+    if (hasPendingCells) {
+      for (const sq of state.squares) {
+        const c00 = state.grid[sq.y][sq.x];
+        const c01 = state.grid[sq.y][sq.x + 1];
+        const c10 = state.grid[sq.y + 1][sq.x];
+        const c11 = state.grid[sq.y + 1][sq.x + 1];
+        const allPending = Boolean(
+          c00?.pendingClear && c01?.pendingClear && c10?.pendingClear && c11?.pendingClear
+        );
+        if (allPending) continue;
+        const touchesPending = Boolean(
+          c00?.pendingClear || c01?.pendingClear || c10?.pendingClear || c11?.pendingClear
+        );
+        const sqCol = getSweepColumnForRow(state, getSquareOwnerRow(sq.y), col);
+        const horizontallyBridged =
+          sq.x === sqCol &&
+          sqCol < maxActiveCol &&
+          (Boolean(c00?.pendingClear) ||
+            Boolean(c10?.pendingClear) ||
+            (sq.x > 0 &&
+              (Boolean(state.grid[sq.y][sq.x - 1]?.pendingClear) ||
+                Boolean(state.grid[sq.y + 1][sq.x - 1]?.pendingClear))));
+        if ((touchesPending || horizontallyBridged) && col < maxActiveCol) {
+          bridgesNext = true;
+          break;
+        }
+      }
+      if (!bridgesNext) {
+        for (let r = 0; r < rows && !bridgesNext; r++) {
+          const rowCol = getSweepColumnForRow(state, r, col);
+          if (rowCol >= maxActiveCol) continue;
+          const cur = state.grid[r][rowCol];
+          const nxt = state.grid[r][rowCol + 1];
+          if (
+            cur?.pendingClear &&
+            cur.chainMarked &&
+            nxt &&
+            nxt.chainMarked &&
+            !nxt.pendingClear &&
+            (cur.isWild || nxt.isWild || cur.color === nxt.color)
+          ) {
+            bridgesNext = true;
+          }
+        }
+      }
+    }
+  } else if (direction === 'rtl') {
     if (col > minActiveCol) {
       if (state.squares.some((sq) => sq.x + 1 === col)) {
         bridgesNext = true;

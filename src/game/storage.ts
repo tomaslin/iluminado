@@ -76,6 +76,11 @@ export const NEW_V5_SHIFTS: ShiftType[] = [
   'vortex_swirl',
 ];
 
+export const NEW_V6_SHIFTS: ShiftType[] = [
+  'split_half_sweep',
+  'diagonal_slant_sweep',
+];
+
 function migrateEnabledShifts(
   parsed: Partial<SavedProgress> & { shiftCatalogVersion?: number }
 ): ShiftType[] {
@@ -90,7 +95,7 @@ function migrateEnabledShifts(
     )
   );
   const ver = parsed.shiftCatalogVersion ?? 1;
-  if (ver >= 5 || filtered.length === 0) {
+  if (ver >= 6 || filtered.length === 0) {
     return filtered;
   }
   const merged = new Set<ShiftType>(filtered);
@@ -109,7 +114,12 @@ function migrateEnabledShifts(
       merged.add(s);
     }
   }
-  for (const s of NEW_V5_SHIFTS) {
+  if (ver < 5) {
+    for (const s of NEW_V5_SHIFTS) {
+      merged.add(s);
+    }
+  }
+  for (const s of NEW_V6_SHIFTS) {
     merged.add(s);
   }
   return Array.from(merged);
@@ -168,7 +178,7 @@ export function saveProgress(progress: SavedProgress): void {
   try {
     localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ ...progress, shiftCatalogVersion: 5 })
+      JSON.stringify({ ...progress, shiftCatalogVersion: 6 })
     );
   } catch {
     // Ignore storage quota errors in private browsing

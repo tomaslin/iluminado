@@ -3,6 +3,7 @@ import {
   BOARD_ROWS,
   LOCK_DELAY_SEC,
   canPlacePiece,
+  getDiagonalSlantSpan,
   getGravityVector,
   getPieceLandingColumns,
 } from './engine';
@@ -2819,25 +2820,40 @@ export class IluminadoCanvasRenderer {
     // Fluid waterline / ink-brushstroke wake trail behind timeline beam(s)
     const isRtlSweep = board.activeShift === 'reverse_sweep';
     const isTwinSweep = board.activeShift === 'twin_sweep';
+    const isSplitHalfSweep = board.activeShift === 'split_half_sweep';
+    const isDiagonalSlantSweep = board.activeShift === 'diagonal_slant_sweep';
     const tlX = isRtlSweep ? x + (1 - timelineNorm) * width : x + timelineNorm * width;
+    const twinNorm = (timelineNorm + 0.5) % 1;
+    const tl2X = x + twinNorm * width;
+    const midSplitRow = Math.floor(boardRows / 2);
+    const splitY = y + midSplitRow * cellSize;
+    const slantCols = getDiagonalSlantSpan(boardCols);
+    const slantNorm = slantCols / Math.max(1, boardCols);
+    const slantBotNorm = ((timelineNorm - slantNorm) % 1 + 1) % 1;
     const activeSweepBonus = board.sweepState.squaresThisSweep > 0 ? 0.35 : 0;
     const glowW = cellSize * (3.15 + activeSweepBonus * 0.9 + subBass * 0.9);
-    const drawSweepWake = (beamX: number, rtl: boolean) => {
+    const drawSweepWakeBand = (
+      beamX: number,
+      rtl: boolean,
+      topY: number,
+      bandH: number
+    ) => {
       const wakeStart = rtl ? beamX + glowW : beamX - glowW;
       const glowGrad = ctx.createLinearGradient(wakeStart, 0, beamX, 0);
       glowGrad.addColorStop(0, 'rgba(250, 246, 238, 0)');
       glowGrad.addColorStop(0.55, palette.timelineGlow);
       glowGrad.addColorStop(1, palette.timelineGlow);
       ctx.fillStyle = glowGrad;
-      ctx.fillRect(rtl ? beamX : beamX - glowW, y, glowW, height);
+      ctx.fillRect(rtl ? beamX : beamX - glowW, topY, glowW, bandH);
 
       ctx.save();
       ctx.strokeStyle = palette.squareHighlight;
       ctx.lineWidth = 1;
       ctx.globalAlpha = 0.26 + Math.pow(1 - beatPhase, 2.2) * 0.12;
       ctx.beginPath();
-      for (let step = 0; step <= 14; step++) {
-        const sy = y + (step / 14) * height;
+      const segs = Math.max(6, Math.round((bandH / Math.max(1, height)) * 14));
+      for (let step = 0; step <= segs; step++) {
+        const sy = topY + (step / segs) * bandH;
         const sx = beamX + (rtl ? 2 : -2) + Math.sin(timeSec * 3.8 + step * 0.8) * 1.4;
         if (step === 0) ctx.moveTo(sx, sy);
         else ctx.lineTo(sx, sy);
@@ -2845,11 +2861,61 @@ export class IluminadoCanvasRenderer {
       ctx.stroke();
       ctx.restore();
     };
-    drawSweepWake(tlX, isRtlSweep);
-    const twinNorm = (timelineNorm + 0.5) % 1;
-    const tl2X = x + twinNorm * width;
-    if (isTwinSweep) {
-      drawSweepWake(tl2X, false);
+
+    const drawSlantWakeSegment = (
+      topNorm: number,
+      botNorm: number,
+      segTopY: number,
+      segBotY: number
+    ) => {
+      const topX = x + topNorm * width;
+      const botX = x + botNorm * width;
+      const midX = (topX + botX) * 0.5;
+      const grad = ctx.createLinearGradient(midX - glowW, 0, midX, 0);
+      grad.addColorStop(0, 'rgba(250, 246, 238, 0)');
+      grad.addColorStop(0.55, palette.timelineGlow);
+      grad.addColorStop(1, palette.timelineGlow);
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.moveTo(topX - glowW, segTopY);
+      ctx.lineTo(topX, segTopY);
+      ctx.lineTo(botX, segBotY);
+      ctx.lineTo(botX - glowW, segBotY);
+      ctx.closePath();
+      ctx.fill();
+    };
+
+    if (isSplitHalfSweep) {
+      drawSweepWakeBand(tlX, false, y, splitY - y);
+      drawSweepWakeBand(tl2X, false, splitY, y + height - splitY);
+      // Crisp horizontal split-plane indicator across board midline
+      ctx.save();
+      ctx.strokeStyle = palette.timelineBeam;
+      ctx.lineWidth = 1.4;
+      ctx.globalAlpha = 0.28 + Math.pow(1 - beatPhase, 2.5) * 0.18;
+      ctx.setLineDash([6, 5]);
+      ctx.beginPath();
+      ctx.moveTo(x, splitY);
+      ctx.lineTo(x + width, splitY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+    } else if (isDiagonalSlantSweep) {
+      const uTop = timelineNorm;
+      const uBot = timelineNorm - slantNorm;
+      if (uBot >= 0) {
+        drawSlantWakeSegment(uTop, uBot, y, y + height);
+      } else {
+        const wrapT = Math.min(1, Math.max(0, uTop / Math.max(0.001, slantNorm)));
+        const wrapY = y + wrapT * height;
+        drawSlantWakeSegment(uTop, 0, y, wrapY);
+        drawSlantWakeSegment(1, 1 + uBot, wrapY, y + height);
+      }
+    } else {
+      drawSweepWakeBand(tlX, isRtlSweep, y, height);
+      if (isTwinSweep) {
+        drawSweepWakeBand(tl2X, false, y, height);
+      }
     }
 
     // Precompute smooth visualX/visualY for active piece along gravityDirection
@@ -3176,21 +3242,28 @@ export class IluminadoCanvasRenderer {
     const activeBeatCol2 = isTwinSweep
       ? Math.floor(twinNorm * boardCols) % boardCols
       : -1;
+    const activeBeatColBot = isSplitHalfSweep
+      ? Math.floor(twinNorm * boardCols) % boardCols
+      : isDiagonalSlantSweep
+      ? Math.floor(slantBotNorm * boardCols) % boardCols
+      : activeBeatCol;
     const isSkyDark = isHexColorDark(palette.skyMid);
     const barStride = boardCols >= 16 ? 4 : 2;
     ctx.save();
     for (let c = 0; c < boardCols; c++) {
       const dx = x + (c + 0.5) * cellSize;
       const dy = y - 13;
-      const isActiveCol = c === activeBeatCol || c === activeBeatCol2;
+      const isActiveColTop = c === activeBeatCol || c === activeBeatCol2;
+      const isActiveColBot =
+        c === activeBeatColBot || (isTwinSweep && c === activeBeatCol2);
       const isDownbeat = c % barStride === 0;
-      ctx.fillStyle = isActiveCol ? palette.hudAccent : palette.timelineBeam;
-      ctx.globalAlpha = isActiveCol ? 0.94 : isDownbeat ? 0.38 : 0.18;
+      ctx.fillStyle = isActiveColTop ? palette.hudAccent : palette.timelineBeam;
+      ctx.globalAlpha = isActiveColTop ? 0.94 : isDownbeat ? 0.38 : 0.18;
       this.drawDiamond(
         ctx,
         dx,
         dy,
-        isActiveCol ? 3.8 + beatPulse * 1.1 : isDownbeat ? 2.6 : 1.9
+        isActiveColTop ? 3.8 + beatPulse * 1.1 : isDownbeat ? 2.6 : 1.9
       );
 
       if (c % Math.max(2, Math.floor(boardCols / 4)) === 0 && !label) {
@@ -3218,8 +3291,8 @@ export class IluminadoCanvasRenderer {
         }
       }
       const distCols = Math.min(
-        Math.abs(c - activeBeatCol),
-        boardCols - Math.abs(c - activeBeatCol)
+        Math.abs(c - activeBeatColBot),
+        boardCols - Math.abs(c - activeBeatColBot)
       );
       const waveBar = Math.max(0, 1 - distCols / 3) * (0.45 + beatPulse * 0.55);
       const bandIdx = bands && bands.length > 0
@@ -3235,10 +3308,10 @@ export class IluminadoCanvasRenderer {
           : high;
       const tickH =
         2.5 + (colHasMarks ? 3.8 : 0) + waveBar * 3.8 + colSpectrum * 7.2;
-      ctx.fillStyle = colHasMarks || isActiveCol ? palette.hudAccent : palette.timelineBeam;
+      ctx.fillStyle = colHasMarks || isActiveColBot ? palette.hudAccent : palette.timelineBeam;
       ctx.globalAlpha = colHasMarks
         ? 0.72 + colSpectrum * 0.24
-        : isActiveCol
+        : isActiveColBot
         ? 0.85
         : 0.22 + colSpectrum * 0.44;
       ctx.fillRect(dx - cellSize * 0.22, y + height + 9, cellSize * 0.44, tickH);
@@ -3452,54 +3525,101 @@ export class IluminadoCanvasRenderer {
       }
     }
 
-    // Prominent Vertical Timeline Sweep Bar(s)
-    const drawSweepBeam = (beamX: number, showCounterBadge: boolean) => {
+    // Prominent Vertical / Modified Timeline Sweep Bar(s)
+    const drawSweepCounterBadge = (beamX: number) => {
+      if (board.sweepState.squaresThisSweep <= 0) return;
+      const badgeText = `${board.sweepState.squaresThisSweep}`;
+      const bx = Math.min(Math.max(beamX, x + 16), x + width - 16);
+      const by = y - 24;
       ctx.save();
+      ctx.fillStyle = palette.squareHighlight;
+      ctx.globalAlpha = 0.28 + beatPulse * 0.22;
+      ctx.beginPath();
+      ctx.arc(bx, by, 16 + beatPulse * 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      ctx.fillStyle = palette.timelineBeam;
+      this.roundRect(ctx, bx - 13, by - 10, 26, 20, 6);
+      ctx.fill();
+      ctx.fillStyle = '#faf6ee';
+      ctx.font = '700 12px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(badgeText, bx, by + 0.5);
+    };
+
+    const drawSweepSegment = (
+      x1: number,
+      y1: number,
+      x2: number,
+      y2: number
+    ) => {
       ctx.strokeStyle = palette.timelineBeam;
       ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.moveTo(beamX, y - 8);
-      ctx.lineTo(beamX, y + height + 8);
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
       ctx.stroke();
 
       ctx.strokeStyle = palette.squareHighlight;
       ctx.globalAlpha = 0.45 + beatPulse * 0.25;
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(beamX, y - 6);
-      ctx.lineTo(beamX, y + height + 6);
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
       ctx.stroke();
       ctx.globalAlpha = 1;
+    };
 
+    const drawSweepBeam = (beamX: number, showCounterBadge: boolean) => {
+      ctx.save();
+      drawSweepSegment(beamX, y - 8, beamX, y + height + 8);
       ctx.fillStyle = palette.timelineBeam;
       this.drawDiamond(ctx, beamX, y - 9, 6 + beatPulse * 1.1);
       this.drawDiamond(ctx, beamX, y + height + 9, 6 + beatPulse * 1.1);
-
-      if (showCounterBadge && board.sweepState.squaresThisSweep > 0) {
-        const badgeText = `${board.sweepState.squaresThisSweep}`;
-        const bx = Math.min(Math.max(beamX, x + 16), x + width - 16);
-        const by = y - 24;
-        ctx.save();
-        ctx.fillStyle = palette.squareHighlight;
-        ctx.globalAlpha = 0.28 + beatPulse * 0.22;
-        ctx.beginPath();
-        ctx.arc(bx, by, 16 + beatPulse * 3, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.restore();
-        ctx.fillStyle = palette.timelineBeam;
-        this.roundRect(ctx, bx - 13, by - 10, 26, 20, 6);
-        ctx.fill();
-        ctx.fillStyle = '#faf6ee';
-        ctx.font = '700 12px "JetBrains Mono", monospace';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(badgeText, bx, by + 0.5);
-      }
+      if (showCounterBadge) drawSweepCounterBadge(beamX);
       ctx.restore();
     };
-    drawSweepBeam(tlX, true);
-    if (isTwinSweep) {
-      drawSweepBeam(tl2X, false);
+
+    if (isSplitHalfSweep) {
+      ctx.save();
+      // Upper half beam + top diamond + midline split junction node
+      drawSweepSegment(tlX, y - 8, tlX, splitY);
+      ctx.fillStyle = palette.timelineBeam;
+      this.drawDiamond(ctx, tlX, y - 9, 6 + beatPulse * 1.1);
+      this.drawDiamond(ctx, tlX, splitY, 4.6 + beatPulse * 0.8);
+
+      // Lower half beam (phase-shifted 50%) + midline split junction node + bottom diamond
+      drawSweepSegment(tl2X, splitY, tl2X, y + height + 8);
+      this.drawDiamond(ctx, tl2X, splitY, 4.6 + beatPulse * 0.8);
+      this.drawDiamond(ctx, tl2X, y + height + 9, 6 + beatPulse * 1.1);
+
+      drawSweepCounterBadge(tlX);
+      ctx.restore();
+    } else if (isDiagonalSlantSweep) {
+      ctx.save();
+      const uTop = timelineNorm;
+      const uBot = timelineNorm - slantNorm;
+      const topX = x + uTop * width;
+      const botX = x + slantBotNorm * width;
+      if (uBot >= 0) {
+        drawSweepSegment(topX, y - 6, botX, y + height + 6);
+      } else {
+        const wrapT = Math.min(1, Math.max(0, uTop / Math.max(0.001, slantNorm)));
+        const wrapY = y + wrapT * height;
+        drawSweepSegment(topX, y - 6, x, wrapY);
+        drawSweepSegment(x + width, wrapY, botX, y + height + 6);
+      }
+      ctx.fillStyle = palette.timelineBeam;
+      this.drawDiamond(ctx, topX, y - 9, 6 + beatPulse * 1.1);
+      this.drawDiamond(ctx, botX, y + height + 9, 6 + beatPulse * 1.1);
+      drawSweepCounterBadge(topX);
+      ctx.restore();
+    } else {
+      drawSweepBeam(tlX, true);
+      if (isTwinSweep) {
+        drawSweepBeam(tl2X, false);
+      }
     }
 
     ctx.restore();

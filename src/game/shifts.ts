@@ -277,6 +277,22 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
       'Flips the beat-locked timeline beam to sweep from right to left across the playfield.',
   },
   {
+    id: 'split_half_sweep',
+    name: 'Split-Half Timeline',
+    shortLabel: 'Split Line',
+    category: 'core',
+    description:
+      'Splits the sweep bar horizontally at mid-screen so the top and bottom halves clear 4 beats apart.',
+  },
+  {
+    id: 'diagonal_slant_sweep',
+    name: 'Diagonal Slant Line',
+    shortLabel: 'Slant Line',
+    category: 'core',
+    description:
+      'Tilts the timeline sweep into a diagonal slash so upper rows clear ahead of lower rows.',
+  },
+  {
     id: 'staircase_terraces',
     name: 'Staircase Terraces',
     shortLabel: 'Terraces',
@@ -2410,6 +2426,8 @@ export function applyBoardShift(
     case 'portal_wrap':
     case 'reverse_sweep':
     case 'twin_sweep':
+    case 'split_half_sweep':
+    case 'diagonal_slant_sweep':
     case 'brick_l_trio':
     case 'chameleon_rotate':
     case 'prism_wild_bricks':

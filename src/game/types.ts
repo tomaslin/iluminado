@@ -57,7 +57,9 @@ export type ShiftType =
   | 'horizon_shear'
   | 'zipper_merge'
   | 'mirror_flip'
-  | 'vortex_swirl';
+  | 'vortex_swirl'
+  | 'split_half_sweep'
+  | 'diagonal_slant_sweep';
 
 export type ObstacleVisualStyle =
   | 'stone'

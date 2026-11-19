@@ -21,7 +21,9 @@ import {
   finalizeSweep,
   flushPendingGarbage,
   generateRandomPiece,
+  getDiagonalSlantSpan,
   getPieceLandingColumns,
+  getSweepColumnForRow,
   hardDropPiece,
   isActivePieceGrounded,
   lockActivePiece,
@@ -62,6 +64,7 @@ import {
 } from './skins';
 import {
   NEW_V5_SHIFTS,
+  NEW_V6_SHIFTS,
   applyDailyResultToProgress,
   applyTimeAttackSplitsToProgress,
   getEffectiveDailyStreak,
@@ -1373,9 +1376,9 @@ test('Dramatic swaps (inside_out_swap, horizon_shear, zipper_merge) preserve exa
   }
 });
 
-test('All 41 shift types execute cleanly without crashing or causing premature game over', () => {
+test('All 43 shift types execute cleanly without crashing or causing premature game over', () => {
   const rng = createSeededRng('all-shifts-smoke');
-  assert.equal(ALL_SHIFT_TYPES.length, 41);
+  assert.equal(ALL_SHIFT_TYPES.length, 43);
   for (const shiftType of ALL_SHIFT_TYPES) {
     const state = createInitialBoardState(0);
     for (let c = 3; c < state.cols - 3; c++) {
@@ -1772,15 +1775,26 @@ test('storage.ts persists and sanitizes enabledShifts including explicit empty a
       assert.ok(migratedV2.enabledShifts.includes(s), `v2->v5 migration should enable ${s}`);
     }
 
-    // v4 save merges only NEW_V5_SHIFTS without adding missing older shifts
+    // v4 save merges NEW_V5_SHIFTS & NEW_V6_SHIFTS without adding missing older shifts
     store.set(
       'iluminado_progress_v2',
       JSON.stringify({ enabledShifts: ['rotate_90'], shiftCatalogVersion: 4 })
     );
     const migratedV4 = loadProgress();
     assert.equal(migratedV4.enabledShifts.includes('split_canyon'), false);
-    for (const s of NEW_V5_SHIFTS) {
-      assert.ok(migratedV4.enabledShifts.includes(s), `v4->v5 migration should enable ${s}`);
+    for (const s of [...NEW_V5_SHIFTS, ...NEW_V6_SHIFTS]) {
+      assert.ok(migratedV4.enabledShifts.includes(s), `v4->v6 migration should enable ${s}`);
+    }
+
+    // v5 save merges only NEW_V6_SHIFTS without overriding v5 choices
+    store.set(
+      'iluminado_progress_v2',
+      JSON.stringify({ enabledShifts: ['rotate_90', 'twin_sweep'], shiftCatalogVersion: 5 })
+    );
+    const migratedV5 = loadProgress();
+    assert.equal(migratedV5.enabledShifts.includes('mirror_flip'), false);
+    for (const s of NEW_V6_SHIFTS) {
+      assert.ok(migratedV5.enabledShifts.includes(s), `v5->v6 migration should enable ${s}`);
     }
 
     assert.equal(getPreviousDateKey('2026-11-16'), '2026-11-15');
@@ -1955,6 +1969,146 @@ test('New silhouette, obstacle, brick, and swap shifts preserve playability and 
     assert.equal(after1, count1, `${swapShift} preserves color 1 count`);
   }
 });
+
+test('split_half_sweep clears top and bottom screen halves at staggered opposite times without splitting straddling squares', () => {
+  const rng = createSeededRng('split-half-sweep-test');
+  const state = createInitialBoardState(0, rng);
+  applyBoardShift(state, 'split_half_sweep', { animateBricks: false, rng });
+
+  // Place a 2x2 square in upper half (rows 0..1, cols 2..3) and another in lower half (rows 8..9, cols 2..3)
+  // Fill supporting columns below upper square with alternating non-matching blocks so it sits stably at rows 0..1
+  for (let r = 2; r < 8; r++) {
+    state.grid[r][2] = makeCell(((r + 1) % 2) as CellColor);
+    state.grid[r][3] = makeCell((r % 2) as CellColor);
+  }
+  state.grid[0][2] = makeCell(0);
+  state.grid[0][3] = makeCell(0);
+  state.grid[1][2] = makeCell(0);
+  state.grid[1][3] = makeCell(0);
+
+  state.grid[8][2] = makeCell(1);
+  state.grid[8][3] = makeCell(1);
+  state.grid[9][2] = makeCell(1);
+  state.grid[9][3] = makeCell(1);
+
+  assert.equal(detectBoardMarks(state.grid).length, 2);
+
+  // At col = 3, upper half beam reaches trailing edge (col 3), while bottom half is at col 11 -> ONLY top square clears!
+  let topRemoved = 0;
+  for (let c = 0; c <= 3; c++) {
+    topRemoved += stepTimelineColumn(state, c).cellsRemovedNow;
+  }
+  assert.equal(topRemoved, 4, 'top square must clear 4 cells at col 3');
+  assert.equal(state.sweepState.squaresThisSweep, 1);
+  assert.equal(state.grid[0][2], null, 'top square must clear at col 3');
+  assert.equal(state.grid[1][3], null, 'top square must clear at col 3');
+  assert.equal(state.grid[8][2]?.color, 1, 'bottom square must still be intact at col 3');
+  assert.equal(state.grid[8][2]?.fallOffset, 0);
+
+  // Continue sweeping through col = 11 ((11 + 8) % 16 === 3): bottom square now clears cleanly and spacer drops 2 rows!
+  let botRemoved = 0;
+  for (let c = 4; c <= 11; c++) {
+    botRemoved += stepTimelineColumn(state, c).cellsRemovedNow;
+  }
+  assert.equal(botRemoved, 4, 'bottom square clears 4 cells at tick 11');
+  assert.equal(state.sweepState.squaresThisSweep, 2);
+  assert.equal(state.grid[2][2], null, 'spacer blocks above bottom square dropped cleanly by 2 rows');
+  assert.equal(state.grid[8][2]?.fallOffset, 2);
+
+  for (let c = 12; c < state.cols; c++) {
+    stepTimelineColumn(state, c);
+  }
+  const ev = finalizeSweep(state, true);
+  assert.equal(ev?.squaresCleared, 2);
+
+  // Also verify a square straddling the midline (rows 4..5) clears intact as a single unit
+  const straddle = createInitialBoardState(0, rng);
+  applyBoardShift(straddle, 'split_half_sweep', { animateBricks: false, rng });
+  for (let r = 6; r < 10; r++) {
+    straddle.grid[r][4] = makeCell(((r + 1) % 2) as CellColor);
+    straddle.grid[r][5] = makeCell((r % 2) as CellColor);
+  }
+  straddle.grid[4][4] = makeCell(0);
+  straddle.grid[4][5] = makeCell(0);
+  straddle.grid[5][4] = makeCell(0);
+  straddle.grid[5][5] = makeCell(0);
+  for (let c = 0; c <= 5; c++) {
+    stepTimelineColumn(straddle, c);
+  }
+  assert.equal(straddle.grid[4][4], null);
+  assert.equal(straddle.grid[5][5], null);
+  const straddleEv = finalizeSweep(straddle, true);
+  assert.equal(straddleEv?.squaresCleared, 1);
+});
+
+test('diagonal_slant_sweep clears upper rows ahead of lower rows and bridges overlapping clusters cleanly', () => {
+  const rng = createSeededRng('diagonal-slant-test');
+  const state = createInitialBoardState(0, rng);
+  applyBoardShift(state, 'diagonal_slant_sweep', { animateBricks: false, rng });
+
+  const span = getDiagonalSlantSpan(state.cols);
+  assert.equal(span, 6);
+  assert.equal(getSweepColumnForRow(state, 0, 5), 5);
+  assert.equal(getSweepColumnForRow(state, state.rows - 1, 5), (5 - 6 + 16) % 16);
+
+  // Upper square at cols 4..5 (rows 0..1) and bottom square at cols 4..5 (rows 8..9) separated vertically
+  for (let r = 2; r < 8; r++) {
+    state.grid[r][4] = makeCell(((r + 1) % 2) as CellColor);
+    state.grid[r][5] = makeCell((r % 2) as CellColor);
+  }
+  state.grid[0][4] = makeCell(0);
+  state.grid[0][5] = makeCell(0);
+  state.grid[1][4] = makeCell(0);
+  state.grid[1][5] = makeCell(0);
+
+  state.grid[8][4] = makeCell(1);
+  state.grid[8][5] = makeCell(1);
+  state.grid[9][4] = makeCell(1);
+  state.grid[9][5] = makeCell(1);
+
+  // Row 1 lags by 1 col -> triggers trailing edge 5 at tick col = 6, while row 9 lags by 6 -> triggers at tick col = 11
+  let upperRemoved = 0;
+  for (let c = 0; c <= 6; c++) {
+    upperRemoved += stepTimelineColumn(state, c).cellsRemovedNow;
+  }
+  assert.equal(upperRemoved, 4, 'upper square clears earlier along diagonal line');
+  assert.equal(state.sweepState.squaresThisSweep, 1);
+  assert.equal(state.grid[0][4], null);
+  assert.equal(state.grid[1][5], null);
+  assert.equal(state.grid[8][4]?.color, 1, 'lower square awaits diagonal trailing edge');
+  assert.equal(state.grid[8][4]?.fallOffset, 0);
+
+  let lowerRemoved = 0;
+  for (let c = 7; c <= 11; c++) {
+    lowerRemoved += stepTimelineColumn(state, c).cellsRemovedNow;
+  }
+  assert.equal(lowerRemoved, 4, 'lower square clears when diagonal bottom reaches col 5');
+  assert.equal(state.sweepState.squaresThisSweep, 2);
+  assert.equal(state.grid[2][4], null, 'spacer dropped by 2 rows after bottom square cleared');
+  assert.equal(state.grid[8][4]?.fallOffset, 2);
+
+  for (let c = 12; c < state.cols; c++) {
+    stepTimelineColumn(state, c);
+  }
+  const ev = finalizeSweep(state, true);
+  assert.equal(ev?.squaresCleared, 2);
+
+  // Overlapping vertical 4-tall stack (rows 5..8, cols 4..5) must bridge and award all 3 squares without stranding!
+  const mono = createInitialBoardState(0, rng);
+  applyBoardShift(mono, 'diagonal_slant_sweep', { animateBricks: false, rng });
+  for (let r = 5; r <= 8; r++) {
+    mono.grid[r][4] = makeCell(0);
+    mono.grid[r][5] = makeCell(0);
+  }
+  mono.grid[9][4] = makeCell(1);
+  mono.grid[9][5] = makeCell(1);
+  for (let c = 0; c < mono.cols; c++) {
+    stepTimelineColumn(mono, c);
+  }
+  const monoEv = finalizeSweep(mono, true);
+  assert.equal(monoEv?.squaresCleared, 3, 'all 3 vertically overlapping squares must clear cleanly');
+});
+
 
 
 
