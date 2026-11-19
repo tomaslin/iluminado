@@ -40,6 +40,10 @@ interface TitleScreenProps {
   progress: SavedProgress;
   muted: boolean;
   onToggleMute: () => void;
+  musicVolume: number;
+  sfxVolume: number;
+  onChangeMusicVolume: (val: number) => void;
+  onChangeSfxVolume: (val: number) => void;
   previewSkin: SkinConfig;
   onStepPreviewSkin: (delta: -1 | 1) => void;
   getSpectrumSnapshot?: () => { bands: number[]; hasLiveAudio: boolean };
@@ -367,6 +371,10 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
   progress,
   muted,
   onToggleMute,
+  musicVolume,
+  sfxVolume,
+  onChangeMusicVolume,
+  onChangeSfxVolume,
   previewSkin,
   onStepPreviewSkin,
   getSpectrumSnapshot,
@@ -377,8 +385,30 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
   const [countdownText, setCountdownText] = useState(() =>
     formatCountdownHMS(getMsUntilNextDaily())
   );
+  const [audioMenuOpen, setAudioMenuOpen] = useState(false);
+  const audioMenuRef = React.useRef<HTMLDivElement | null>(null);
   const eqBarRefs = React.useRef<Array<HTMLSpanElement | null>>([]);
   const smoothedBarsRef = React.useRef<number[]>(EQ_HEIGHTS.map((h) => h / 100));
+
+  useEffect(() => {
+    if (!audioMenuOpen) return;
+    const onDocDown = (e: PointerEvent) => {
+      if (audioMenuRef.current && !audioMenuRef.current.contains(e.target as Node)) {
+        setAudioMenuOpen(false);
+      }
+    };
+    const onEsc = (e: KeyboardEvent) => {
+      if (e.code === 'Escape') {
+        setAudioMenuOpen(false);
+      }
+    };
+    window.addEventListener('pointerdown', onDocDown);
+    window.addEventListener('keydown', onEsc);
+    return () => {
+      window.removeEventListener('pointerdown', onDocDown);
+      window.removeEventListener('keydown', onEsc);
+    };
+  }, [audioMenuOpen]);
 
   useEffect(() => {
     if (selectedMode !== 'daily') return;
@@ -607,25 +637,104 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
             heroInk={heroInk}
           />
 
-          {/* Audio Mute Toggle */}
-          <button
-            type="button"
-            onClick={onToggleMute}
-            aria-label={muted ? 'Unmute audio (M)' : 'Mute audio (M)'}
-            className="h-9 px-3 rounded-xl flex items-center gap-1.5 text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap"
-            style={{
-              backgroundColor: topChipBg,
-              color: heroInk,
-              border: topChipBorder,
-            }}
-          >
-            {muted ? (
-              <VolumeX className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
-            ) : (
-              <Volume2 className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+          {/* Audio Mute + Volume Mix Popover */}
+          <div className="relative flex items-center" ref={audioMenuRef}>
+            <div
+              className="h-9 rounded-xl flex items-center overflow-hidden transition-colors"
+              style={{
+                backgroundColor: topChipBg,
+                color: heroInk,
+                border: topChipBorder,
+              }}
+            >
+              <button
+                type="button"
+                onClick={onToggleMute}
+                aria-label={muted ? 'Unmute audio (M)' : 'Mute audio (M)'}
+                className="h-9 px-2.5 flex items-center gap-1.5 text-xs font-semibold hover:bg-[#201c2c]/10 transition-colors cursor-pointer whitespace-nowrap"
+              >
+                {muted ? (
+                  <VolumeX className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                ) : (
+                  <Volume2 className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
+                )}
+                <span className="hidden sm:inline">{muted ? 'Muted' : 'Sound'}</span>
+              </button>
+              <button
+                type="button"
+                data-testid="title-volume-toggle"
+                onClick={() => setAudioMenuOpen((v) => !v)}
+                aria-label="Audio volume settings"
+                aria-expanded={audioMenuOpen}
+                className="h-9 px-2 border-l border-[#201c2c]/10 flex items-center justify-center hover:bg-[#201c2c]/10 transition-colors cursor-pointer text-[11px] font-mono-tabular"
+              >
+                ▾
+              </button>
+            </div>
+
+            {audioMenuOpen && (
+              <div
+                data-testid="title-volume-popover"
+                role="dialog"
+                aria-label="Audio Volumes"
+                className="absolute right-0 top-11 w-56 rounded-2xl p-4 shadow-xl z-40 space-y-3"
+                style={{
+                  backgroundColor: palette.hudCardBg,
+                  color: palette.hudInk,
+                  border: `1.5px solid ${palette.boardFrame}`,
+                }}
+              >
+                <div>
+                  <div className="flex items-center justify-between text-xs font-semibold mb-1">
+                    <label htmlFor="title-music-vol">Music</label>
+                    <span
+                      className="font-mono-tabular text-[11px]"
+                      style={{ color: palette.hudMuted }}
+                    >
+                      {Math.round(musicVolume * 100)}%
+                    </span>
+                  </div>
+                  <input
+                    id="title-music-vol"
+                    data-testid="title-music-volume-slider"
+                    type="range"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={Math.round(musicVolume * 100)}
+                    onChange={(e) => onChangeMusicVolume(Number(e.target.value) / 100)}
+                    aria-label="Music volume"
+                    className="w-full h-1.5 rounded-full cursor-pointer"
+                    style={{ accentColor: palette.hudAccent }}
+                  />
+                </div>
+                <div>
+                  <div className="flex items-center justify-between text-xs font-semibold mb-1">
+                    <label htmlFor="title-sfx-vol">SFX</label>
+                    <span
+                      className="font-mono-tabular text-[11px]"
+                      style={{ color: palette.hudMuted }}
+                    >
+                      {Math.round(sfxVolume * 100)}%
+                    </span>
+                  </div>
+                  <input
+                    id="title-sfx-vol"
+                    data-testid="title-sfx-volume-slider"
+                    type="range"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={Math.round(sfxVolume * 100)}
+                    onChange={(e) => onChangeSfxVolume(Number(e.target.value) / 100)}
+                    aria-label="SFX volume"
+                    className="w-full h-1.5 rounded-full cursor-pointer"
+                    style={{ accentColor: palette.hudAccent }}
+                  />
+                </div>
+              </div>
             )}
-            <span className="hidden sm:inline">{muted ? 'Muted' : 'Sound'}</span>
-          </button>
+          </div>
         </div>
       </header>
 

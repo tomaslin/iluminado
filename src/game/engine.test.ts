@@ -41,8 +41,12 @@ import {
 import { computeCpuBestMove, checkPuzzlePatternMatch, PUZZLE_LEVELS } from './modes';
 import {
   IluminadoAudioEngine,
+  MAX_DECODED_BUFFER_CACHE,
+  computeBeatFromBufferPosition,
+  computeQuantizedSfxDelaySec,
   computeStemLevels,
   getTrackTrimGain,
+  resolveLoopTiming,
 } from './audio';
 import {
   buildDailyStartingGrid,
@@ -63,6 +67,8 @@ import {
   pickRandomSkinIndex,
 } from './skins';
 import {
+  DEFAULT_MUSIC_VOLUME,
+  DEFAULT_SFX_VOLUME,
   NEW_V5_SHIFTS,
   NEW_V6_SHIFTS,
   applyDailyResultToProgress,
@@ -2299,5 +2305,134 @@ test('Shift classification partitions all 42 shifts into Start-Ready vs Needs-Br
   for (let i = 0; i < 15; i++) {
     const picked = pickNextShift(['mirror_flip', 'vortex_swirl', 'portal_wrap'], null, Math.random, emptyBoard);
     assert.equal(picked, 'portal_wrap');
+  }
+});
+
+test('All 50 skins carry measured BPM, silent-intro firstBeatSec, and exact whole-sweep loop boundaries', () => {
+  const expectedKnownBpms: Record<string, number> = {
+    'monument-courtyard': 80,
+    'gris-watercolor': 90,
+    'limbo-mist': 80,
+    'abzu-cathedral': 90,
+    'machinarium-brass': 160,
+    'sable-moebius': 130,
+  };
+  for (const [id, bpm] of Object.entries(expectedKnownBpms)) {
+    const sk = SKINS.find((s) => s.id === id);
+    assert.ok(sk, `Missing skin ${id}`);
+    assert.equal(sk.bpm, bpm, `${id} should use measured BPM ${bpm}`);
+  }
+  for (const sk of SKINS) {
+    assert.ok(typeof sk.music.firstBeatSec === 'number' && sk.music.firstBeatSec >= 0);
+    assert.ok(typeof sk.music.loopSweeps === 'number' && sk.music.loopSweeps >= 1);
+    assert.ok(typeof sk.music.loopEndSec === 'number' && sk.music.loopEndSec > sk.music.firstBeatSec);
+    const sweepSec = (8 * 60) / sk.bpm;
+    const expectedEnd = sk.music.firstBeatSec + sk.music.loopSweeps * sweepSec;
+    assert.ok(
+      Math.abs(sk.music.loopEndSec - expectedEnd) <= 0.015,
+      `${sk.id} loopEndSec (${sk.music.loopEndSec}) must match whole-sweep multiple (${expectedEnd.toFixed(3)})`
+    );
+  }
+});
+
+test('resolveLoopTiming and computeBeatFromBufferPosition stay locked to whole 8-beat sweeps', () => {
+  const skin = SKINS[0]; // 80 BPM, sweepSec = 6.0s
+  const timing = resolveLoopTiming(skin, 176.2);
+  assert.equal(timing.firstBeatSec, skin.music.firstBeatSec);
+  assert.equal(timing.loopSweeps, skin.music.loopSweeps);
+  const sweepSec = (8 * 60) / skin.bpm;
+  assert.ok(Math.abs(timing.loopEndSec - (timing.firstBeatSec + timing.loopSweeps * sweepSec)) < 1e-6);
+
+  // At firstBeatSec, beat position is 0
+  assert.equal(
+    computeBeatFromBufferPosition({
+      rawUnwrappedPosSec: timing.firstBeatSec,
+      firstBeatSec: timing.firstBeatSec,
+      bpm: skin.bpm,
+    }),
+    0
+  );
+  // After exactly 1 whole sweep duration, beat position advances by exactly 8 beats
+  const beatAtSweep1 = computeBeatFromBufferPosition({
+    rawUnwrappedPosSec: timing.firstBeatSec + sweepSec,
+    firstBeatSec: timing.firstBeatSec,
+    bpm: skin.bpm,
+  });
+  assert.ok(Math.abs(beatAtSweep1 - 8) < 1e-9);
+});
+
+test('computeQuantizedSfxDelaySec snaps to next 16th note within 60ms and skips far gaps', () => {
+  // At 120 BPM, one beat = 0.5s, one 16th = 0.125s
+  assert.equal(computeQuantizedSfxDelaySec(2.0, 120, 0.06), 0);
+  // beatPos = 0.18 -> frac16 = 0.72 -> 0.28 of a 16th remaining = 0.28 * 0.125 = 0.035s (<= 0.06s)
+  const snapDelay = computeQuantizedSfxDelaySec(0.18, 120, 0.06);
+  assert.ok(Math.abs(snapDelay - 0.035) < 1e-6);
+  // beatPos = 0.05 -> frac16 = 0.20 -> 0.80 of a 16th remaining = 0.100s (> 0.06s -> immediate 0)
+  assert.equal(computeQuantizedSfxDelaySec(0.05, 120, 0.06), 0);
+});
+
+test('IluminadoAudioEngine enforces 3-buffer memory cap, throttles rapid move ticks, and clamps volumes', () => {
+  assert.equal(MAX_DECODED_BUFFER_CACHE, 3);
+  const engine = new IluminadoAudioEngine();
+
+  // Populate internal decoded buffer cache directly to test LRU eviction strictly to 3 entries
+  const fakeCache = (engine as unknown as { audioBuffers: Map<string, unknown> }).audioBuffers;
+  fakeCache.set('music/world1.mp3', {});
+  fakeCache.set('music/world2.mp3', {});
+  fakeCache.set('music/world3.mp3', {});
+  fakeCache.set('music/world4.mp3', {});
+  fakeCache.set('music/world5.mp3', {});
+  engine.trimBufferCaches('music/world5.mp3');
+  assert.equal(engine.getDecodedBufferCount(), 3);
+  assert.ok(engine.getCachedBufferUrls().includes('music/world5.mp3'));
+
+  // Rapid 42ms DAS move repeats are throttled cleanly (>78ms cooldown)
+  assert.equal(engine.playMove(SKINS[0], 1000), true);
+  assert.equal(engine.playMove(SKINS[0], 1042), false);
+  assert.equal(engine.playMove(SKINS[0], 1084), true);
+
+  // Volume clamping
+  engine.setMusicVolume(1.5);
+  assert.equal(engine.getMusicVolume(), 1);
+  engine.setMusicVolume(-0.2);
+  assert.equal(engine.getMusicVolume(), 0);
+  engine.setSfxVolume(0.42);
+  assert.equal(engine.getSfxVolume(), 0.42);
+});
+
+test('storage persists and sanitizes musicVolume and sfxVolume with sensible defaults', () => {
+  const loadedDefault = loadProgress();
+  assert.equal(loadedDefault.musicVolume, DEFAULT_MUSIC_VOLUME);
+  assert.equal(loadedDefault.sfxVolume, DEFAULT_SFX_VOLUME);
+
+  const store = new Map<string, string>();
+  (globalThis as unknown as { localStorage?: Storage }).localStorage = {
+    get length() {
+      return store.size;
+    },
+    clear() {
+      store.clear();
+    },
+    getItem(k: string) {
+      return store.get(k) ?? null;
+    },
+    key(i: number) {
+      return Array.from(store.keys())[i] ?? null;
+    },
+    removeItem(k: string) {
+      store.delete(k);
+    },
+    setItem(k: string, v: string) {
+      store.set(k, v);
+    },
+  };
+
+  try {
+    saveProgress({ ...loadedDefault, musicVolume: 0.35, sfxVolume: 0.62 });
+    const reloaded = loadProgress();
+    assert.equal(reloaded.musicVolume, 0.35);
+    assert.equal(reloaded.sfxVolume, 0.62);
+  } finally {
+    delete (globalThis as unknown as { localStorage?: Storage }).localStorage;
   }
 });

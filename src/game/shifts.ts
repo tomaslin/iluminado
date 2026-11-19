@@ -12,6 +12,8 @@ import {
   rotateBoard90,
   settleBoard,
   settleBoardForDirection,
+  stepCeilingPressSweep,
+  stepRisingTideSweep,
 } from './engine';
 import {
   BoardState,
@@ -21,6 +23,8 @@ import {
   ObstacleVisualStyle,
   PatrollingBumperState,
   PieceShapeMode,
+  ShiftDraftOption,
+  ShiftPolarity,
   ShiftType,
 } from './types';
 
@@ -31,6 +35,7 @@ export interface ShiftDefinition {
   name: string;
   shortLabel: string;
   category: ShiftCategory;
+  polarity: ShiftPolarity;
   requiresBricks: boolean;
   description: string;
 }
@@ -49,6 +54,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: '90° Board Rotate',
     shortLabel: '90° Rotate',
     category: 'core',
+    polarity: 'neutral',
     requiresBricks: true,
     description:
       'Turns the entire playfield 90° clockwise or counter-clockwise and drops stacks to the new floor.',
@@ -58,6 +64,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Expand / Contract (±2)',
     shortLabel: 'Size Shift',
     category: 'core',
+    polarity: 'neutral',
     requiresBricks: false,
     description:
       'Grows or shrinks board width and height by up to 2 blocks while preserving your stacks.',
@@ -67,6 +74,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Monochrome Line / Diagonal',
     shortLabel: 'Color Line',
     category: 'core',
+    polarity: 'boon',
     requiresBricks: true,
     description:
       'Converts a single horizontal row, vertical column, or diagonal line into one uniform color.',
@@ -76,6 +84,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Directional Gravity Flow',
     shortLabel: 'Gravity Flow',
     category: 'core',
+    polarity: 'neutral',
     requiresBricks: true,
     description:
       'Shifts gravity and piece entry to arrive from the left, right, or bottom edge instead of the top.',
@@ -85,6 +94,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'The Split Canyon',
     shortLabel: 'Split Canyon',
     category: 'silhouette',
+    polarity: 'bane',
     requiresBricks: false,
     description:
       'Cracks stacks left and right to carve an impassable 2-block-wide stone chasm down the center.',
@@ -94,6 +104,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Hourglass / Funnel Walls',
     shortLabel: 'Funnel Walls',
     category: 'silhouette',
+    polarity: 'bane',
     requiresBricks: false,
     description:
       'Steps neutral side bumpers inward by 1–2 blocks across middle or lower rows.',
@@ -103,6 +114,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Twin Elevators',
     shortLabel: 'Twin Elevators',
     category: 'silhouette',
+    polarity: 'neutral',
     requiresBricks: true,
     description:
       'Lifts the left half up +2 blocks and lowers the right stage by 1 block into an asymmetric step.',
@@ -112,6 +124,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Rolling Wave Floor',
     shortLabel: 'Wave Floor',
     category: 'silhouette',
+    polarity: 'bane',
     requiresBricks: false,
     description:
       'Undulates the stone floor into a +0 to +2 sine wave, lifting stacks into rolling hills.',
@@ -121,6 +134,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Octagon Cutoffs',
     shortLabel: 'Octagon Arena',
     category: 'silhouette',
+    polarity: 'bane',
     requiresBricks: false,
     description:
       'Locks stepped neutral stone blocks into all four corners to form an octagonal playfield.',
@@ -130,6 +144,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Floating Mid-Air Shelf',
     shortLabel: 'Mid-Air Shelf',
     category: 'obstacles',
+    polarity: 'bane',
     requiresBricks: false,
     description:
       'Spawns a solid horizontal girder mid-air, turning the board into a two-story bunker.',
@@ -139,6 +154,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Castle Battlements',
     shortLabel: 'Battlements',
     category: 'obstacles',
+    polarity: 'bane',
     requiresBricks: false,
     description:
       'Raises 2-block neutral stone pillars every 3rd column from the floor to form narrow trenches.',
@@ -148,6 +164,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Patrolling 2×2 Bumper',
     shortLabel: '2×2 Bumper',
     category: 'obstacles',
+    polarity: 'bane',
     requiresBricks: false,
     description:
       'Suspends a metallic 2×2 obstacle mid-air that slides left and right on the beat.',
@@ -157,6 +174,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Corner Bastion (4×4)',
     shortLabel: 'Corner Block',
     category: 'obstacles',
+    polarity: 'bane',
     requiresBricks: false,
     description:
       'Seals a compact 4×4 stone bastion in one lower corner once per run while keeping main drop lanes open.',
@@ -166,6 +184,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Bottom Plinth (4×3)',
     shortLabel: 'Bottom Plinth',
     category: 'obstacles',
+    polarity: 'bane',
     requiresBricks: false,
     description:
       'Raises a low stone plinth along the bottom edge once per run without blocking central drops.',
@@ -175,6 +194,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Side Margin Ledge (3×4)',
     shortLabel: 'Side Ledge',
     category: 'obstacles',
+    polarity: 'bane',
     requiresBricks: false,
     description:
       'Places a stepped stone margin along the left or right wall once per run to narrow the wing gently.',
@@ -184,6 +204,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: '2×1 / 1×2 Domino Bricks',
     shortLabel: '2×1 Bricks',
     category: 'bricks',
+    polarity: 'boon',
     requiresBricks: false,
     description:
       'Transforms incoming falling pieces into nimble 2×1 / 1×2 domino bricks for one turn.',
@@ -193,6 +214,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: '1×3 / 3×1 Trio Bricks',
     shortLabel: '1×3 Bricks',
     category: 'bricks',
+    polarity: 'neutral',
     requiresBricks: false,
     description:
       'Transforms incoming falling pieces into linear 1×3 and 3×1 trio bricks for one turn.',
@@ -202,6 +224,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: '3×2 / 2×3 Slab Bricks',
     shortLabel: '3×2 Bricks',
     category: 'bricks',
+    polarity: 'neutral',
     requiresBricks: false,
     description:
       'Transforms incoming falling pieces into wide 3×2 / 2×3 six-tile slabs for one turn.',
@@ -211,6 +234,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Tetromino Bricks',
     shortLabel: 'Tetrominoes',
     category: 'bricks',
+    polarity: 'neutral',
     requiresBricks: false,
     description:
       'Transforms incoming falling pieces into classic 4-tile I, O, T, S, Z, J, L shapes for one turn.',
@@ -220,6 +244,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Obsidian Blocked Bricks',
     shortLabel: 'Blocked 2×2',
     category: 'bricks',
+    polarity: 'bane',
     requiresBricks: false,
     description:
       'Mixes a solid dark obsidian block into occasional 2×2 pieces for one turn; shatters beside clears.',
@@ -229,6 +254,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: '3-Color Spectrum',
     shortLabel: '3 Colors',
     category: 'bricks',
+    polarity: 'bane',
     requiresBricks: false,
     description:
       'Introduces a third block color onto the board and incoming queue for one turn.',
@@ -238,6 +264,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Inside-Out Swap',
     shortLabel: 'Inside-Out',
     category: 'swaps',
+    polarity: 'boon',
     requiresBricks: true,
     description:
       'Swaps outer columns with inner columns, flipping a central mountain into twin outer cliffs.',
@@ -247,6 +274,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Sawtooth Shear',
     shortLabel: 'Sawtooth',
     category: 'swaps',
+    polarity: 'neutral',
     requiresBricks: true,
     description:
       'Juts even rows right and odd rows left to transform straight walls into jagged zigzag teeth.',
@@ -256,6 +284,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Horizon Shear',
     shortLabel: 'Fault Line',
     category: 'swaps',
+    polarity: 'neutral',
     requiresBricks: true,
     description:
       'Cuts a glowing fault seam across the stack, sliding upper rows right and lower rows left.',
@@ -265,6 +294,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'The Zipper Merge',
     shortLabel: 'Zipper Merge',
     category: 'swaps',
+    polarity: 'boon',
     requiresBricks: true,
     description:
       'Interleaves top and bottom occupied rows cleanly like a zipper while keeping exact color ratios.',
@@ -275,6 +305,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Cyclotron Gravity Orbit',
     shortLabel: 'Orbit Flow',
     category: 'core',
+    polarity: 'bane',
     requiresBricks: true,
     description:
       'Gravity orbits 90° clockwise after every dropped piece—top to right, bottom, left, and back.',
@@ -284,6 +315,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Portal Edge Wrap',
     shortLabel: 'Portal Wrap',
     category: 'core',
+    polarity: 'boon',
     requiresBricks: false,
     description:
       'Opens dimensional edges so steering past the left or right wall warps your piece to the opposite side.',
@@ -293,6 +325,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Reverse Timeline Sweep',
     shortLabel: 'RTL Sweep',
     category: 'core',
+    polarity: 'neutral',
     requiresBricks: false,
     description:
       'Flips the beat-locked timeline beam to sweep from right to left across the playfield.',
@@ -302,6 +335,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Split-Half Timeline',
     shortLabel: 'Split Line',
     category: 'core',
+    polarity: 'neutral',
     requiresBricks: false,
     description:
       'Splits the sweep bar horizontally at mid-screen so the top and bottom halves clear 4 beats apart.',
@@ -311,6 +345,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Diagonal Slant Line',
     shortLabel: 'Slant Line',
     category: 'core',
+    polarity: 'neutral',
     requiresBricks: false,
     description:
       'Tilts the timeline sweep into a diagonal slash so upper rows clear ahead of lower rows.',
@@ -320,6 +355,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Staircase Terraces',
     shortLabel: 'Terraces',
     category: 'silhouette',
+    polarity: 'bane',
     requiresBricks: false,
     description:
       'Sculpts symmetrical 1–2–3 stone steps rising along both wings, funneling stacks toward the center.',
@@ -329,6 +365,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Twin-Basin Center Spire',
     shortLabel: 'Center Spire',
     category: 'silhouette',
+    polarity: 'bane',
     requiresBricks: false,
     description:
       'Raises a central stone monolith in the middle two columns to split play into twin flanking basins.',
@@ -338,6 +375,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Central Dome Pedestal',
     shortLabel: 'Dome Mound',
     category: 'silhouette',
+    polarity: 'bane',
     requiresBricks: false,
     description:
       'Lifts the center four columns into a vaulted arched mound while keeping outer valleys deep.',
@@ -347,6 +385,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Springboard Floor',
     shortLabel: 'Spring Pads',
     category: 'obstacles',
+    polarity: 'bane',
     requiresBricks: false,
     description:
       'Mounts amber trampoline pads along the floor that bounce incoming pieces skyward before locking.',
@@ -356,6 +395,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Belt Conveyor Floor',
     shortLabel: 'Conveyor Belt',
     category: 'obstacles',
+    polarity: 'bane',
     requiresBricks: false,
     description:
       'Drives a motorized track along the bottom row, shifting settled floor blocks one column every 2 beats.',
@@ -365,6 +405,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Dual Twin Timeline',
     shortLabel: 'Twin Sweep',
     category: 'obstacles',
+    polarity: 'boon',
     requiresBricks: false,
     description:
       'Splits the timeline into two synchronized beams sweeping 4 beats apart for double-tempo clears.',
@@ -374,6 +415,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Crumble Crystal Ledges',
     shortLabel: 'Crumble Ledges',
     category: 'obstacles',
+    polarity: 'bane',
     requiresBricks: false,
     description:
       'Suspends brittle crystal ledges mid-board; two impacts or adjacent clears crack and shatter them.',
@@ -383,6 +425,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: '3-Tile Corner L-Bricks',
     shortLabel: 'L-Trio Bricks',
     category: 'bricks',
+    polarity: 'neutral',
     requiresBricks: false,
     description:
       'Carves incoming pieces into crisp 3-tile L-trominoes with a missing corner pocket for interlocking fits.',
@@ -392,6 +435,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Chameleon Rotate',
     shortLabel: 'Chameleon',
     category: 'bricks',
+    polarity: 'boon',
     requiresBricks: false,
     description:
       'Rotating a falling brick cycles every tile color forward, letting you paint matches mid-air.',
@@ -401,6 +445,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Prism Wild Bricks',
     shortLabel: 'Prism Wild',
     category: 'bricks',
+    polarity: 'boon',
     requiresBricks: false,
     description:
       'Embeds achromatic diamond Prism Wild tiles into incoming 2×2 bricks that match any adjacent color.',
@@ -410,6 +455,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Mirror Symmetry Flip',
     shortLabel: 'Mirror Flip',
     category: 'swaps',
+    polarity: 'neutral',
     requiresBricks: true,
     description:
       'Reflects the entire occupied board horizontally across the center line in a crisp specular flip.',
@@ -419,9 +465,111 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Orbital Vortex Swirl',
     shortLabel: 'Vortex Swirl',
     category: 'swaps',
+    polarity: 'neutral',
     requiresBricks: true,
     description:
       'Rotates occupied blocks clockwise around concentric perimeter rings like a slow architectural whirlpool.',
+  },
+  // --- 10 New Shifts (v7) ---
+  {
+    id: 'double_time_sweep',
+    name: 'Double-Time Sweep',
+    shortLabel: '4-Beat Sweep',
+    category: 'core',
+    polarity: 'neutral',
+    requiresBricks: false,
+    description:
+      'Accelerates the timeline beam to cross the board in 4 beats instead of 8 for rapid-fire clears.',
+  },
+  {
+    id: 'half_time_sweep',
+    name: 'Half-Time Sweep',
+    shortLabel: '16-Beat Sweep',
+    category: 'core',
+    polarity: 'neutral',
+    requiresBricks: false,
+    description:
+      'Stretches the timeline sweep to 16 beats so you can stack huge multi-square sweeps.',
+  },
+  {
+    id: 'lantern_sweep',
+    name: 'Lantern Spotlight',
+    shortLabel: 'Lantern Beam',
+    category: 'core',
+    polarity: 'bane',
+    requiresBricks: false,
+    description:
+      'Dims distant columns into monochrome silhouettes while the timeline beam illuminates nearby colors.',
+  },
+  {
+    id: 'crash_gem',
+    name: 'Crash Gem Surge',
+    shortLabel: 'Crash Gems',
+    category: 'bricks',
+    polarity: 'boon',
+    requiresBricks: false,
+    description:
+      'Embeds radiant Crash Gems into pieces; clearing one detonates all connected matching-color blocks.',
+  },
+  {
+    id: 'anchored_viruses',
+    name: 'Anchored Color Nodes',
+    shortLabel: 'Color Nodes',
+    category: 'obstacles',
+    polarity: 'bane',
+    requiresBricks: false,
+    description:
+      'Suspends fixed chromatic nodes mid-air that resist gravity until cleared by a 2×2 square or chain (+500 purge).',
+  },
+  {
+    id: 'rising_tide',
+    name: 'Rising Tide Floor',
+    shortLabel: 'Rising Tide',
+    category: 'obstacles',
+    polarity: 'bane',
+    requiresBricks: false,
+    description:
+      'Sweeps with under 4 squares raise a new floor row; 4+ square sweeps push the tide back down.',
+  },
+  {
+    id: 'ceiling_press',
+    name: 'Ceiling Press Shutters',
+    shortLabel: 'Ceiling Press',
+    category: 'obstacles',
+    polarity: 'bane',
+    requiresBricks: false,
+    description:
+      'Flank ceiling shutters descend on small sweeps and lift back up whenever you clear 4+ squares.',
+  },
+  {
+    id: 'frost_tiles',
+    name: 'Frost-Rimed Surface',
+    shortLabel: 'Frost Tiles',
+    category: 'obstacles',
+    polarity: 'bane',
+    requiresBricks: true,
+    description:
+      'Freezes top-layer tiles in crystal frost that cracks on the first sweep and shatters on the second.',
+  },
+  {
+    id: 'stash_hold',
+    name: 'Architectural Stash Hold',
+    shortLabel: 'Stash Hold',
+    category: 'bricks',
+    polarity: 'boon',
+    requiresBricks: false,
+    description:
+      'Unlocks a Hold slot (C / Shift / button) to bank and swap your active falling brick once per drop.',
+  },
+  {
+    id: 'metronome_charge',
+    name: 'Metronome Beat Charge',
+    shortLabel: 'Beat Charge',
+    category: 'core',
+    polarity: 'boon',
+    requiresBricks: false,
+    description:
+      'Locking a piece on the beat awards +150 bonus points and charges Veto Tokens every 3 beat-locks.',
   },
 ];
 
@@ -447,6 +595,17 @@ export function isShiftStartFriendly(type: ShiftType): boolean {
   return def ? !def.requiresBricks : false;
 }
 
+export function getShiftPolarity(type: ShiftType | null): ShiftPolarity | null {
+  if (!type) return null;
+  return SHIFT_MAP.get(type)?.polarity ?? 'neutral';
+}
+
+export function getSweepBeatsForShift(shift: ShiftType | null): number {
+  if (shift === 'double_time_sweep') return 4;
+  if (shift === 'half_time_sweep') return 16;
+  return 8;
+}
+
 export const OBSTACLE_SHIFT_SET = new Set<ShiftType>([
   'split_canyon',
   'hourglass_funnel',
@@ -463,6 +622,10 @@ export const OBSTACLE_SHIFT_SET = new Set<ShiftType>([
   'dome_pedestal',
   'spring_bounce',
   'crumble_blocks',
+  'anchored_viruses',
+  'rising_tide',
+  'ceiling_press',
+  'frost_tiles',
 ]);
 
 export const TILE_TYPE_SHIFT_SET = new Set<ShiftType>([
@@ -475,6 +638,7 @@ export const TILE_TYPE_SHIFT_SET = new Set<ShiftType>([
   'brick_l_trio',
   'chameleon_rotate',
   'prism_wild_bricks',
+  'crash_gem',
 ]);
 
 const ONE_TIME_SHIFT_SET = new Set<ShiftType>([
@@ -544,14 +708,21 @@ export function stripBoardObstacles(state: BoardState): void {
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const cell = state.grid[r][c];
-      if (cell && cell.isObstacle) {
+      if (!cell) continue;
+      if (cell.isObstacle) {
         state.grid[r][c] = null;
+      } else {
+        if (cell.isVirus) cell.isVirus = undefined;
+        if (cell.frostHp) cell.frostHp = undefined;
       }
     }
   }
   state.patrollingBumper = null;
   state.shiftEffect = null;
   state.conveyorDir = undefined;
+  state.ceilingLockRows = 0;
+  state.risingTideRows = 0;
+  state.beatChargeAccum = 0;
 }
 
 /**
@@ -2139,6 +2310,7 @@ export function pickNextShift(
     if (withoutLast.length > 0) pool = withoutLast;
   }
 
+  let occupancy = 0;
   if (board) {
     const sched = board.shiftScheduler ?? createShiftSchedulerState();
     const freshTurnWindow = sched.stageTurnIndex >= 3;
@@ -2151,15 +2323,17 @@ export function pickNextShift(
     const turnsSinceTile = sched.turnsSinceTileShift ?? 1;
 
     let playerCount = 0;
-    for (let r = 0; r < board.grid.length && playerCount < 6; r++) {
-      for (let c = 0; c < board.grid[r].length && playerCount < 6; c++) {
+    const totalCells = Math.max(1, board.rows * board.cols);
+    for (let r = 0; r < board.grid.length; r++) {
+      for (let c = 0; c < board.grid[r].length; c++) {
         const cell = board.grid[r][c];
         if (cell && !cell.isObstacle) playerCount++;
       }
     }
+    occupancy = playerCount / totalCells;
 
-    // Never repeat rotate_90 immediately back-to-back when other shifts exist
-    if (sched.turnsSinceRotation === 0 && pool.length > 1 && pool.includes('rotate_90')) {
+    // Never repeat rotate_90 within 2 turns when other shifts exist
+    if (sched.turnsSinceRotation < 2 && pool.length > 1 && pool.includes('rotate_90')) {
       const nonRot = pool.filter((s) => s !== 'rotate_90');
       if (nonRot.length > 0) pool = nonRot;
     }
@@ -2210,19 +2384,14 @@ export function pickNextShift(
     const tileCandidates = pool.filter((s) => TILE_TYPE_SHIFT_SET.has(s));
     const nonTileCandidates = pool.filter((s) => !TILE_TYPE_SHIFT_SET.has(s));
 
-    // Frequent rotation cadence: guarantee max 3-turn gap (mostly 2 turns)
-    if (pool.includes('rotate_90') && sched.turnsSinceRotation >= 2) {
+    // Gentle rotation cadence (~every 3-4 turns, never dominating the run)
+    if (pool.includes('rotate_90') && sched.turnsSinceRotation >= 4 && rng() < 0.45) {
       return 'rotate_90';
     }
 
     // Tile-type cadence (~every 3 levels): once >= 3 turns have elapsed since last special tile turn, pick one
     if (tileCount === 0 && turnsSinceTile >= 3 && tileCandidates.length > 0) {
       return tileCandidates[Math.floor(rng() * tileCandidates.length)];
-    }
-
-    // Frequent rotation every 2 turns (~68% on turn 1 after rotation)
-    if (pool.includes('rotate_90') && sched.turnsSinceRotation === 1 && rng() < 0.68) {
-      return 'rotate_90';
     }
 
     // Trigger special tile shift right around the 3rd level (turnsSinceTile === 2)
@@ -2242,7 +2411,58 @@ export function pickNextShift(
     }
   }
 
+  // Polarity weighting based on board occupancy: crowded boards favor boons, low boards allow banes
+  const weighted = pool.map((s) => {
+    const pol = SHIFT_MAP.get(s)?.polarity ?? 'neutral';
+    let w = 1;
+    if (occupancy >= 0.52) {
+      w = pol === 'boon' ? 3.5 : pol === 'neutral' ? 1.4 : 0.35;
+    } else if (occupancy <= 0.28) {
+      w = pol === 'bane' ? 2.2 : pol === 'neutral' ? 1.4 : 0.9;
+    }
+    if (s === 'rotate_90') {
+      w *= 0.5;
+    }
+    return { s, w };
+  });
+
+  const totalW = weighted.reduce((acc, item) => acc + item.w, 0);
+  if (totalW > 0) {
+    let roll = rng() * totalW;
+    for (const item of weighted) {
+      roll -= item.w;
+      if (roll <= 0) return item.s;
+    }
+  }
   return pool[Math.floor(rng() * pool.length)];
+}
+
+export function getShiftDraftOptions(
+  enabledShifts: ShiftType[],
+  lastShift: ShiftType | null,
+  rng: () => number = Math.random,
+  board?: BoardState
+): ShiftDraftOption[] {
+  const first = pickNextShift(enabledShifts, lastShift, rng, board);
+  if (!first) return [];
+
+  const remainingEnabled = enabledShifts.filter((s) => s !== first);
+  const second =
+    remainingEnabled.length > 0
+      ? pickNextShift(remainingEnabled, lastShift, rng, board)
+      : null;
+
+  const picked: ShiftType[] = second && second !== first ? [first, second] : [first];
+  return picked.map((id) => {
+    const def = SHIFT_MAP.get(id);
+    return {
+      id,
+      name: def?.name ?? id,
+      shortLabel: def?.shortLabel ?? id,
+      polarity: def?.polarity ?? 'neutral',
+      description: def?.description ?? '',
+    };
+  });
 }
 
 export interface ApplyShiftResult {
@@ -2413,6 +2633,12 @@ export function applyBoardShift(
     resizeBoardSafely(state, nominal.cols, nominal.rows, false);
   }
 
+  // Clear stash hold when shifting away from stash_hold
+  if (shiftType !== 'stash_hold') {
+    state.heldPiece = null;
+    state.stashUsedThisTurn = false;
+  }
+
   let customLabel: string | null = null;
   switch (shiftType) {
     case 'line_color_shift':
@@ -2505,6 +2731,70 @@ export function applyBoardShift(
     case 'vortex_swirl':
       applyVortexSwirl(state, animateBricks);
       break;
+    case 'anchored_viruses': {
+      const rows = state.grid.length;
+      const cols = state.grid[0]?.length ?? state.cols;
+      const midR0 = Math.max(3, Math.floor(rows * 0.35));
+      const midR1 = Math.min(rows - 2, Math.floor(rows * 0.65));
+      const candidateCols = [1, Math.floor(cols * 0.3), Math.floor(cols * 0.7), cols - 2];
+      const colorCount = state.colorCount ?? 2;
+      candidateCols.forEach((c, idx) => {
+        if (c < 0 || c >= cols) return;
+        const r = midR0 + (idx % Math.max(1, midR1 - midR0 + 1));
+        if (state.grid[r][c] === null) {
+          state.grid[r][c] = {
+            id: allocCellId(),
+            color: (idx % colorCount) as CellColor,
+            isChain: false,
+            isVirus: true,
+            chainMarked: false,
+            inSquare: false,
+            pendingClear: false,
+            sweptCol: false,
+            fallOffset: 0,
+            landFlash: animateBricks ? 0.8 : 0,
+          };
+        }
+      });
+      state.shiftEffect = { type: shiftType, life: 1.2, maxLife: 1.2 };
+      break;
+    }
+    case 'frost_tiles': {
+      const rows = state.grid.length;
+      const cols = state.grid[0]?.length ?? state.cols;
+      let frozen = 0;
+      for (let c = 0; c < cols && frozen < 6; c++) {
+        for (let r = 0; r < rows; r++) {
+          const cell = state.grid[r][c];
+          if (cell && !cell.isObstacle) {
+            cell.frostHp = 2;
+            cell.landFlash = animateBricks ? 0.75 : 0;
+            frozen++;
+            break;
+          }
+        }
+      }
+      state.shiftEffect = { type: shiftType, life: 1.2, maxLife: 1.2 };
+      break;
+    }
+    case 'rising_tide':
+      state.activeShift = 'rising_tide';
+      state.risingTideRows = 0;
+      stepRisingTideSweep(state, 0, rng);
+      state.shiftEffect = { type: shiftType, life: 1.2, maxLife: 1.2 };
+      break;
+    case 'ceiling_press':
+      state.activeShift = 'ceiling_press';
+      state.ceilingLockRows = 0;
+      stepCeilingPressSweep(state, 0);
+      state.shiftEffect = { type: shiftType, life: 1.2, maxLife: 1.2 };
+      break;
+    case 'crash_gem':
+    case 'double_time_sweep':
+    case 'half_time_sweep':
+    case 'lantern_sweep':
+    case 'stash_hold':
+    case 'metronome_charge':
     case 'portal_wrap':
     case 'reverse_sweep':
     case 'twin_sweep':
@@ -2522,7 +2812,11 @@ export function applyBoardShift(
   }
 
   state.activeShift = shiftType;
-  syncQueueIfRulesChanged();
+  if (shiftType === 'crash_gem') {
+    refreshQueueForBoardRules(state, chainFrequency, rng);
+  } else {
+    syncQueueIfRulesChanged();
+  }
   if ((state.gravityDirection ?? 'down') !== prevGravityDir && state.activePiece) {
     const newInit = getPieceInitialPos(state, state.activePiece);
     state.activePiece = {

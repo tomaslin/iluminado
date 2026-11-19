@@ -1,6 +1,6 @@
 {
-  "name": "Remix Iluminado",
-  "description": "Imported from GitHub",
+  "name": "Iluminado",
+  "description": "A fun Lumines like game that shifts",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

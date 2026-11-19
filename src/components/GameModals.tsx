@@ -5,6 +5,10 @@ import { HudSnapshot, SkinConfig } from '../game/types';
 interface GameModalsProps {
   hud: HudSnapshot;
   skin: SkinConfig;
+  musicVolume: number;
+  sfxVolume: number;
+  onChangeMusicVolume: (val: number) => void;
+  onChangeSfxVolume: (val: number) => void;
   onResume: () => void;
   onRestart: () => void;
   onNextStage?: () => void;
@@ -15,6 +19,10 @@ interface GameModalsProps {
 export const GameModals: React.FC<GameModalsProps> = ({
   hud,
   skin,
+  musicVolume,
+  sfxVolume,
+  onChangeMusicVolume,
+  onChangeSfxVolume,
   onResume,
   onRestart,
   onNextStage,
@@ -24,6 +32,9 @@ export const GameModals: React.FC<GameModalsProps> = ({
   const { palette } = skin;
 
   if (hud.status === 'paused') {
+    const musicPct = Math.round(musicVolume * 100);
+    const sfxPct = Math.round(sfxVolume * 100);
+
     return (
       <div
         className="fixed inset-0 z-30 flex items-center justify-center p-6 pointer-events-auto"
@@ -33,14 +44,14 @@ export const GameModals: React.FC<GameModalsProps> = ({
         aria-label="Game Paused"
       >
         <div
-          className="w-full max-w-xs rounded-3xl p-7 shadow-xl animate-modal-in"
+          className="w-full max-w-xs rounded-3xl p-6 sm:p-7 shadow-xl animate-modal-in"
           style={{
             backgroundColor: palette.hudCardBg,
             color: palette.hudInk,
             border: `2px solid ${palette.boardFrame}`,
           }}
         >
-          <div className="text-center mb-6">
+          <div className="text-center mb-5">
             <h2 className="font-display text-3xl font-semibold tracking-tight">
               Paused
             </h2>
@@ -50,6 +61,61 @@ export const GameModals: React.FC<GameModalsProps> = ({
             >
               {hud.mode.replace('_', ' ')} · {skin.name}
             </p>
+          </div>
+
+          <div
+            className="mb-4 px-3.5 py-3 rounded-2xl space-y-2.5"
+            style={{ backgroundColor: 'rgba(32, 28, 44, 0.045)' }}
+          >
+            <div>
+              <div className="flex items-center justify-between text-xs font-semibold mb-1">
+                <label htmlFor="pause-music-vol">Music</label>
+                <span
+                  className="font-mono-tabular text-[11px]"
+                  style={{ color: palette.hudMuted }}
+                >
+                  {musicPct}%
+                </span>
+              </div>
+              <input
+                id="pause-music-vol"
+                data-testid="music-volume-slider"
+                type="range"
+                min={0}
+                max={100}
+                step={1}
+                value={musicPct}
+                onChange={(e) => onChangeMusicVolume(Number(e.target.value) / 100)}
+                aria-label="Music volume"
+                className="w-full h-1.5 rounded-full cursor-pointer"
+                style={{ accentColor: palette.hudAccent }}
+              />
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between text-xs font-semibold mb-1">
+                <label htmlFor="pause-sfx-vol">SFX</label>
+                <span
+                  className="font-mono-tabular text-[11px]"
+                  style={{ color: palette.hudMuted }}
+                >
+                  {sfxPct}%
+                </span>
+              </div>
+              <input
+                id="pause-sfx-vol"
+                data-testid="sfx-volume-slider"
+                type="range"
+                min={0}
+                max={100}
+                step={1}
+                value={sfxPct}
+                onChange={(e) => onChangeSfxVolume(Number(e.target.value) / 100)}
+                aria-label="SFX volume"
+                className="w-full h-1.5 rounded-full cursor-pointer"
+                style={{ accentColor: palette.hudAccent }}
+              />
+            </div>
           </div>
 
           <div className="flex flex-col gap-2.5">

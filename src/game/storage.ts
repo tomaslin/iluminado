@@ -6,12 +6,22 @@ import { DailyCompletionRecord, SavedProgress, ShiftType } from './types';
 const STORAGE_KEY = 'iluminado_progress_v2';
 const VALID_SKIN_IDS = new Set(SKINS.map((s) => s.id));
 
+export const DEFAULT_MUSIC_VOLUME = 0.85;
+export const DEFAULT_SFX_VOLUME = 0.85;
+
+function clampVolume(v: unknown, fallback: number): number {
+  if (typeof v !== 'number' || !Number.isFinite(v)) return fallback;
+  return Math.max(0, Math.min(1, Math.round(v * 100) / 100));
+}
+
 function createDefaultProgress(): SavedProgress {
   return {
     highScores: {},
     unlockedSkins: [...INITIAL_UNLOCKED_SKIN_IDS],
     skinEditPlaylist: SKINS.slice(0, 6).map((s) => s.id),
     muted: false,
+    musicVolume: DEFAULT_MUSIC_VOLUME,
+    sfxVolume: DEFAULT_SFX_VOLUME,
     hapticsEnabled: true,
     dailyHistory: {},
     dailyStreak: 0,
@@ -155,6 +165,8 @@ export function loadProgress(): SavedProgress {
       skinEditPlaylist:
         filteredPlaylist.length > 0 ? filteredPlaylist : defaults.skinEditPlaylist,
       muted: Boolean(parsed.muted),
+      musicVolume: clampVolume(parsed.musicVolume, DEFAULT_MUSIC_VOLUME),
+      sfxVolume: clampVolume(parsed.sfxVolume, DEFAULT_SFX_VOLUME),
       hapticsEnabled: parsed.hapticsEnabled !== false,
       dailyHistory,
       dailyStreak:

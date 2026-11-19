@@ -60,6 +60,8 @@ import {
   pickRandomSkinIndex,
 } from './game/skins';
 import {
+  DEFAULT_MUSIC_VOLUME,
+  DEFAULT_SFX_VOLUME,
   applyDailyResultToProgress,
   applyTimeAttackSplitsToProgress,
   getEffectiveDailyStreak,
@@ -222,15 +224,27 @@ export default function App() {
     return () => window.clearInterval(id);
   }, []);
 
-  // Preload current preview world and neighboring soundtracks while browsing the title screen
+  // Preload current preview world and immediate neighbors while browsing the title screen (strict 3-buffer cap)
   useEffect(() => {
     const total = SKINS.length;
-    const urls = [0, 1, -1, 2].map(
+    const urls = [0, 1, -1].map(
       (offset) =>
         getSkinByIndex((previewSkinIdx + offset + total) % total).music.audioTrackUrl
     );
     audioRef.current.preloadTracks(urls);
   }, [previewSkinIdx]);
+
+  // Keep AudioEngine volume & mute state synced on mount
+  useEffect(() => {
+    audioRef.current.setMuted(progressRef.current.muted);
+    audioRef.current.setHapticsEnabled(progressRef.current.hapticsEnabled);
+    audioRef.current.setMusicVolume(
+      progressRef.current.musicVolume ?? DEFAULT_MUSIC_VOLUME
+    );
+    audioRef.current.setSfxVolume(
+      progressRef.current.sfxVolume ?? DEFAULT_SFX_VOLUME
+    );
+  }, []);
 
   const simRef = useRef<SimState>({
     status: 'title',
@@ -289,6 +303,13 @@ export default function App() {
     dir: 0,
     hold: 0,
     repeat: 0,
+  });
+  const bufferClockSyncRef = useRef<{
+    trackUrl: string | null;
+    lastRawBufBeat: number;
+  }>({
+    trackUrl: null,
+    lastRawBufBeat: 0,
   });
 
   const buildHudSnapshot = useCallback((sim: SimState): HudSnapshot => {
@@ -485,6 +506,7 @@ export default function App() {
       heldKeysRef.current.clear();
 
       audioRef.current.setPlaybackTempoScale(1);
+      audioRef.current.updateShiftRiser(0);
       if (isVictory) {
         audioRef.current.playSkinTransition(getSkinByIndex(sim.skinIndex));
       } else {
@@ -550,8 +572,15 @@ export default function App() {
       }
       audioRef.current.setMuted(progressRef.current.muted);
       audioRef.current.setHapticsEnabled(progressRef.current.hapticsEnabled);
+      audioRef.current.setMusicVolume(
+        progressRef.current.musicVolume ?? DEFAULT_MUSIC_VOLUME
+      );
+      audioRef.current.setSfxVolume(
+        progressRef.current.sfxVolume ?? DEFAULT_SFX_VOLUME
+      );
       audioRef.current.setPlaybackTempoScale(1);
       audioRef.current.resetStepTrack();
+      bufferClockSyncRef.current = { trackUrl: null, lastRawBufBeat: 0 };
 
       const mode = overrideMode ?? selectedMode;
       const effectivePuzzleIdx = stageOverride?.puzzleIdx ?? selectedPuzzleIdx;
@@ -838,6 +867,31 @@ export default function App() {
         }
       }
       const next = { ...prev, muted: nextMuted };
+      progressRef.current = next;
+      saveProgress(next);
+      return next;
+    });
+  }, []);
+
+  const handleChangeMusicVolume = useCallback((volume: number) => {
+    const clamped = Math.max(0, Math.min(1, Math.round(volume * 100) / 100));
+    audioRef.current.unlock();
+    audioRef.current.setMusicVolume(clamped);
+    setProgress((prev) => {
+      const next = { ...prev, musicVolume: clamped };
+      progressRef.current = next;
+      saveProgress(next);
+      return next;
+    });
+  }, []);
+
+  const handleChangeSfxVolume = useCallback((volume: number) => {
+    const clamped = Math.max(0, Math.min(1, Math.round(volume * 100) / 100));
+    audioRef.current.unlock();
+    audioRef.current.setSfxVolume(clamped);
+    setProgress((prev) => {
+      const next = { ...prev, sfxVolume: clamped };
+      progressRef.current = next;
       saveProgress(next);
       return next;
     });
@@ -853,12 +907,14 @@ export default function App() {
       p2DasRef.current = { dir: 0, hold: 0, repeat: 0 };
       syncBodyState('paused');
       audioRef.current.setPlaybackTempoScale(1);
+      audioRef.current.updateShiftRiser(0);
       audioRef.current.syncWorldMusic(activeSkin, 'paused');
       setHud(buildHudSnapshot(sim));
     } else if (sim.status === 'paused') {
       audioRef.current.unlock();
       sim.status = 'playing';
       syncBodyState('playing');
+      bufferClockSyncRef.current = { trackUrl: null, lastRawBufBeat: 0 };
       audioRef.current.notifyClockReset();
       audioRef.current.syncWorldMusic(activeSkin, 'playing');
       setHud(buildHudSnapshot(sim));
@@ -881,6 +937,7 @@ export default function App() {
     sim.encoreBonusBpm = 0;
     sim.encoreIntensity = 0;
     sim.preloadedNextKey = null;
+    bufferClockSyncRef.current = { trackUrl: null, lastRawBufBeat: 0 };
     heldKeysRef.current.clear();
     p1DasRef.current = { dir: 0, hold: 0, repeat: 0 };
     p2DasRef.current = { dir: 0, hold: 0, repeat: 0 };
@@ -1024,9 +1081,18 @@ export default function App() {
               gravDir
             );
           }
+          const effectiveDropBpm = skin.bpm + sim.encoreBonusBpm;
           rendererRef.current.triggerLandRipple(boardIdx, landCol, landRow);
-          audioRef.current.playLand(skin);
-          if (res.squaresFormed > 0) audioRef.current.playSquareFormed(skin);
+          audioRef.current.playLand(skin, effectiveDropBpm, sim.beatAccum);
+          if (res.squaresFormed > 0) {
+            audioRef.current.playSquareFormed(
+              skin,
+              targetBoard.squares.length,
+              res.chainActivated ? 2 : 0,
+              effectiveDropBpm,
+              sim.beatAccum
+            );
+          }
           if (res.chainActivated) audioRef.current.playChainTrigger(skin);
           if (res.zenTrimmed) {
             rendererRef.current.spawnScorePopup(
@@ -1434,7 +1500,46 @@ export default function App() {
 
           const chainFreq = sim.mode === 'puzzle' ? 0 : skin.chainFrequency;
           const prevBeat = sim.beatAccum;
-          sim.beatAccum += audioRef.current.consumeTimelineBeatDelta(dt, effectiveBpm);
+          const activeTrackUrl = skin.music.audioTrackUrl ?? null;
+          const rawBufBeat = audioRef.current.getBufferBeatPosition();
+          const syncState = bufferClockSyncRef.current;
+
+          if (rawBufBeat !== null && activeTrackUrl) {
+            if (
+              syncState.trackUrl === activeTrackUrl &&
+              rawBufBeat >= syncState.lastRawBufBeat &&
+              rawBufBeat - syncState.lastRawBufBeat <= 0.75
+            ) {
+              sim.beatAccum += rawBufBeat - syncState.lastRawBufBeat;
+              syncState.lastRawBufBeat = rawBufBeat;
+            } else {
+              const targetMod = ((rawBufBeat % 8) + 8) % 8;
+              const prevMod = ((prevBeat % 8) + 8) % 8;
+              const diffMod = ((targetMod - prevMod + 12) % 8) - 4;
+              if (diffMod >= 0 && diffMod < 0.75) {
+                sim.beatAccum = prevBeat + diffMod;
+                syncState.trackUrl = activeTrackUrl;
+                syncState.lastRawBufBeat = rawBufBeat;
+              } else if (diffMod < 0 && diffMod > -0.5) {
+                // Hold briefly for buffer cursor to catch up (<0.5 beats) without jumping backward
+                sim.beatAccum = prevBeat;
+              } else {
+                const forwardShift = (targetMod - prevMod + 8) % 8;
+                sim.beatAccum = prevBeat + forwardShift;
+                syncState.trackUrl = activeTrackUrl;
+                syncState.lastRawBufBeat = rawBufBeat;
+                const cols = sim.board.cols || BOARD_COLS;
+                const newNorm = (sim.beatAccum % 8) / 8;
+                const isRtl = sim.board.activeShift === 'reverse_sweep';
+                sim.lastStepCol = isRtl
+                  ? Math.max(0, cols - 1 - (Math.floor(newNorm * cols) % cols))
+                  : Math.floor(newNorm * cols) % cols;
+              }
+            }
+          } else {
+            syncState.trackUrl = null;
+            sim.beatAccum += audioRef.current.consumeTimelineBeatDelta(dt, effectiveBpm);
+          }
 
           // Beat-synced movement for patrolling 2x2 bumper & conveyor floor (steps every 2 beats)
           if (Math.floor(sim.beatAccum / 2) > Math.floor(prevBeat / 2)) {
@@ -1460,6 +1565,18 @@ export default function App() {
             ? Math.max(0, liveCols - 1 - (Math.floor(timelineNorm * liveCols) % liveCols))
             : Math.floor(timelineNorm * liveCols) % liveCols;
           const twinOffset = Math.floor(liveCols / 2);
+
+          // DJ-style Shift riser: filter sweeps down over the final bar before a Shift triggers
+          if (sim.mode !== 'puzzle' && !skin.finalStageTimerSec) {
+            const squaresIntoLevel =
+              sim.progression.levelSquaresCleared + sim.board.squares.length;
+            const shiftReady = squaresIntoLevel >= Math.max(1, skin.squaresPerLevel);
+            audioRef.current.updateShiftRiser(
+              shiftReady && timelineNorm >= 0.5 ? (timelineNorm - 0.5) / 0.5 : 0
+            );
+          } else {
+            audioRef.current.updateShiftRiser(0);
+          }
 
           // Step through every column crossed since last frame
           const processColumn = (col: number) => {
@@ -1534,6 +1651,7 @@ export default function App() {
             sim.encoreBonusBpm = 0;
             sim.encoreIntensity = 0;
             sim.preloadedNextKey = null;
+            bufferClockSyncRef.current = { trackUrl: null, lastRawBufBeat: 0 };
             const nextSkin = getSkinByIndex(nextIdx);
             audioRef.current.playSkinTransition(nextSkin);
             audioRef.current.syncWorldMusic(nextSkin, 'playing');
@@ -1569,6 +1687,11 @@ export default function App() {
                 rendererRef.current.triggerSweepBloom(
                   Math.max(1, ev1.squaresCleared)
                 );
+              }
+              if (ev1.allDeletedBonus) {
+                audioRef.current.playBonusSting(skin, 'all_deleted', effectiveBpm);
+              } else if (ev1.singleColorBonus) {
+                audioRef.current.playBonusSting(skin, 'single_color', effectiveBpm);
               }
               if (ev1.pointsAwarded > 0) {
                 const sub = ev1.allDeletedBonus
@@ -1928,8 +2051,16 @@ export default function App() {
                       Math.min(sim.board.rows - 1, Math.max(0, preY + 1))
                     : (res.finalPieceY ?? preY) + 0.5;
                 rendererRef.current.triggerLandRipple(0, landCol, landRow);
-                audioRef.current.playLand(skin);
-                if (res.squaresFormed > 0) audioRef.current.playSquareFormed(skin);
+                audioRef.current.playLand(skin, effectiveBpm, sim.beatAccum);
+                if (res.squaresFormed > 0) {
+                  audioRef.current.playSquareFormed(
+                    skin,
+                    sim.board.squares.length,
+                    res.chainActivated ? 2 : 0,
+                    effectiveBpm,
+                    sim.beatAccum
+                  );
+                }
                 if (res.chainActivated) audioRef.current.playChainTrigger(skin);
                 if (res.zenTrimmed) {
                   rendererRef.current.spawnScorePopup(
@@ -2184,6 +2315,10 @@ export default function App() {
           progress={progress}
           muted={progress.muted}
           onToggleMute={toggleMute}
+          musicVolume={progress.musicVolume ?? DEFAULT_MUSIC_VOLUME}
+          sfxVolume={progress.sfxVolume ?? DEFAULT_SFX_VOLUME}
+          onChangeMusicVolume={handleChangeMusicVolume}
+          onChangeSfxVolume={handleChangeSfxVolume}
           previewSkin={getSkinByIndex(previewSkinIdx)}
           onStepPreviewSkin={stepPreviewSkin}
           getSpectrumSnapshot={getTitleSpectrumSnapshot}
@@ -2210,6 +2345,10 @@ export default function App() {
         <GameModals
           hud={hud}
           skin={activeSkin}
+          musicVolume={progress.musicVolume ?? DEFAULT_MUSIC_VOLUME}
+          sfxVolume={progress.sfxVolume ?? DEFAULT_SFX_VOLUME}
+          onChangeMusicVolume={handleChangeMusicVolume}
+          onChangeSfxVolume={handleChangeSfxVolume}
           onResume={togglePause}
           onRestart={() => startNewGame(simRef.current.mode)}
           onNextStage={handleNextStage}

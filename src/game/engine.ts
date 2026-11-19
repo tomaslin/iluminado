@@ -246,6 +246,8 @@ export interface GeneratePieceOptions {
   boardCols?: number;
   ensureBlocked?: boolean;
   ensureWild?: boolean;
+  ensureCrashGem?: boolean;
+  allowCrashGem?: boolean;
 }
 
 export function generateRandomPiece(
@@ -515,7 +517,20 @@ export function generateRandomPiece(
   }
   const hasChain = rng() < chainFrequency;
   const chainIndex = hasChain ? Math.floor(rng() * 4) : -1;
-  return createPieceFromPattern(chosen, chainIndex, resolveSpawnX(2));
+  const piece = createPieceFromPattern(chosen, chainIndex, resolveSpawnX(2));
+  if (
+    options?.ensureCrashGem ||
+    (options?.allowCrashGem && rng() < 0.55)
+  ) {
+    const cr = Math.floor(rng() * 2);
+    const cc = Math.floor(rng() * 2);
+    const targetCell = piece.cells[cr]?.[cc];
+    if (targetCell && !targetCell.isBlocked) {
+      targetCell.isCrashGem = true;
+      targetCell.isChain = false;
+    }
+  }
+  return piece;
 }
 
 export function refreshQueueForBoardRules(
@@ -528,6 +543,7 @@ export function refreshQueueForBoardRules(
     colorCount: state.colorCount,
     shapeMode: state.pieceShapeMode,
     boardCols: state.cols,
+    allowCrashGem: state.activeShift === 'crash_gem',
   };
   const queueLen = Math.max(3, state.nextQueue.length);
   state.nextQueue = Array.from({ length: queueLen }, (_, i) => {
@@ -535,6 +551,7 @@ export function refreshQueueForBoardRules(
       ...opts,
       ensureBlocked: i === 0 && state.pieceShapeMode === 'blocked_2x2',
       ensureWild: i === 0 && state.pieceShapeMode === 'prism_wild_2x2',
+      ensureCrashGem: i === 0 && state.activeShift === 'crash_gem',
     });
     const pos = getPieceInitialPos(state, p);
     return { ...p, x: pos.x, y: pos.y };
@@ -545,6 +562,7 @@ export function refreshQueueForBoardRules(
       ...opts,
       ensureBlocked: state.pieceShapeMode === 'blocked_2x2',
       ensureWild: state.pieceShapeMode === 'prism_wild_2x2',
+      ensureCrashGem: state.activeShift === 'crash_gem',
     });
     const pos = getPieceInitialPos(state, candidate);
     candidate.x = pos.x;
@@ -590,6 +608,7 @@ export function createInitialBoardState(
     squares: [],
     sweepState: createSweepState(),
     comboLevel: 0,
+    comboGraceUsed: false,
     score: 0,
     squaresClearedTotal: 0,
     stageSquaresCleared: 0,
@@ -602,6 +621,14 @@ export function createInitialBoardState(
     chainClearsTotal: 0,
     singleColorCount: 0,
     allClearCount: 0,
+    vetoTokens: 0,
+    upcomingShift: null,
+    shiftDraftChoices: null,
+    heldPiece: null,
+    stashUsedThisTurn: false,
+    ceilingLockRows: 0,
+    risingTideRows: 0,
+    beatChargeAccum: 0,
   };
 }
 
@@ -613,6 +640,7 @@ function clonePieceCell(cell: PieceCell): PieceCell {
         color: cell.color,
         isChain: cell.isChain,
         ...(cell.isWild ? { isWild: true } : {}),
+        ...(cell.isCrashGem ? { isCrashGem: true } : {}),
       };
 }
 
@@ -1113,7 +1141,7 @@ export function settleBoardForDirection(
       for (let row = rows - 1; row >= 0; row--) {
         const cell = grid[row][col];
         if (cell !== null) {
-          if (cell.isObstacle && cell.obstacleFixed) {
+          if ((cell.isObstacle && cell.obstacleFixed) || cell.isVirus) {
             writeRow = row - 1;
             continue;
           }
@@ -1139,7 +1167,7 @@ export function settleBoardForDirection(
       for (let row = 0; row < rows; row++) {
         const cell = grid[row][col];
         if (cell !== null) {
-          if (cell.isObstacle && cell.obstacleFixed) {
+          if ((cell.isObstacle && cell.obstacleFixed) || cell.isVirus) {
             writeRow = row + 1;
             continue;
           }
@@ -1164,7 +1192,7 @@ export function settleBoardForDirection(
       for (let col = 0; col < cols; col++) {
         const cell = grid[row][col];
         if (cell !== null) {
-          if (cell.isObstacle && cell.obstacleFixed) {
+          if ((cell.isObstacle && cell.obstacleFixed) || cell.isVirus) {
             writeCol = col + 1;
             continue;
           }
@@ -1189,7 +1217,7 @@ export function settleBoardForDirection(
     for (let col = cols - 1; col >= 0; col--) {
       const cell = grid[row][col];
       if (cell !== null) {
-        if (cell.isObstacle && cell.obstacleFixed) {
+        if ((cell.isObstacle && cell.obstacleFixed) || cell.isVirus) {
           writeCol = col - 1;
           continue;
         }
@@ -1477,6 +1505,7 @@ function buildPlacedGridCell(
         color: pCell.color,
         isChain: pCell.isChain,
         ...(pCell.isWild ? { isWild: true } : {}),
+        ...(pCell.isCrashGem ? { isCrashGem: true } : {}),
         chainMarked: false,
         inSquare: false,
         pendingClear: false,
@@ -1851,6 +1880,7 @@ export function lockActivePiece(
     colorCount: state.colorCount,
     shapeMode: state.pieceShapeMode,
     boardCols: cols,
+    allowCrashGem: state.activeShift === 'crash_gem',
   };
   const fallbackSpawnX = getSpawnColForWidth(cols, 2);
   const popped =
@@ -1873,6 +1903,8 @@ export function lockActivePiece(
     x: queuedPos.x,
     y: queuedPos.y,
   });
+
+  state.stashUsedThisTurn = false;
 
   if (noCellsEntered && !options?.zenNoLoss) {
     state.activePiece = null;
@@ -2196,7 +2228,7 @@ export function stepPassiveGravity(
  * Iluminado scoring formula:
  * Base = squareCount * 40
  * If squareCount < 4 -> base (no multiplier)
- * If squareCount >= 4 -> multiplier = Math.min(4 * comboLevel, 16)
+ * If squareCount >= 4 -> super-linear size bonus + combo multiplier
  */
 export function calculateSweepScore(squareCount: number, comboLevel: number): number {
   const base = squareCount * 40;
@@ -2205,7 +2237,8 @@ export function calculateSweepScore(squareCount: number, comboLevel: number): nu
   }
   const effectiveLevel = Math.max(1, comboLevel);
   const multiplier = Math.min(4 * effectiveLevel, 16);
-  return base * multiplier;
+  const sizeBonus = Math.round(squareCount * (squareCount - 3) * 15);
+  return (base + sizeBonus) * multiplier;
 }
 
 function flushPendingClearCells(state: BoardState): {
@@ -2217,23 +2250,59 @@ function flushPendingClearCells(state: BoardState): {
   let cellsRemoved = 0;
   const clearedPositions: Array<{ x: number; y: number; color: CellColor }> = [];
   const pendingCoords: Array<[number, number]> = [];
+  const bfsExpandQueue: Array<[number, number, CellColor]> = [];
+  const seen = new Set<string>();
 
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const cell = state.grid[r][c];
       if (cell && cell.pendingClear) {
+        if ((cell.frostHp ?? 0) > 1) {
+          cell.frostHp = 1;
+          cell.pendingClear = false;
+          cell.landFlash = 0.95;
+          continue;
+        }
+        const key = `${r},${c}`;
+        seen.add(key);
         pendingCoords.push([r, c]);
+        if (cell.isCrashGem) {
+          bfsExpandQueue.push([r, c, cell.color]);
+        }
       }
     }
   }
 
-  // Shatter any orthogonally adjacent gravity-falling 'blocked' obsidian tiles when a square clears
   const shatterDirs = [
     [0, 1],
     [0, -1],
     [1, 0],
     [-1, 0],
   ];
+
+  // Crash Gem flood: purge all orthogonally connected same-color blocks across the board
+  while (bfsExpandQueue.length > 0) {
+    const [cr, cc, targetColor] = bfsExpandQueue.shift()!;
+    for (const [dr, dc] of shatterDirs) {
+      const nr = cr + dr;
+      const nc = cc + dc;
+      if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) continue;
+      const key = `${nr},${nc}`;
+      if (seen.has(key)) continue;
+      const adj = state.grid[nr][nc];
+      if (
+        adj &&
+        !adj.isObstacle &&
+        (adj.color === targetColor || adj.isWild)
+      ) {
+        seen.add(key);
+        pendingCoords.push([nr, nc]);
+        bfsExpandQueue.push([nr, nc, targetColor]);
+      }
+    }
+  }
+
+  // Shatter any orthogonally adjacent gravity-falling 'blocked' obsidian tiles when a square clears
   for (const [r, c] of pendingCoords) {
     const cell = state.grid[r][c];
     if (cell) {
@@ -2263,8 +2332,10 @@ function flushPendingClearCells(state: BoardState): {
     }
   }
 
-  if (clearedPositions.length > 0) {
-    settleBoardForDirection(state.grid, state.gravityDirection);
+  if (clearedPositions.length > 0 || pendingCoords.length === 0) {
+    if (clearedPositions.length > 0) {
+      settleBoardForDirection(state.grid, state.gravityDirection);
+    }
     state.squares = detectBoardMarks(state.grid);
   }
 
@@ -2499,9 +2570,15 @@ export function finalizeSweep(state: BoardState, hadClearsDuringSweep: boolean):
 
   if (totalSquares >= 4) {
     state.comboLevel += 1;
+    state.comboGraceUsed = false;
     state.maxCombo = Math.max(state.maxCombo, state.comboLevel);
+    const tokenGain = totalSquares >= 8 ? 2 : 1;
+    state.vetoTokens = Math.min(3, (state.vetoTokens ?? 0) + tokenGain);
+  } else if (state.comboLevel > 0 && !state.comboGraceUsed) {
+    state.comboGraceUsed = true;
   } else {
     state.comboLevel = 0;
+    state.comboGraceUsed = false;
   }
 
   const squarePoints = calculateSweepScore(totalSquares, state.comboLevel);
@@ -2512,17 +2589,23 @@ export function finalizeSweep(state: BoardState, hadClearsDuringSweep: boolean):
 
   if (anyCleared) {
     let remaining = 0;
+    let remainingViruses = 0;
     const seenColors = new Set<CellColor>();
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
         const cell = state.grid[r][c];
         if (cell && !cell.isObstacle) {
           remaining++;
+          if (cell.isVirus) remainingViruses++;
           if (!cell.isWild) {
             seenColors.add(cell.color);
           }
         }
       }
+    }
+
+    if (state.activeShift === 'anchored_viruses' && remainingViruses === 0) {
+      bonusPoints += 500;
     }
 
     if (remaining === 0) {
@@ -2558,6 +2641,238 @@ export function finalizeSweep(state: BoardState, hadClearsDuringSweep: boolean):
     allDeletedBonus,
     clearedPositions: flushed.clearedPositions,
   };
+}
+
+/**
+ * Stash / Hold swap: swaps activePiece with state.heldPiece once per piece drop when stash_hold is active.
+ */
+export function swapHeldPiece(
+  state: BoardState,
+  chainFrequency: number = 0.05,
+  rng: () => number = Math.random
+): boolean {
+  if (!state.activePiece || state.isGameOver) return false;
+  if (state.activeShift !== 'stash_hold') return false;
+  if (state.stashUsedThisTurn) return false;
+
+  const cols = state.grid[0]?.length ?? state.cols ?? BOARD_COLS;
+  const current: Piece = {
+    ...state.activePiece,
+    cells: state.activePiece.cells.map((row) => row.map((c) => clonePieceCell(c))),
+  };
+
+  let incoming: Piece;
+  if (state.heldPiece) {
+    incoming = {
+      ...state.heldPiece,
+      cells: state.heldPiece.cells.map((row) => row.map((c) => clonePieceCell(c))),
+    };
+  } else {
+    const genOpts: GeneratePieceOptions = {
+      colorCount: state.colorCount,
+      shapeMode: state.pieceShapeMode,
+      boardCols: cols,
+    };
+    const popped =
+      state.nextQueue.shift() ??
+      generateRandomPiece(chainFrequency, rng, getSpawnColForWidth(cols, 2), genOpts);
+    const queuedPiece = generateRandomPiece(
+      chainFrequency,
+      rng,
+      getSpawnColForWidth(cols, 2),
+      genOpts
+    );
+    const queuedPos = getPieceInitialPos(state, queuedPiece);
+    state.nextQueue.push({ ...queuedPiece, x: queuedPos.x, y: queuedPos.y });
+    incoming = popped;
+  }
+
+  const initPos = getPieceInitialPos(state, incoming);
+  const candidate: Piece = { ...incoming, x: initPos.x, y: initPos.y };
+  if (!canPlacePiece(state, candidate, 0, 0)) {
+    return false;
+  }
+
+  const heldPos = getPieceInitialPos(state, current);
+  state.heldPiece = { ...current, x: heldPos.x, y: heldPos.y };
+  state.activePiece = candidate;
+  state.stashUsedThisTurn = true;
+  state.spawnTimer = 0;
+  state.gravityAccum = 0;
+  state.lockTimer = 0;
+  state.lockResetCount = 0;
+  return true;
+}
+
+/**
+ * Rising Tide per-sweep surge:
+ * - Sweeps with < 4 squares surge +1 alternating tide row from the bottom (max 3 rows, pushing stacks safely up).
+ * - Sweeps with >= 4 squares push the tide back down by 1 row.
+ */
+export function stepRisingTideSweep(
+  state: BoardState,
+  squaresThisSweep: number,
+  rng: () => number = Math.random
+): boolean {
+  if (state.activeShift !== 'rising_tide' || state.isGameOver) return false;
+  const rows = state.grid.length;
+  const cols = state.grid[0]?.length ?? state.cols ?? BOARD_COLS;
+  const currTide = state.risingTideRows ?? 0;
+
+  if (squaresThisSweep >= 4) {
+    if (currTide <= 0) return false;
+    // Remove bottom row and settle down
+    for (let r = rows - 1; r > 0; r--) {
+      for (let c = 0; c < cols; c++) {
+        state.grid[r][c] = state.grid[r - 1][c];
+      }
+    }
+    for (let c = 0; c < cols; c++) {
+      state.grid[0][c] = null;
+    }
+    state.risingTideRows = Math.max(0, currTide - 1);
+    settleBoardForDirection(state.grid, state.gravityDirection, true);
+    state.squares = detectBoardMarks(state.grid);
+    return true;
+  }
+
+  if (currTide >= 3) return false;
+  // Don't surge if top 2 rows are already occupied in spawn chute
+  const spawnX = getSpawnColForWidth(cols, 2);
+  for (let c = spawnX; c <= Math.min(cols - 1, spawnX + 1); c++) {
+    if (state.grid[0][c] !== null || state.grid[1][c] !== null) {
+      return false;
+    }
+  }
+  // Shift grid up 1 row
+  for (let r = 0; r < rows - 1; r++) {
+    for (let c = 0; c < cols; c++) {
+      const movedCell = state.grid[r + 1][c];
+      if (movedCell) {
+        movedCell.animOffsetY = -0.8;
+      }
+      state.grid[r][c] = movedCell;
+    }
+  }
+  const colorCount = state.colorCount ?? 2;
+  const phase = Math.floor(rng() * colorCount);
+  for (let c = 0; c < cols; c++) {
+    const color = ((c + phase) % colorCount) as CellColor;
+    state.grid[rows - 1][c] = {
+      id: allocCellId(),
+      color,
+      isChain: false,
+      chainMarked: false,
+      inSquare: false,
+      pendingClear: false,
+      sweptCol: false,
+      fallOffset: 0,
+      animOffsetY: -1,
+      landFlash: 0.7,
+    };
+  }
+  state.risingTideRows = currTide + 1;
+  state.squares = detectBoardMarks(state.grid);
+  return true;
+}
+
+/**
+ * Ceiling Press per-sweep shutter:
+ * - Sweeps with < 4 squares lower ceiling flank shutters by 1 row (max 3), keeping the central spawn chute open.
+ * - Sweeps with >= 4 squares raise ceiling shutters back up by 1 row.
+ */
+export function stepCeilingPressSweep(
+  state: BoardState,
+  squaresThisSweep: number
+): boolean {
+  if (state.activeShift !== 'ceiling_press' || state.isGameOver) return false;
+  const rows = state.grid.length;
+  const cols = state.grid[0]?.length ?? state.cols ?? BOARD_COLS;
+  const spawnX = getSpawnColForWidth(cols, 2);
+  const currLock = state.ceilingLockRows ?? 0;
+
+  let nextLock = currLock;
+  if (squaresThisSweep >= 4) {
+    nextLock = Math.max(0, currLock - 1);
+  } else {
+    nextLock = Math.min(3, Math.min(Math.max(1, rows - 5), currLock + 1));
+  }
+  if (nextLock === currLock) return false;
+
+  // Clear previous ceiling shutter stones in top rows
+  for (let r = 0; r < Math.min(rows, 4); r++) {
+    for (let c = 0; c < cols; c++) {
+      const cell = state.grid[r][c];
+      if (cell?.isObstacle && cell.obstacleStyle === 'girder') {
+        state.grid[r][c] = null;
+      }
+    }
+  }
+
+  // Place new shutters outside spawn chute
+  for (let r = 0; r < nextLock; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (c === spawnX || c === spawnX + 1) continue;
+      const existing = state.grid[r][c];
+      if (existing && !existing.isObstacle) {
+        // Nudge downward safely to lowest open cell below shutter if possible
+        for (let dr = nextLock; dr < rows; dr++) {
+          if (state.grid[dr][c] === null) {
+            state.grid[dr][c] = existing;
+            break;
+          }
+        }
+      }
+      state.grid[r][c] = {
+        id: allocCellId(),
+        color: 0,
+        isChain: false,
+        isObstacle: true,
+        obstacleFixed: true,
+        obstacleStyle: 'girder',
+        chainMarked: false,
+        inSquare: false,
+        pendingClear: false,
+        sweptCol: false,
+        fallOffset: 0,
+        landFlash: 0.65,
+      };
+    }
+  }
+  state.ceilingLockRows = nextLock;
+  settleBoardForDirection(state.grid, state.gravityDirection, true);
+  state.squares = detectBoardMarks(state.grid);
+  return true;
+}
+
+/**
+ * Metronome Charge: locking a piece within the beat window (near beatPhase 0 or 1) awards bonus points
+ * and charges Veto Tokens every 3 on-beat locks.
+ */
+export function applyMetronomeChargeBonus(
+  state: BoardState,
+  beatPhase: number
+): { onBeat: boolean; bonusPoints: number; tokenGranted: boolean } {
+  if (state.activeShift !== 'metronome_charge' || state.isGameOver) {
+    return { onBeat: false, bonusPoints: 0, tokenGranted: false };
+  }
+  const wrapped = ((beatPhase % 1) + 1) % 1;
+  const distToBeat = Math.min(wrapped, 1 - wrapped);
+  if (distToBeat > 0.2) {
+    return { onBeat: false, bonusPoints: 0, tokenGranted: false };
+  }
+  const bonusPoints = 150;
+  state.score += bonusPoints;
+  const nextCharge = (state.beatChargeAccum ?? 0) + 1;
+  let tokenGranted = false;
+  if (nextCharge >= 3) {
+    state.beatChargeAccum = 0;
+    state.vetoTokens = Math.min(3, (state.vetoTokens ?? 0) + 1);
+    tokenGranted = true;
+  } else {
+    state.beatChargeAccum = nextCharge;
+  }
+  return { onBeat: true, bonusPoints, tokenGranted };
 }
 
 export function applyGarbageToBoard(

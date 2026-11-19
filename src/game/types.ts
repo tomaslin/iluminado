@@ -390,6 +390,9 @@ export interface SkinConfig {
     styleId: MusicStyleId;
     genreLabel: string;
     audioTrackUrl?: string;
+    firstBeatSec?: number;
+    loopSweeps?: number;
+    loopEndSec?: number;
     rootMidi: number;
     scale: number[];
     chords: number[][];
@@ -559,6 +562,8 @@ export interface SavedProgress {
   unlockedSkins: string[];
   skinEditPlaylist: string[];
   muted: boolean;
+  musicVolume?: number;
+  sfxVolume?: number;
   hapticsEnabled: boolean;
   dailyHistory: Record<string, DailyCompletionRecord>;
   dailyStreak: number;
