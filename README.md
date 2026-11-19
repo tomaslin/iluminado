@@ -43,17 +43,25 @@ I added a few of these into the game and found they were genuinely fun. They bri
 
 Whenever you level up (outside Puzzle mode), one active shift triggers for the new stage—rotating the playfield, reshaping the floor, swapping rows, or altering piece geometry and rules. Open **Shifts** from the title screen to toggle individual shifts or load category presets.
 
-| Tetromino Bricks (`brick_tetromino`) | 90° Board Rotate (`rotate_90`) |
+| Tetromino Bricks (`brick_tetromino`) | Obsidian Blocked Bricks (`brick_blocked`) |
 | :---: | :---: |
-| ![Tetromino Bricks Shift](docs/images/shift-tetromino.png) | ![90° Vertical Board Shift](docs/images/shift-vertical.png) |
-| Classic 4-tile I, O, T, S, Z, J, L tetrominoes drop into the courtyard. | Turns the playfield 90° into a tall 10×16 vertical shaft and drops stacks to the new floor. |
+| ![Tetromino Bricks Shift](docs/images/shift-tetromino.png) | ![Obsidian Blocked Bricks Shift](docs/images/shift-obsidian.png) |
+| Classic 4-tile I, O, T, S, Z, J, L tetrominoes drop into the courtyard. | Mixes dark obsidian blocker tiles into falling 2×2 pieces; they shatter beside cleared squares. |
 
-| Peggle Bounce Orb (`brick_peggle`) | Obsidian Blocked Bricks (`brick_blocked`) |
+| 90° Board Rotate (`rotate_90`) | Silver Clearing Monochrome |
 | :---: | :---: |
-| ![Peggle Bounce Orb Shift](docs/images/shift-peggle.png) | ![Obsidian Blocked Bricks Shift](docs/images/shift-obsidian.png) |
-| Incoming pieces become single orbs that ricochet off blocks and walls on their way down. | Mixes dark obsidian blocker tiles into falling 2×2 pieces; they shatter beside cleared squares. |
+| ![90° Vertical Board Shift](docs/images/shift-vertical.png) | ![Silver Clearing Black and White Skin](docs/images/skin-monochrome.png) |
+| Turns the playfield 90° into a tall 10×16 vertical shaft and drops stacks to the new floor. | High-contrast ink-and-chalk architectural stage from the 50-world soundtrack collection. |
 
-### All 43 Shifts
+### More Than 2 Colors
+
+Unlike classic two-tone block droppers, Iluminado breaks open the binary color rule with shifts that bring **more than 2 colors** into play:
+
+- **3-Color Spectrum (`three_color_mode`)**: Injects a harmonious third tile color (`blockC`) into both the live courtyard and incoming piece queue, turning easy checkerboards into strategic multi-color planning.
+- **Chameleon Rotate (`chameleon_rotate`)**: Rotating a falling brick cycles every tile color forward, letting you paint 2×2 matches mid-air across 2-color or 3-color stages.
+- **Prism Wild Bricks (`prism_wild_bricks`)**: Embeds luminous diamond Prism Wild tiles that bridge and complete squares across any adjacent tile color.
+
+### All 42 Shifts
 
 #### Core & Dimension Shifts (9)
 1. **90° Board Rotate** (`rotate_90`): Turns the entire playfield 90° clockwise or counter-clockwise and drops stacks to the new floor.
@@ -88,25 +96,24 @@ Whenever you level up (outside Puzzle mode), one active shift triggers for the n
 26. **Dual Twin Timeline** (`twin_sweep`): Splits the timeline into two synchronized beams sweeping 4 beats apart for double-tempo clears.
 27. **Crumble Crystal Ledges** (`crumble_blocks`): Suspends brittle crystal ledges mid-board; two impacts or adjacent clears crack and shatter them.
 
-#### Brick Shapes & 3-Color Shifts (10)
+#### Brick Shapes & 3-Color Shifts (9)
 28. **2×1 / 1×2 Domino Bricks** (`brick_2x1`): Transforms incoming falling pieces into nimble 2×1 / 1×2 domino bricks for one turn.
 29. **1×3 / 3×1 Trio Bricks** (`brick_3x1`): Transforms incoming falling pieces into linear 1×3 and 3×1 trio bricks for one turn.
 30. **3×2 / 2×3 Slab Bricks** (`brick_3x2`): Transforms incoming falling pieces into wide 3×2 / 2×3 six-tile slabs for one turn.
 31. **Tetromino Bricks** (`brick_tetromino`): Transforms incoming falling pieces into classic 4-tile I, O, T, S, Z, J, L shapes for one turn.
 32. **Obsidian Blocked Bricks** (`brick_blocked`): Mixes a solid dark obsidian block into occasional 2×2 pieces for one turn; shatters beside clears.
-33. **Peggle Bounce Orb** (`brick_peggle`): Turns incoming pieces into single bouncing orbs that ricochet randomly off blocks and walls for one turn.
-34. **3-Color Spectrum** (`three_color_mode`): Introduces a third block color onto the board and incoming queue for one turn.
-35. **3-Tile Corner L-Bricks** (`brick_l_trio`): Carves incoming pieces into crisp 3-tile L-trominoes with a missing corner pocket for interlocking fits.
-36. **Chameleon Rotate** (`chameleon_rotate`): Rotating a falling brick cycles every tile color forward, letting you paint matches mid-air.
-37. **Prism Wild Bricks** (`prism_wild_bricks`): Embeds achromatic diamond Prism Wild tiles into incoming 2×2 bricks that match any adjacent color.
+33. **3-Color Spectrum** (`three_color_mode`): Introduces a third block color onto the board and incoming queue for one turn.
+34. **3-Tile Corner L-Bricks** (`brick_l_trio`): Carves incoming pieces into crisp 3-tile L-trominoes with a missing corner pocket for interlocking fits.
+35. **Chameleon Rotate** (`chameleon_rotate`): Rotating a falling brick cycles every tile color forward, letting you paint matches mid-air.
+36. **Prism Wild Bricks** (`prism_wild_bricks`): Embeds achromatic diamond Prism Wild tiles into incoming 2×2 bricks that match any adjacent color.
 
 #### Dramatic Row & Column Swaps (6)
-38. **Inside-Out Swap** (`inside_out_swap`): Swaps outer columns with inner columns, flipping a central mountain into twin outer cliffs.
-39. **Sawtooth Shear** (`sawtooth_shear`): Juts even rows right and odd rows left to transform straight walls into jagged zigzag teeth.
-40. **Horizon Shear** (`horizon_shear`): Cuts a glowing fault seam across the stack, sliding upper rows right and lower rows left.
-41. **The Zipper Merge** (`zipper_merge`): Interleaves top and bottom occupied rows cleanly like a zipper while keeping exact color ratios.
-42. **Mirror Symmetry Flip** (`mirror_flip`): Reflects the entire occupied board horizontally across the center line in a crisp specular flip.
-43. **Orbital Vortex Swirl** (`vortex_swirl`): Rotates occupied blocks clockwise around concentric perimeter rings like a slow architectural whirlpool.
+37. **Inside-Out Swap** (`inside_out_swap`): Swaps outer columns with inner columns, flipping a central mountain into twin outer cliffs.
+38. **Sawtooth Shear** (`sawtooth_shear`): Juts even rows right and odd rows left to transform straight walls into jagged zigzag teeth.
+39. **Horizon Shear** (`horizon_shear`): Cuts a glowing fault seam across the stack, sliding upper rows right and lower rows left.
+40. **The Zipper Merge** (`zipper_merge`): Interleaves top and bottom occupied rows cleanly like a zipper while keeping exact color ratios.
+41. **Mirror Symmetry Flip** (`mirror_flip`): Reflects the entire occupied board horizontally across the center line in a crisp specular flip.
+42. **Orbital Vortex Swirl** (`vortex_swirl`): Rotates occupied blocks clockwise around concentric perimeter rings like a slow architectural whirlpool.
 
 ## Skins and Music
 
@@ -138,7 +145,7 @@ I paste this into Google Gemini and say Generate a track. Then I download the MP
 
 Once I upload the mp3 into the project, I ask AI studio to build a skin that is different than the other ones but inspired by the music, I usually also give it a visual reference that I love like cubist art that is a little more illustration and with a Neo Andean vibe. 
 
-Each of the 40 worlds pairs its own architectural or artistic backdrop, themed board border, block textures, and 4-stem reactive mix (Percussion, Bass, Lead, and Atmosphere)—ranging from sumi-e ink wash, cubist collage, Neo-Andean *cholets*, 80s chrome sci-fi, Miami sunset neon, and animated cat sketchbooks to high-contrast monochrome worlds like **Silver Clearing**:
+Each of the 50 worlds pairs its own architectural or artistic backdrop, themed board border, block textures, and 4-stem reactive mix (Percussion, Bass, Lead, and Atmosphere)—ranging from sumi-e ink wash, cubist collage, Neo-Andean *cholets*, Nordic flat-pack showrooms, Grand Budapest symmetry, Ghibli rail expresses, 80s chrome sci-fi, Miami sunset neon, and animated cat sketchbooks to high-contrast monochrome worlds like **Silver Clearing**:
 
 ![Silver Clearing Black and White Skin](docs/images/skin-monochrome.png)
 
@@ -149,7 +156,7 @@ Sadly yes. I would have loved to build this game with simply pure hand written c
 
 ## Game Modes
 
-- **Challenge** (`Basic` / `Endless` / `Shuffle` / `Zen Flow`): Journey across all 40 worlds (`Basic`), loop endlessly (`Endless`), shuffle the world deck (`Shuffle`), or play continuously with top-overflow trimming in no-loss `Zen Flow`.
+- **Challenge** (`Basic` / `Endless` / `Shuffle` / `Zen Flow`): Journey across all 50 worlds (`Basic`), loop endlessly (`Endless`), shuffle the world deck (`Shuffle`), or play continuously with top-overflow trimming in no-loss `Zen Flow`.
 - **Daily Challenge**: Deterministic daily courtyard seed and mission shared by date, with countdown timer and streak tracking.
 - **Time Attack** (`1 min` / `3 min` / `5 min`): High-tempo score race with live Personal Best (`vs PB`) split pace tracking.
 - **Puzzle** (6 Levels): Build target silhouettes (*Pastel Archway*, *Sunlit Obelisk*, *Sand Hourglass*, *Monument Crown*, *Ascending Steps*, *Compass Sanctuary*) before the timer expires.

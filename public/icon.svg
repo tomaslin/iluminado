@@ -1,0 +1,147 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Iluminado">
+  <defs>
+    <linearGradient id="bg" x1="0.1" y1="0" x2="0.9" y2="1">
+      <stop offset="0%" stop-color="#f2b840" />
+      <stop offset="52%" stop-color="#ec6b52" />
+      <stop offset="100%" stop-color="#c4346a" />
+    </linearGradient>
+    <radialGradient id="sunGlow" cx="48%" cy="46%" r="54%">
+      <stop offset="0%" stop-color="#fff1a8" stop-opacity="0.48" />
+      <stop offset="65%" stop-color="#ffaa64" stop-opacity="0.14" />
+      <stop offset="100%" stop-color="#c4346a" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="shiftTile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#3cd4e6" />
+      <stop offset="100%" stop-color="#1996b8" />
+    </linearGradient>
+  </defs>
+
+  <!-- Squircle Icon Canvas -->
+  <rect width="512" height="512" rx="112" fill="url(#bg)" />
+  <rect width="512" height="512" rx="112" fill="url(#sunGlow)" />
+
+  <!-- Subtle architectural grid lines -->
+  <g stroke="#fff8eb" stroke-opacity="0.18" stroke-width="2.5">
+    <line x1="156" y1="68" x2="156" y2="444" />
+    <line x1="256" y1="68" x2="256" y2="444" />
+    <line x1="356" y1="68" x2="356" y2="444" />
+    <line x1="68" y1="156" x2="444" y2="156" />
+    <line x1="68" y1="256" x2="444" y2="256" />
+    <line x1="68" y1="356" x2="444" y2="356" />
+  </g>
+
+  <!-- Soft Timeline Sweep Accent behind blocks -->
+  <rect x="249" y="82" width="14" height="348" rx="7" fill="#fff8eb" fill-opacity="0.24" />
+
+  <!-- Centered 2D 2x2 Block System (optically balanced around 256, 256) -->
+  <g transform="translate(248, 264) scale(1.06)">
+    <!-- Ground offset shadow for crisp tactile depth -->
+    <g fill="#191522" fill-opacity="0.28" transform="translate(8, 12)">
+      <rect x="-112" y="-112" width="102" height="102" rx="22" />
+      <rect x="-112" y="10" width="102" height="102" rx="22" />
+      <rect x="10" y="10" width="102" height="102" rx="22" />
+    </g>
+
+    <!-- Dotted Ghost Origin Socket for Top-Right Shifting Tile -->
+    <rect
+      x="10"
+      y="-112"
+      width="102"
+      height="102"
+      rx="20"
+      fill="#191522"
+      fill-opacity="0.22"
+      stroke="#fff8eb"
+      stroke-opacity="0.72"
+      stroke-width="6"
+      stroke-dasharray="15 11"
+    />
+
+    <!-- Top-Left Tile (Ivory) -->
+    <g>
+      <rect
+        x="-112"
+        y="-112"
+        width="102"
+        height="102"
+        rx="22"
+        fill="#faf6ee"
+        stroke="#191522"
+        stroke-width="11"
+      />
+      <rect x="-92" y="-92" width="62" height="14" rx="7" fill="#ffffff" fill-opacity="0.9" />
+      <circle cx="-61" cy="-56" r="14" fill="#ec6b52" fill-opacity="0.22" />
+    </g>
+
+    <!-- Bottom-Left Tile (Coral) -->
+    <g>
+      <rect
+        x="-112"
+        y="10"
+        width="102"
+        height="102"
+        rx="22"
+        fill="#f05a3a"
+        stroke="#191522"
+        stroke-width="11"
+      />
+      <rect x="-92" y="28" width="62" height="13" rx="6.5" fill="#ff9d7e" fill-opacity="0.55" />
+      <rect x="-79" y="51" width="36" height="36" rx="9" fill="none" stroke="#faf6ee" stroke-opacity="0.45" stroke-width="5" />
+    </g>
+
+    <!-- Bottom-Right Tile (Ivory) -->
+    <g>
+      <rect
+        x="10"
+        y="10"
+        width="102"
+        height="102"
+        rx="22"
+        fill="#faf6ee"
+        stroke="#191522"
+        stroke-width="11"
+      />
+      <rect x="30" y="28" width="62" height="14" rx="7" fill="#ffffff" fill-opacity="0.9" />
+      <polygon points="61,44 79,62 61,80 43,62" fill="#ec6b52" fill-opacity="0.28" />
+    </g>
+
+    <!-- Shifting & Transforming Top-Right Tile (Clean 2D shift + prism morph) -->
+    <g transform="translate(26, -26)">
+      <!-- Crisp drop shadow -->
+      <rect
+        x="16"
+        y="-102"
+        width="102"
+        height="102"
+        rx="24"
+        fill="#191522"
+        fill-opacity="0.34"
+      />
+      <rect
+        x="10"
+        y="-112"
+        width="102"
+        height="102"
+        rx="24"
+        fill="url(#shiftTile)"
+        stroke="#191522"
+        stroke-width="11"
+      />
+      <!-- Inner transformed diamond emblem -->
+      <polygon
+        points="61,-88 88,-61 61,-34 34,-61"
+        fill="#faf6ee"
+        stroke="#191522"
+        stroke-width="5.5"
+        stroke-linejoin="round"
+      />
+      <circle cx="61" cy="-61" r="9" fill="#f2b840" />
+    </g>
+
+    <!-- Clean spaced shift motion lines -->
+    <g stroke="#fff8eb" stroke-opacity="0.9" stroke-width="7" stroke-linecap="round" fill="none">
+      <path d="M 10 -122 L 24 -136" />
+      <path d="M 122 -10 L 136 -24" />
+    </g>
+  </g>
+</svg>

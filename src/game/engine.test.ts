@@ -75,10 +75,15 @@ import {
 import {
   ALL_SHIFT_TYPES,
   OBSTACLE_SHIFT_SET,
+  POPULATED_BOARD_SHIFTS,
+  START_FRIENDLY_SHIFTS,
+  START_FRIENDLY_SHIFT_SET,
   TILE_TYPE_SHIFT_SET,
   advanceShiftStageTurn,
   applyBoardShift,
+  isShiftStartFriendly,
   pickNextShift,
+  pickStartShift,
   stepConveyorFloor,
   stepPatrollingBumper,
 } from './shifts';
@@ -349,8 +354,8 @@ test('computeStemLevels dynamically scales percussion, bass, lead, and vocal ste
   assert.ok(peakStems.vocal > 0.85);
 });
 
-test('all 40 worlds define valid music configs covering all requested genres', () => {
-  assert.equal(SKINS.length, 40);
+test('all 50 worlds define valid music configs covering all requested genres', () => {
+  assert.equal(SKINS.length, 50);
   const styleSet = new Set(SKINS.map((s) => s.music.styleId));
   const requiredStyles = [
     'dark_zouk',
@@ -386,6 +391,16 @@ test('all 40 worlds define valid music configs covering all requested genres', (
     'constructivist_march',
     'botanical_waltz',
     'memphis_electro',
+    'nordic_synth',
+    'chamber_waltz',
+    'studio_orchestral',
+    'de_stijl_minimal',
+    'koto_taiko',
+    'analog_funk_70s',
+    'kraut_motorik',
+    'solarpunk_ambient',
+    'tokyo_jazz_kissa',
+    'space_age_lounge',
   ] as const;
 
   for (const style of requiredStyles) {
@@ -476,7 +491,7 @@ test('getPieceLandingColumns predicts per-column split landing heights and hardD
   assert.ok((state.grid[9][4]?.fallOffset ?? 0) >= 5);
 });
 
-test('All 40 soundtrack worlds (1-40) configure root-relative MP3 paths in music/ with no public/music folder and .nojekyll present', () => {
+test('All 50 soundtrack worlds (1-50) configure root-relative MP3 paths in music/ with no public/music folder and .nojekyll present', () => {
   assert.equal(fs.existsSync(path.resolve(process.cwd(), 'public/music')), false);
   assert.equal(fs.existsSync(path.resolve(process.cwd(), '.nojekyll')), true);
   assert.equal(
@@ -484,7 +499,7 @@ test('All 40 soundtrack worlds (1-40) configure root-relative MP3 paths in music
     false,
     'Typo music/wolrd30.mp3 should remain renamed to music/world30.mp3'
   );
-  for (let i = 0; i < 40; i++) {
+  for (let i = 0; i < 50; i++) {
     const expectedUrl = `music/world${i + 1}.mp3`;
     assert.equal(SKINS[i].music.audioTrackUrl, expectedUrl);
     const filePath = path.resolve(process.cwd(), expectedUrl);
@@ -679,9 +694,9 @@ test('Daily completion enforces once-per-24h completion, tracks consecutive stre
   assert.equal(afterGap.dailyStreak, 1);
 });
 
-test('INITIAL_UNLOCKED_SKIN_IDS unlocks all 40 worlds including all 40 studio MP3 worlds', () => {
-  assert.equal(INITIAL_UNLOCKED_SKIN_IDS.length, 40);
-  for (let i = 0; i < 40; i++) {
+test('INITIAL_UNLOCKED_SKIN_IDS unlocks all 50 worlds including all 50 studio MP3 worlds', () => {
+  assert.equal(INITIAL_UNLOCKED_SKIN_IDS.length, 50);
+  for (let i = 0; i < 50; i++) {
     assert.equal(
       INITIAL_UNLOCKED_SKIN_IDS.includes(SKINS[i].id),
       true,
@@ -690,8 +705,8 @@ test('INITIAL_UNLOCKED_SKIN_IDS unlocks all 40 worlds including all 40 studio MP
   }
 });
 
-test('getTrackTrimGain normalizes loudness across all 40 MP3 tracks and getSpectrumSnapshot is safe in Node', () => {
-  for (let i = 0; i < 40; i++) {
+test('getTrackTrimGain normalizes loudness across all 50 MP3 tracks and getSpectrumSnapshot is safe in Node', () => {
+  for (let i = 0; i < 50; i++) {
     const url = SKINS[i].music.audioTrackUrl;
     const gain = getTrackTrimGain(url);
     assert.ok(gain >= 0.5 && gain <= 3.0, `Unexpected trim gain ${gain} for ${url}`);
@@ -949,7 +964,7 @@ test('rotateBoard90 swaps landscape <-> portrait dimensions, drops all bricks to
   }
 });
 
-test('All 40 skins avoid pure black/white, preserve readable sky luminance, and configure valid stroke/fill variants & crisp block contrast', () => {
+test('All 50 skins avoid pure black/white, preserve readable sky luminance, and configure valid stroke/fill variants & crisp block contrast', () => {
   const rgbDist = (h1: string, h2: string): number => {
     const p = (h: string) => {
       const c = h.replace('#', '');
@@ -1032,22 +1047,22 @@ test('All 40 skins avoid pure black/white, preserve readable sky luminance, and 
   assert.ok(boardLum - bLum >= 0.35, `Expected limbo-mist blockB (${bLum.toFixed(2)}) clearly darker than board (${boardLum.toFixed(2)})`);
 });
 
-test('pickRandomSkinIndex and shuffled skin deck avoid back-to-back repeats and cover all 40 worlds', () => {
-  for (let i = 0; i < 40; i++) {
+test('pickRandomSkinIndex and shuffled skin deck avoid back-to-back repeats and cover all 50 worlds', () => {
+  for (let i = 0; i < 50; i++) {
     const picked = pickRandomSkinIndex(undefined, i);
     assert.notEqual(picked, i);
     assert.ok(picked >= 0 && picked < SKINS.length);
   }
 
   const deck = createShuffledSkinDeck(SKINS.length, 0);
-  assert.equal(deck.length, 40);
+  assert.equal(deck.length, 50);
   assert.notEqual(deck[0], 0);
-  assert.equal(new Set(deck).size, 40);
+  assert.equal(new Set(deck).size, 50);
 
-  // Advancing through basic visits all 40 stages then marks completed
+  // Advancing through basic visits all 50 stages then marks completed
   let curDeck = deck;
   let pos = 0;
-  for (let step = 1; step < 40; step++) {
+  for (let step = 1; step < 50; step++) {
     const adv = advanceShuffledSkinDeck(curDeck, pos, false);
     assert.equal(adv.completed, false);
     curDeck = adv.nextDeck;
@@ -1410,9 +1425,9 @@ test('Dramatic swaps (inside_out_swap, horizon_shear, zipper_merge) preserve exa
   }
 });
 
-test('All 43 shift types execute cleanly without crashing or causing premature game over', () => {
+test('All 42 shift types execute cleanly without crashing or causing premature game over', () => {
   const rng = createSeededRng('all-shifts-smoke');
-  assert.equal(ALL_SHIFT_TYPES.length, 43);
+  assert.equal(ALL_SHIFT_TYPES.length, 42);
   for (const shiftType of ALL_SHIFT_TYPES) {
     const state = createInitialBoardState(0);
     for (let c = 3; c < state.cols - 3; c++) {
@@ -1426,8 +1441,8 @@ test('All 43 shift types execute cleanly without crashing or causing premature g
   }
 });
 
-test('All 40 skins define harmonious non-pure-black/white blockC styles for 3-color mode', () => {
-  assert.equal(SKINS.length, 40);
+test('All 50 skins define harmonious non-pure-black/white blockC styles for 3-color mode', () => {
+  assert.equal(SKINS.length, 50);
   for (const skin of SKINS) {
     const blockC = getBlockStyle(skin.palette, 2);
     assert.ok(blockC, `${skin.id} must define blockC`);
@@ -2253,4 +2268,36 @@ test('partial 1x1 overflow entry forms a 2x2 square at row 0 and continues until
   assert.equal(resZero.landed, true);
   assert.equal(state1x1.isGameOver, true, '0 cells entering the board must trigger Game Over');
   assert.equal(state1x1.activePiece, null);
+});
+
+test('Shift classification partitions all 42 shifts into Start-Ready vs Needs-Bricks and pickStartShift prioritizes Start-Ready on opening boards', () => {
+  assert.equal(
+    START_FRIENDLY_SHIFTS.length + POPULATED_BOARD_SHIFTS.length,
+    ALL_SHIFT_TYPES.length
+  );
+  const startSet = new Set(START_FRIENDLY_SHIFTS);
+  const brickSet = new Set(POPULATED_BOARD_SHIFTS);
+  for (const s of ALL_SHIFT_TYPES) {
+    assert.notEqual(startSet.has(s), brickSet.has(s), `Shift ${s} must belong to exactly one bucket`);
+    assert.equal(isShiftStartFriendly(s), START_FRIENDLY_SHIFT_SET.has(s));
+  }
+  assert.equal(isShiftStartFriendly('mirror_flip'), false);
+  assert.equal(isShiftStartFriendly('line_color_shift'), false);
+  assert.equal(isShiftStartFriendly('split_canyon'), true);
+  assert.equal(isShiftStartFriendly('brick_2x1'), true);
+
+  const emptyBoard = createInitialBoardState(0);
+  assert.equal(pickStartShift([], Math.random, emptyBoard), null);
+  for (let i = 0; i < 20; i++) {
+    const chosen = pickStartShift(['mirror_flip', 'line_color_shift', 'split_canyon', 'brick_2x1'], Math.random, emptyBoard);
+    assert.ok(chosen === 'split_canyon' || chosen === 'brick_2x1', `Expected start-friendly shift on empty board, got ${chosen}`);
+  }
+  // Falls back cleanly if user enables only populated-board shifts
+  assert.equal(pickStartShift(['mirror_flip'], Math.random, emptyBoard), 'mirror_flip');
+
+  // Sparse board (< 6 bricks) in pickNextShift prioritizes Start-Ready shifts over brick-dependent swaps
+  for (let i = 0; i < 15; i++) {
+    const picked = pickNextShift(['mirror_flip', 'vortex_swirl', 'portal_wrap'], null, Math.random, emptyBoard);
+    assert.equal(picked, 'portal_wrap');
+  }
 });

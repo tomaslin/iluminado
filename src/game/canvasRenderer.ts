@@ -408,7 +408,7 @@ export class IluminadoCanvasRenderer {
     }
   }
 
-  public spawnPeggleBounce(
+  public spawnSpringBounce(
     boardIdx: 0 | 1,
     gx: number,
     gy: number,
@@ -421,24 +421,24 @@ export class IluminadoCanvasRenderer {
     const cx = rect.x + (gx + 0.5) * rect.cellSize;
     const cy = rect.y + (gy + 0.5) * rect.cellSize;
 
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 6; i++) {
       const p = this.particles[this.particleCursor];
       this.particleCursor = (this.particleCursor + 1) % MAX_PARTICLES;
-      const angle = (Math.PI * 2 * i) / 4 + Math.random() * 0.6;
-      const speed = 26 + Math.random() * 28;
+      const spread = -Math.PI * 0.5 + (i - 2.5) * 0.28 + (Math.random() - 0.5) * 0.14;
+      const speed = 38 + Math.random() * 34;
       p.active = true;
       p.x = cx;
       p.y = cy;
-      p.vx = Math.cos(angle) * speed;
-      p.vy = Math.sin(angle) * speed;
+      p.vx = Math.cos(spread) * speed;
+      p.vy = Math.sin(spread) * speed;
       p.size = rect.cellSize * (0.14 + Math.random() * 0.08);
-      p.alpha = 0.85;
+      p.alpha = 0.88;
       p.life = 0;
       p.maxLife = 0.36 + Math.random() * 0.14;
       p.color = i % 2 === 0 ? skin.palette.squareHighlight : skin.palette.hudAccent;
       p.rotation = Math.random() * Math.PI;
       p.vRot = (Math.random() - 0.5) * 6;
-      p.shape = i % 2 === 0 ? 'star' : 'bubble';
+      p.shape = i % 2 === 0 ? 'spark' : 'square';
     }
 
     const ring = this.clearRings[this.ringCursor];
@@ -446,9 +446,9 @@ export class IluminadoCanvasRenderer {
     ring.active = true;
     ring.x = cx;
     ring.y = cy;
-    ring.maxRadius = rect.cellSize * 0.82;
+    ring.maxRadius = rect.cellSize * 0.86;
     ring.life = 0;
-    ring.maxLife = 0.32;
+    ring.maxLife = 0.34;
     ring.color = skin.palette.squareHighlight;
   }
 
@@ -768,9 +768,9 @@ export class IluminadoCanvasRenderer {
 
     ctx.globalAlpha = alpha;
     ctx.drawImage(layers.sky, 0, 0, layers.width, layers.height);
-    ctx.drawImage(layers.far, -ox - px * 0.28, layers.farTop - oy - py * 0.22);
-    ctx.drawImage(layers.mid, -ox - px * 0.62, -oy - py * 0.52);
-    ctx.drawImage(layers.near, -ox - px * 1.05, layers.nearTop - oy - py * 0.88);
+    ctx.drawImage(layers.far, -ox - px * 0.34, layers.farTop - oy - py * 0.28);
+    ctx.drawImage(layers.mid, -ox - px * 0.72, -oy - py * 0.62);
+    ctx.drawImage(layers.near, -ox - px * 1.18, layers.nearTop - oy - py * 0.96);
   }
 
   public render(
@@ -814,20 +814,20 @@ export class IluminadoCanvasRenderer {
       ? primaryBoard.grid.length ?? primaryBoard.rows ?? BOARD_ROWS
       : BOARD_ROWS;
 
-    // Update target camera parallax from player piece movement or gentle title drift
+    // Update target camera parallax from player piece movement, pointer gaze, or title drift
     if (!isTitleScreen && primaryBoard?.activePiece) {
       const piece = primaryBoard.activePiece;
       const moveNormX = ((piece.x + 1) / primaryCols - 0.5) * 2;
       const moveNormY = Math.max(-0.4, Math.min(1, piece.y / primaryRows - 0.35));
       this.targetParallaxX =
-        moveNormX * 26 + this.pointerNormX * 6 + Math.sin(timeSec * 0.16) * 5;
+        moveNormX * 26 + this.pointerNormX * 12 + Math.sin(timeSec * 0.16) * 5;
       this.targetParallaxY =
-        moveNormY * 10 + this.pointerNormY * 3 + Math.cos(timeSec * 0.12) * 3;
+        moveNormY * 10 + this.pointerNormY * 5 + Math.cos(timeSec * 0.12) * 3;
     } else {
       this.targetParallaxX =
-        this.pointerNormX * 22 + Math.sin(timeSec * 0.18) * 14;
+        this.pointerNormX * 26 + Math.sin(timeSec * 0.18) * 14;
       this.targetParallaxY =
-        this.pointerNormY * 10 + Math.cos(timeSec * 0.14) * 5;
+        this.pointerNormY * 12 + Math.cos(timeSec * 0.14) * 5;
     }
 
     ctx.save();
@@ -1148,21 +1148,65 @@ export class IluminadoCanvasRenderer {
       ctx.fill();
     }
 
-    // Layered soft glowing celestial solar discs (shape-forward, zero harsh lines)
-    const sunX = width * 0.72 - this.parallaxX * 0.18;
-    const sunY = height * 0.24 - this.parallaxY * 0.14;
+    // Volumetric sunlit/celestial caustic light shafts from solar disc
+    const sunX = width * 0.72 - this.parallaxX * 0.22;
+    const sunY = height * 0.24 - this.parallaxY * 0.16;
+    const shaftTilt = Math.sin(timeSec * 0.22) * 24 - this.parallaxX * 0.45;
+    for (let sIdx = 0; sIdx < 2; sIdx++) {
+      const spreadX = (sIdx === 0 ? -width * 0.19 : -width * 0.03) + shaftTilt;
+      const shaftGrad = ctx.createLinearGradient(sunX, sunY, sunX + spreadX, horizonY);
+      shaftGrad.addColorStop(0, palette.architectureLight);
+      shaftGrad.addColorStop(1, 'rgba(250, 246, 238, 0)');
+      ctx.fillStyle = shaftGrad;
+      ctx.globalAlpha = (sIdx === 0 ? 0.048 : 0.034) + beatPulse * 0.025 + this.sweepBloom * 0.04;
+      ctx.beginPath();
+      ctx.moveTo(sunX - 18, sunY);
+      ctx.lineTo(sunX + 18, sunY);
+      ctx.lineTo(sunX + spreadX + width * (0.1 + sIdx * 0.05), horizonY + 12);
+      ctx.lineTo(sunX + spreadX - width * (0.08 + sIdx * 0.04), horizonY + 12);
+      ctx.closePath();
+      ctx.fill();
+    }
+
     const pulseR =
       Math.min(width, height) * (0.1 + beatPulse * 0.024 + subBass * 0.022);
     ctx.fillStyle = palette.architectureLight;
-    ctx.globalAlpha = 0.07 + beatPulse * 0.04 + mid * 0.05;
+    ctx.globalAlpha = 0.08 + beatPulse * 0.045 + mid * 0.055;
     ctx.beginPath();
-    ctx.arc(sunX, sunY, pulseR * 1.45, 0, Math.PI * 2);
+    ctx.arc(sunX, sunY, pulseR * 1.48, 0, Math.PI * 2);
     ctx.fill();
 
-    ctx.globalAlpha = 0.12 + beatPulse * 0.06 + high * 0.06;
+    ctx.globalAlpha = 0.14 + beatPulse * 0.065 + high * 0.065;
     ctx.beginPath();
     ctx.arc(sunX, sunY, pulseR * 0.92, 0, Math.PI * 2);
     ctx.fill();
+
+    // Interactive cursor & piece-steering shimmering reflection ripples across water plane
+    {
+      const rippleX =
+        width * 0.5 +
+        this.pointerNormX * width * 0.22 +
+        this.moveRippleShift * 3.5 -
+        this.parallaxX * 0.5;
+      const rippleY = horizonY + (height - horizonY) * (0.42 + this.pointerNormY * 0.14);
+      for (let rIdx = 0; rIdx < 3; rIdx++) {
+        const wSpan = (48 + rIdx * 36) * (1 + beatPulse * 0.18 + this.sweepBloom * 0.25);
+        const ry = rippleY + rIdx * 13 + Math.sin(timeSec * 1.7 + rIdx) * 2.5;
+        ctx.fillStyle = rIdx === 0 ? palette.squareHighlight : palette.architectureLight;
+        ctx.globalAlpha = (0.12 - rIdx * 0.025) + beatPulse * 0.05 + this.sweepBloom * 0.09;
+        ctx.beginPath();
+        ctx.ellipse(
+          rippleX + Math.sin(timeSec * 1.3 + rIdx * 1.6) * 14,
+          ry,
+          wSpan,
+          3.2,
+          0,
+          0,
+          Math.PI * 2
+        );
+        ctx.fill();
+      }
+    }
 
     // Theme-authentic subtle shape-rich background animations
     if (
@@ -1870,13 +1914,40 @@ export class IluminadoCanvasRenderer {
 
     const skyGrad = ctx.createLinearGradient(0, 0, 0, height);
     skyGrad.addColorStop(0, palette.skyTop);
-    skyGrad.addColorStop(0.45, palette.skyMid);
-    skyGrad.addColorStop(0.76, palette.skyBottom);
+    skyGrad.addColorStop(0.44, palette.skyMid);
+    skyGrad.addColorStop(0.75, palette.skyBottom);
     skyGrad.addColorStop(1, palette.waterSurface);
     ctx.fillStyle = skyGrad;
     ctx.fillRect(0, 0, width, height);
 
-    if (
+    // Subtle twilight starfield pinpoints when sky canopy is nocturnal
+    if (isHexColorDark(palette.skyTop)) {
+      ctx.save();
+      for (let i = 0; i < 16; i++) {
+        const sx = (((i * 197 + 43) % 97) / 97) * width;
+        const sy = (((i * 113 + 19) % 83) / 100) * (horizonY * 0.72);
+        const sr = i % 4 === 0 ? 1.8 : 1.1;
+        ctx.fillStyle = i % 3 === 0 ? palette.blockA.highlight : '#faf6ee';
+        ctx.globalAlpha = i % 4 === 0 ? 0.55 : 0.34;
+        ctx.beginPath();
+        ctx.arc(sx, sy, sr, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+
+    // Soft atmospheric scatter band hugging the horizon
+    const horizBand = ctx.createLinearGradient(0, horizonY - 90, 0, horizonY + 12);
+    horizBand.addColorStop(0, 'rgba(250, 246, 238, 0)');
+    horizBand.addColorStop(0.78, palette.horizonMist);
+    horizBand.addColorStop(1, 'rgba(250, 246, 238, 0)');
+    ctx.save();
+    ctx.globalAlpha = 0.28;
+    ctx.fillStyle = horizBand;
+    ctx.fillRect(0, horizonY - 90, width, 102);
+    ctx.restore();
+
+    const hasWater =
       theme === 'monument_valley' ||
       theme === 'sennaar' ||
       theme === 'kentucky_rz' ||
@@ -1890,22 +1961,52 @@ export class IluminadoCanvasRenderer {
       theme === 'miami_vice' ||
       theme === 'neo_andean' ||
       theme === 'botanical_herbarium' ||
-      theme === 'memphis_milano'
-    ) {
+      theme === 'memphis_milano' ||
+      theme === 'ghibli_express' ||
+      theme === 'ukiyoe_wave' ||
+      theme === 'synth_greenhouse' ||
+      theme === 'old_mans_journey' ||
+      theme === 'abzu';
+
+    if (hasWater) {
+      const waterGrad = ctx.createLinearGradient(0, horizonY, 0, height);
+      waterGrad.addColorStop(0, palette.waterSurface);
+      waterGrad.addColorStop(1, palette.architectureShadow);
+      ctx.save();
       ctx.fillStyle = palette.waterSurface;
       ctx.fillRect(0, horizonY, width, height - horizonY);
+      ctx.globalAlpha = 0.18;
+      ctx.fillStyle = waterGrad;
+      ctx.fillRect(0, horizonY, width, height - horizonY);
+
+      // Sunlit specular reflection column tapering below solar axis
+      const sunX = width * 0.72;
+      const specGrad = ctx.createLinearGradient(0, horizonY, 0, height);
+      specGrad.addColorStop(0, palette.architectureLight);
+      specGrad.addColorStop(0.65, palette.horizonMist);
+      specGrad.addColorStop(1, 'rgba(250, 246, 238, 0)');
+      ctx.fillStyle = specGrad;
+      ctx.globalAlpha = 0.22;
+      ctx.beginPath();
+      ctx.moveTo(sunX - 58, horizonY);
+      ctx.lineTo(sunX + 58, horizonY);
+      ctx.lineTo(sunX + 18, height);
+      ctx.lineTo(sunX - 18, height);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
     }
 
     const sunX = width * 0.72;
     const sunY = height * 0.24;
     const sunR = Math.min(width, height) * 0.15;
-    const sunGrad = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, sunR * 2.2);
-    sunGrad.addColorStop(0, 'rgba(255, 252, 246, 0.70)');
-    sunGrad.addColorStop(0.45, 'rgba(255, 248, 240, 0.20)');
+    const sunGrad = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, sunR * 2.25);
+    sunGrad.addColorStop(0, 'rgba(255, 252, 246, 0.76)');
+    sunGrad.addColorStop(0.45, 'rgba(255, 248, 240, 0.22)');
     sunGrad.addColorStop(1, 'rgba(255, 248, 240, 0)');
     ctx.fillStyle = sunGrad;
     ctx.beginPath();
-    ctx.arc(sunX, sunY, sunR * 2.2, 0, Math.PI * 2);
+    ctx.arc(sunX, sunY, sunR * 2.25, 0, Math.PI * 2);
     ctx.fill();
   }
 
@@ -1920,9 +2021,9 @@ export class IluminadoCanvasRenderer {
 
     ctx.save();
     if (theme === 'sumi_bamboo') {
-      // Soft misty sumi-e mountain ink wash silhouettes
+      // Soft misty sumi-e mountain ink wash silhouettes + pale mist rim
       ctx.fillStyle = palette.architectureMid;
-      ctx.globalAlpha = 0.26;
+      ctx.globalAlpha = 0.28;
       ctx.beginPath();
       ctx.moveTo(-PARALLAX_OVERSCAN_X, height);
       ctx.quadraticCurveTo(width * 0.18, horizonY - 125, width * 0.42, horizonY - 22);
@@ -1930,10 +2031,59 @@ export class IluminadoCanvasRenderer {
       ctx.lineTo(width + PARALLAX_OVERSCAN_X, height);
       ctx.closePath();
       ctx.fill();
-    } else {
-      // Distant terraced pastel skyline / ridge common across worlds (atmospheric fade)
+    } else if (theme === 'ukiyoe_wave') {
+      // Iconic distant snow-capped Fuji peak behind sea mist
       ctx.fillStyle = palette.architectureMid;
-      ctx.globalAlpha = 0.26;
+      ctx.globalAlpha = 0.38;
+      ctx.beginPath();
+      ctx.moveTo(width * 0.34, horizonY);
+      ctx.quadraticCurveTo(width * 0.45, horizonY - 40, width * 0.48, horizonY - 108);
+      ctx.lineTo(width * 0.52, horizonY - 108);
+      ctx.quadraticCurveTo(width * 0.55, horizonY - 40, width * 0.66, horizonY);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = palette.architectureLight;
+      ctx.globalAlpha = 0.74;
+      ctx.beginPath();
+      ctx.moveTo(width * 0.465, horizonY - 72);
+      ctx.lineTo(width * 0.48, horizonY - 108);
+      ctx.lineTo(width * 0.52, horizonY - 108);
+      ctx.lineTo(width * 0.535, horizonY - 72);
+      ctx.lineTo(width * 0.51, horizonY - 62);
+      ctx.lineTo(width * 0.49, horizonY - 66);
+      ctx.closePath();
+      ctx.fill();
+    } else if (theme === 'ghibli_express') {
+      // Towering sunlit studio cumulonimbus sky clouds
+      ctx.fillStyle = palette.architectureLight;
+      ctx.globalAlpha = 0.58;
+      [
+        [width * 0.16, horizonY - 65, 92],
+        [width * 0.24, horizonY - 98, 72],
+        [width * 0.76, horizonY - 82, 108],
+        [width * 0.85, horizonY - 52, 84],
+      ].forEach(([cx, cy, r]) => {
+        ctx.beginPath();
+        ctx.arc(cx, cy, r, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    } else if (theme === 'space_terminal') {
+      // Distant ringed Saturnian planetoid & trajectory arc
+      ctx.fillStyle = palette.blockC.fill;
+      ctx.globalAlpha = 0.32;
+      ctx.beginPath();
+      ctx.arc(width * 0.82, height * 0.22, 46, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = palette.architectureLight;
+      ctx.globalAlpha = 0.46;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.ellipse(width * 0.82, height * 0.22, 86, 18, -0.22, 0, Math.PI * 2);
+      ctx.stroke();
+    } else {
+      // Distant terraced pastel skyline / ridge common across worlds (atmospheric fade + crisp backlit rim)
+      ctx.fillStyle = palette.architectureMid;
+      ctx.globalAlpha = 0.28;
       ctx.beginPath();
       ctx.moveTo(-PARALLAX_OVERSCAN_X, height);
       ctx.lineTo(-PARALLAX_OVERSCAN_X, horizonY - 28);
@@ -1947,6 +2097,20 @@ export class IluminadoCanvasRenderer {
       ctx.lineTo(width + PARALLAX_OVERSCAN_X, height);
       ctx.closePath();
       ctx.fill();
+
+      ctx.strokeStyle = palette.architectureLight;
+      ctx.globalAlpha = 0.26;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(-PARALLAX_OVERSCAN_X, horizonY - 28);
+      ctx.lineTo(width * 0.18, horizonY - 58);
+      ctx.lineTo(width * 0.28, horizonY - 58);
+      ctx.lineTo(width * 0.34, horizonY - 22);
+      ctx.lineTo(width * 0.64, horizonY - 26);
+      ctx.lineTo(width * 0.71, horizonY - 72);
+      ctx.lineTo(width * 0.82, horizonY - 72);
+      ctx.lineTo(width + PARALLAX_OVERSCAN_X, horizonY - 30);
+      ctx.stroke();
     }
 
     // Distant isometric background spires / colonnades for architectural depth
@@ -1963,7 +2127,7 @@ export class IluminadoCanvasRenderer {
       theme === 'neo_andean' ||
       theme === 'stained_glass'
     ) {
-      ctx.globalAlpha = 0.34;
+      ctx.globalAlpha = 0.36;
       this.drawIsoTower(ctx, width * 0.26, horizonY - 8, 62, 118, skin, true, false);
       this.drawIsoTower(ctx, width * 0.72, horizonY - 6, 68, 134, skin, true, true);
       this.drawIsoTower(ctx, width * 0.42, horizonY - 14, 48, 86, skin, false, false);
@@ -1974,7 +2138,7 @@ export class IluminadoCanvasRenderer {
     mistGrad.addColorStop(0, 'rgba(250, 246, 238, 0)');
     mistGrad.addColorStop(0.65, palette.horizonMist);
     mistGrad.addColorStop(1, 'rgba(250, 246, 238, 0)');
-    ctx.globalAlpha = 0.22;
+    ctx.globalAlpha = 0.25;
     ctx.fillStyle = mistGrad;
     ctx.fillRect(-PARALLAX_OVERSCAN_X, horizonY - 95, width + PARALLAX_OVERSCAN_X * 2, 115);
 
@@ -2996,6 +3160,304 @@ export class IluminadoCanvasRenderer {
         ctx.globalAlpha = 1;
         break;
       }
+      case 'scandi_showroom': {
+        // IKEA Scandinavian showroom bays, birch shelving, hanging yellow dome pendant lamps & floor arrows
+        [width * 0.09, width * 0.91].forEach((cx, idx) => {
+          // Showroom bay backdrop + birch frame
+          ctx.fillStyle = palette.blockA.fill;
+          ctx.globalAlpha = 0.22;
+          this.roundRect(ctx, cx - 72, horizonY - 220, 144, 220, 10);
+          ctx.fill();
+          // KALLAX-style 2x2 shelving unit silhouette
+          ctx.strokeStyle = palette.architectureShadow;
+          ctx.globalAlpha = 0.45;
+          ctx.lineWidth = 4;
+          ctx.strokeRect(cx - 46, horizonY - 118, 92, 92);
+          ctx.beginPath();
+          ctx.moveTo(cx, horizonY - 118);
+          ctx.lineTo(cx, horizonY - 26);
+          ctx.moveTo(cx - 46, horizonY - 72);
+          ctx.lineTo(cx + 46, horizonY - 72);
+          ctx.stroke();
+          // Yellow accent cube insert inside shelf
+          ctx.fillStyle = palette.blockB.fill;
+          ctx.globalAlpha = 0.55;
+          ctx.fillRect(idx === 0 ? cx + 4 : cx - 42, horizonY - 68, 38, 38);
+
+          // Hanging Scandi pendant lamp from ceiling
+          ctx.strokeStyle = palette.architectureShadow;
+          ctx.globalAlpha = 0.52;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(cx, 0);
+          ctx.lineTo(cx, height * 0.24);
+          ctx.stroke();
+          ctx.fillStyle = palette.blockB.fill;
+          ctx.globalAlpha = 0.72;
+          ctx.beginPath();
+          ctx.arc(cx, height * 0.28, 30, Math.PI, 0);
+          ctx.closePath();
+          ctx.fill();
+        });
+        // Iconic floor directional arrow
+        ctx.fillStyle = palette.blockB.fill;
+        ctx.globalAlpha = 0.42;
+        ctx.beginPath();
+        ctx.moveTo(width * 0.18, horizonY + 26);
+        ctx.lineTo(width * 0.28, horizonY + 26);
+        ctx.lineTo(width * 0.30, horizonY + 42);
+        ctx.lineTo(width * 0.20, horizonY + 42);
+        ctx.closePath();
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        break;
+      }
+      case 'grand_budapest': {
+        // Symmetrical Grand Alpine hotel elevation with arched windows & striped awning wings
+        [width * 0.11, width * 0.89].forEach((cx) => {
+          ctx.fillStyle = palette.architectureMid;
+          ctx.globalAlpha = 0.38;
+          ctx.fillRect(cx - 70, horizonY - 210, 140, 210);
+          // Stepped Mansard pediment cap
+          ctx.fillStyle = palette.blockB.fill;
+          ctx.globalAlpha = 0.42;
+          ctx.beginPath();
+          ctx.moveTo(cx - 78, horizonY - 210);
+          ctx.lineTo(cx, horizonY - 265);
+          ctx.lineTo(cx + 78, horizonY - 210);
+          ctx.closePath();
+          ctx.fill();
+          // Symmetrical cream arched windows
+          ctx.fillStyle = palette.architectureLight;
+          ctx.globalAlpha = 0.72;
+          [-34, 0, 34].forEach((ox) => {
+            [-165, -105].forEach((oy) => {
+              this.roundRect(ctx, cx + ox - 10, horizonY + oy, 20, 34, 10);
+              ctx.fill();
+            });
+          });
+        });
+        ctx.globalAlpha = 1;
+        break;
+      }
+      case 'ghibli_express': {
+        // Flooded ocean horizon railway trestle piers & vintage tram silhouette
+        ctx.strokeStyle = palette.architectureShadow;
+        ctx.globalAlpha = 0.42;
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(startX, horizonY + 12);
+        ctx.lineTo(startX + fullW, horizonY + 12);
+        ctx.stroke();
+        for (let x = width * 0.06; x < width * 0.96; x += width * 0.12) {
+          ctx.fillStyle = palette.architectureShadow;
+          ctx.globalAlpha = 0.35;
+          ctx.fillRect(x - 3, horizonY + 12, 6, 46);
+          // Utility pole & catenary post
+          ctx.fillRect(x - 1.5, horizonY - 56, 3, 68);
+          ctx.fillRect(x - 10, horizonY - 50, 20, 2.5);
+        }
+        // Distant vermilion railcar gliding along left horizon
+        ctx.fillStyle = palette.blockA.fill;
+        ctx.globalAlpha = 0.56;
+        this.roundRect(ctx, width * 0.07, horizonY - 20, 128, 30, 6);
+        ctx.fill();
+        ctx.fillStyle = palette.architectureLight;
+        ctx.globalAlpha = 0.78;
+        for (let wx = 0; wx < 5; wx++) {
+          ctx.fillRect(width * 0.08 + wx * 22, horizonY - 13, 14, 10);
+        }
+        ctx.globalAlpha = 1;
+        break;
+      }
+      case 'de_stijl': {
+        // Bold Mondrian neoplasticist ashlar orthogonal panels & primary planes
+        const drawPanel = (px: number, py: number, pw: number, ph: number) => {
+          ctx.fillStyle = palette.architectureLight;
+          ctx.globalAlpha = 0.55;
+          ctx.fillRect(px, py, pw, ph);
+          ctx.fillStyle = palette.blockA.fill;
+          ctx.globalAlpha = 0.48;
+          ctx.fillRect(px, py, pw * 0.55, ph * 0.45);
+          ctx.fillStyle = palette.blockB.fill;
+          ctx.fillRect(px + pw * 0.55, py + ph * 0.45, pw * 0.45, ph * 0.55);
+          ctx.fillStyle = palette.blockC.fill;
+          ctx.fillRect(px, py + ph * 0.65, pw * 0.34, ph * 0.35);
+          ctx.strokeStyle = palette.boardFrame;
+          ctx.globalAlpha = 0.62;
+          ctx.lineWidth = 4;
+          ctx.strokeRect(px, py, pw, ph);
+          ctx.beginPath();
+          ctx.moveTo(px + pw * 0.55, py);
+          ctx.lineTo(px + pw * 0.55, py + ph);
+          ctx.moveTo(px, py + ph * 0.45);
+          ctx.lineTo(px + pw, py + ph * 0.45);
+          ctx.stroke();
+        };
+        drawPanel(width * 0.03, horizonY - 230, 145, 210);
+        drawPanel(width * 0.85, horizonY - 210, 140, 195);
+        ctx.globalAlpha = 1;
+        break;
+      }
+      case 'ukiyoe_wave': {
+        // Sweeping Prussian-indigo Ukiyo-e cresting wave curves & foam scallops
+        [
+          { cx: width * 0.14, dir: 1 },
+          { cx: width * 0.86, dir: -1 },
+        ].forEach(({ cx, dir }) => {
+          ctx.fillStyle = palette.blockA.fill;
+          ctx.globalAlpha = 0.45;
+          ctx.beginPath();
+          ctx.moveTo(cx - dir * 130, horizonY + 18);
+          ctx.quadraticCurveTo(cx - dir * 40, horizonY - 180, cx + dir * 65, horizonY - 120);
+          ctx.quadraticCurveTo(cx - dir * 5, horizonY - 82, cx + dir * 110, horizonY + 18);
+          ctx.closePath();
+          ctx.fill();
+          // Cream seafoam arc
+          ctx.strokeStyle = palette.architectureLight;
+          ctx.globalAlpha = 0.72;
+          ctx.lineWidth = 5;
+          ctx.beginPath();
+          ctx.arc(cx + dir * 24, horizonY - 108, 44, 0.2, Math.PI * 1.15);
+          ctx.stroke();
+        });
+        // Edo vermilion seal cartouche on left sky
+        ctx.fillStyle = palette.blockC.fill;
+        ctx.globalAlpha = 0.58;
+        ctx.fillRect(width * 0.04, height * 0.14, 24, 58);
+        ctx.globalAlpha = 1;
+        break;
+      }
+      case 'kodak_cinema': {
+        // 70s Desert Modernist silhouette & vintage 35mm film sprocket strip frames
+        ctx.fillStyle = palette.architectureShadow;
+        ctx.globalAlpha = 0.36;
+        ctx.fillRect(width * 0.03, horizonY - 110, 130, 110);
+        ctx.fillRect(width * 0.84, horizonY - 135, 136, 135);
+        // Sunburst warm cinema frame bars along sides
+        [width * 0.025, width * 0.96].forEach((fx) => {
+          ctx.fillStyle = palette.blockA.fill;
+          ctx.globalAlpha = 0.34;
+          for (let sy = height * 0.16; sy < horizonY; sy += 34) {
+            this.roundRect(ctx, fx, sy, 14, 20, 3);
+            ctx.fill();
+          }
+        });
+        ctx.globalAlpha = 1;
+        break;
+      }
+      case 'kinetic_bauhaus': {
+        // Suspended Calder mobile arms, wires & counterbalanced shapes
+        [
+          { anchorX: width * 0.14, span: 78 },
+          { anchorX: width * 0.86, span: -82 },
+        ].forEach(({ anchorX, span }) => {
+          ctx.strokeStyle = palette.boardFrame;
+          ctx.globalAlpha = 0.52;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(anchorX, 0);
+          ctx.lineTo(anchorX, height * 0.22);
+          ctx.moveTo(anchorX - span * 0.6, height * 0.24);
+          ctx.lineTo(anchorX + span * 0.8, height * 0.18);
+          ctx.stroke();
+          // Terracotta disc & cobalt counterweight
+          ctx.fillStyle = palette.blockA.fill;
+          ctx.globalAlpha = 0.62;
+          ctx.beginPath();
+          ctx.arc(anchorX - span * 0.6, height * 0.29, 26, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = palette.blockB.fill;
+          ctx.beginPath();
+          ctx.moveTo(anchorX + span * 0.8, height * 0.18);
+          ctx.lineTo(anchorX + span * 0.8 - 22, height * 0.28);
+          ctx.lineTo(anchorX + span * 0.8 + 22, height * 0.28);
+          ctx.closePath();
+          ctx.fill();
+        });
+        ctx.globalAlpha = 1;
+        break;
+      }
+      case 'synth_greenhouse': {
+        // Twin ribbed geodesic glass solarium domes on left and right wings
+        [width * 0.12, width * 0.88].forEach((cx) => {
+          ctx.fillStyle = palette.architectureLight;
+          ctx.globalAlpha = 0.34;
+          ctx.beginPath();
+          ctx.arc(cx, horizonY, 108, Math.PI, 0);
+          ctx.closePath();
+          ctx.fill();
+          ctx.strokeStyle = palette.architectureShadow;
+          ctx.globalAlpha = 0.45;
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          for (let rx = -70; rx <= 70; rx += 35) {
+            ctx.beginPath();
+            ctx.ellipse(cx, horizonY, Math.abs(rx) + 12, 108, 0, Math.PI, 0);
+            ctx.stroke();
+          }
+          // Orchid magenta blossom inside dome
+          ctx.fillStyle = palette.blockC.fill;
+          ctx.globalAlpha = 0.42;
+          ctx.beginPath();
+          ctx.arc(cx + 18, horizonY - 38, 16, 0, Math.PI * 2);
+          ctx.fill();
+        });
+        ctx.globalAlpha = 1;
+        break;
+      }
+      case 'vinyl_lounge': {
+        // Acoustic walnut wall slats, Altec horn speakers & spinning vinyl disc
+        [width * 0.1, width * 0.9].forEach((cx) => {
+          ctx.fillStyle = palette.architectureShadow;
+          ctx.globalAlpha = 0.48;
+          this.roundRect(ctx, cx - 58, horizonY - 190, 116, 190, 8);
+          ctx.fill();
+          // Brass horn flare
+          ctx.fillStyle = palette.blockA.fill;
+          ctx.globalAlpha = 0.42;
+          ctx.beginPath();
+          ctx.arc(cx, horizonY - 125, 34, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = palette.architectureShadow;
+          ctx.globalAlpha = 0.72;
+          ctx.beginPath();
+          ctx.arc(cx, horizonY - 125, 11, 0, Math.PI * 2);
+          ctx.fill();
+          // Large vinyl sleeve silhouette below
+          ctx.fillStyle = palette.blockB.fill;
+          ctx.globalAlpha = 0.36;
+          ctx.beginPath();
+          ctx.arc(cx, horizonY - 46, 36, 0, Math.PI * 2);
+          ctx.fill();
+        });
+        ctx.globalAlpha = 1;
+        break;
+      }
+      case 'space_terminal': {
+        // Saarinen sweeping gull-wing concrete vaults & illuminated capsule portals
+        [
+          { cx: width * 0.13, dir: 1 },
+          { cx: width * 0.87, dir: -1 },
+        ].forEach(({ cx, dir }) => {
+          ctx.fillStyle = palette.architectureLight;
+          ctx.globalAlpha = 0.62;
+          ctx.beginPath();
+          ctx.moveTo(cx - dir * 120, horizonY);
+          ctx.quadraticCurveTo(cx - dir * 10, horizonY - 230, cx + dir * 110, horizonY - 150);
+          ctx.quadraticCurveTo(cx + dir * 35, horizonY - 95, cx + dir * 48, horizonY);
+          ctx.closePath();
+          ctx.fill();
+          // Capsule orange beacon port
+          ctx.fillStyle = palette.blockA.fill;
+          ctx.globalAlpha = 0.56;
+          ctx.beginPath();
+          ctx.arc(cx + dir * 18, horizonY - 82, 16, 0, Math.PI * 2);
+          ctx.fill();
+        });
+        ctx.globalAlpha = 1;
+        break;
+      }
     }
   }
 
@@ -3061,9 +3523,9 @@ export class IluminadoCanvasRenderer {
         this.roundRect(ctx, rx + 12, ry + 6, 48, 3, 1.5);
         ctx.fill();
       });
-    } else if (theme === 'constructivist' || theme === 'cubist_atelier' || theme === 'memphis_milano') {
+    } else if (theme === 'constructivist' || theme === 'cubist_atelier' || theme === 'memphis_milano' || theme === 'de_stijl' || theme === 'kinetic_bauhaus') {
       // Geometric corner plinth wedges matching modern art themes
-      ctx.fillStyle = theme === 'constructivist' ? palette.blockA.fill : palette.architectureShadow;
+      ctx.fillStyle = theme === 'constructivist' || theme === 'de_stijl' ? palette.blockA.fill : palette.architectureShadow;
       ctx.globalAlpha = 0.38;
       ctx.beginPath();
       ctx.moveTo(-PARALLAX_OVERSCAN_X, height + PARALLAX_OVERSCAN_Y);
@@ -3071,14 +3533,25 @@ export class IluminadoCanvasRenderer {
       ctx.lineTo(width * 0.09, height + PARALLAX_OVERSCAN_Y);
       ctx.closePath();
       ctx.fill();
-      ctx.fillStyle = theme === 'memphis_milano' ? palette.blockC.fill : palette.architectureMid;
+      ctx.fillStyle = theme === 'memphis_milano' || theme === 'de_stijl' ? palette.blockC.fill : palette.architectureMid;
       ctx.beginPath();
       ctx.moveTo(width + PARALLAX_OVERSCAN_X, height + PARALLAX_OVERSCAN_Y);
       ctx.lineTo(width + PARALLAX_OVERSCAN_X, height * 0.76);
       ctx.lineTo(width * 0.9, height + PARALLAX_OVERSCAN_Y);
       ctx.closePath();
       ctx.fill();
-    } else if (theme === 'gris' || theme === 'old_mans_journey' || theme === 'abzu' || theme === 'ori') {
+    } else if (theme === 'scandi_showroom') {
+      // Flat-pack birch corner crates with showroom blue/yellow tags
+      ctx.fillStyle = palette.architectureLight;
+      ctx.globalAlpha = 0.56;
+      this.roundRect(ctx, width * 0.01, height * 0.81, 88, 96, 6);
+      ctx.fill();
+      ctx.fillStyle = palette.blockA.fill;
+      ctx.globalAlpha = 0.65;
+      ctx.fillRect(width * 0.02, height * 0.83, 44, 14);
+      ctx.fillStyle = palette.blockB.fill;
+      ctx.fillRect(width * 0.91, height * 0.82, 74, 86);
+    } else if (theme === 'gris' || theme === 'old_mans_journey' || theme === 'abzu' || theme === 'ori' || theme === 'ghibli_express' || theme === 'synth_greenhouse') {
       // Soft rolling foreground wash mounds for painterly / organic worlds
       ctx.fillStyle = palette.architectureShadow;
       ctx.globalAlpha = 0.32;
@@ -3322,6 +3795,18 @@ export class IluminadoCanvasRenderer {
     ctx.fillStyle = 'rgba(30, 22, 38, 0.12)';
     this.roundRect(ctx, x - 8, y - 4, width + 16, height + 20, 12);
     ctx.fill();
+
+    if (board.comboLevel >= 2) {
+      const comboStrength = Math.min(4, board.comboLevel - 1) / 4;
+      const comboPulse = Math.pow(1 - beatPhase, 2.2);
+      ctx.save();
+      ctx.strokeStyle = palette.hudAccent;
+      ctx.lineWidth = 3 + comboStrength * 2.5;
+      ctx.globalAlpha = 0.16 + comboStrength * 0.14 + comboPulse * 0.14;
+      this.roundRect(ctx, x - 9, y - 9, width + 18, height + 18, 13);
+      ctx.stroke();
+      ctx.restore();
+    }
 
     ctx.fillStyle = palette.boardSurface;
     this.roundRect(ctx, x - 6, y - 6, width + 12, height + 12, 10);
@@ -3760,32 +4245,6 @@ export class IluminadoCanvasRenderer {
 
         const settledForMarks =
           cell.fallOffset <= 0.15 && Math.abs(ax) <= 0.12 && Math.abs(ay) <= 0.12;
-        if (cell.isPeggle) {
-          this.drawPeggleOrbCell(
-            ctx,
-            drawX,
-            drawY,
-            cellSize,
-            cell.color,
-            cell.isChain,
-            skin,
-            {
-              inSquare: cell.inSquare && settledForMarks,
-              chainMarked: cell.chainMarked,
-              pendingClear: cell.pendingClear,
-              sweptCol: cell.sweptCol,
-              landFlash: cell.landFlash,
-              rippleGlow: this.tmpRipple.glow,
-              beatPhase,
-              timeSec,
-              shimmerWave:
-                cell.inSquare && settledForMarks
-                  ? 0.5 + 0.5 * Math.sin(timeSec * 3.6 - (r + c) * 0.58)
-                  : 0,
-            }
-          );
-          continue;
-        }
         this.writeGridCellJoins(board.grid, r, c, cell, this.tmpJoins);
         this.tmpBlockFx.row = r;
         this.tmpBlockFx.col = c;
@@ -4093,7 +4552,7 @@ export class IluminadoCanvasRenderer {
     }
     ctx.restore();
 
-    // Active falling / staging piece (supports all shapes, Peggle orb, and all 4 flow directions)
+    // Active falling / staging piece (supports all shapes and all 4 flow directions)
     if (activePiece) {
       const pieceRows = activePiece.cells.length;
       const pieceCols = activePiece.cells[0]?.length ?? 2;
@@ -4173,43 +4632,6 @@ export class IluminadoCanvasRenderer {
         ctx.restore();
       }
 
-      // Draw luminous bounce wake trail behind falling Peggle orb
-      if (activePiece.isPeggle && activePiece.peggleTrail && activePiece.peggleTrail.length > 0) {
-        const trail = activePiece.peggleTrail;
-        const pColor = activePiece.cells[0]?.[0]?.color ?? 0;
-        const pStyle = getBlockStyle(palette, pColor);
-        ctx.save();
-        ctx.strokeStyle = pStyle.highlight;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.lineWidth = Math.max(2, cellSize * 0.14);
-        ctx.globalAlpha = 0.38;
-        ctx.beginPath();
-        trail.forEach((pt, idx) => {
-          const tx = x + (pt.x + 0.5) * cellSize;
-          const ty = y + (pt.y + 0.5) * cellSize;
-          if (idx === 0) ctx.moveTo(tx, ty);
-          else ctx.lineTo(tx, ty);
-        });
-        ctx.lineTo(x + (visualPieceX + 0.5) * cellSize, y + (visualPieceY + 0.5) * cellSize);
-        ctx.stroke();
-        trail.forEach((pt, idx) => {
-          const frac = (idx + 1) / (trail.length + 1);
-          ctx.fillStyle = pStyle.highlight;
-          ctx.globalAlpha = 0.16 + frac * 0.34;
-          ctx.beginPath();
-          ctx.arc(
-            x + (pt.x + 0.5) * cellSize,
-            y + (pt.y + 0.5) * cellSize,
-            cellSize * (0.09 + frac * 0.09),
-            0,
-            Math.PI * 2
-          );
-          ctx.fill();
-        });
-        ctx.restore();
-      }
-
       for (let py = 0; py < pieceRows; py++) {
         for (let px = 0; px < pieceCols; px++) {
           const pCell = activePiece.cells[py]?.[px];
@@ -4218,29 +4640,6 @@ export class IluminadoCanvasRenderer {
           const cy = y + (visualPieceY + py) * cellSize;
           if (pCell.isBlocked) {
             this.drawBlockedObsidianTile(ctx, cx, cy, cellSize, lockProgress * 0.25);
-            continue;
-          }
-          if (pCell.isPeggle || activePiece.isPeggle) {
-            this.drawPeggleOrbCell(
-              ctx,
-              cx,
-              cy,
-              cellSize,
-              pCell.color,
-              pCell.isChain,
-              skin,
-              {
-                inSquare: false,
-                chainMarked: false,
-                pendingClear: false,
-                sweptCol: false,
-                landFlash: lockProgress * 0.25,
-                rippleGlow: 0,
-                beatPhase,
-                timeSec,
-                shimmerWave: 0,
-              }
-            );
             continue;
           }
           this.writePieceCellJoins(activePiece, py, px, this.tmpJoins);
@@ -4348,6 +4747,28 @@ export class IluminadoCanvasRenderer {
 
     const drawSweepBeam = (beamX: number, showCounterBadge: boolean) => {
       ctx.save();
+      const beamCol = Math.min(
+        boardCols - 1,
+        Math.max(0, Math.floor(((beamX - x) / Math.max(1, width)) * boardCols))
+      );
+      let hasBeamHit = false;
+      for (let r = 0; r < boardRows; r++) {
+        const c = board.grid[r][beamCol];
+        if (c && (c.inSquare || c.chainMarked || c.pendingClear)) {
+          hasBeamHit = true;
+          break;
+        }
+      }
+      if (hasBeamHit) {
+        ctx.strokeStyle = palette.squareHighlight;
+        ctx.lineWidth = 7;
+        ctx.globalAlpha = 0.26 + beatPulse * 0.2;
+        ctx.beginPath();
+        ctx.moveTo(beamX, y);
+        ctx.lineTo(beamX, y + height);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
       drawSweepSegment(beamX, y - 8, beamX, y + height + 8);
       ctx.fillStyle = palette.timelineBeam;
       this.drawDiamond(ctx, beamX, y - 9, 6 + beatPulse * 1.1);
@@ -4708,6 +5129,49 @@ export class IluminadoCanvasRenderer {
       ctx.fillRect(fx - 3, fy + 6, 6, 16);
       ctx.fillStyle = palette.blockA.fill;
       ctx.fillRect(fx + fw - 3, fy + fh - 22, 6, 16);
+    } else if (theme === 'scandi_showroom') {
+      // Flat-pack wooden dowel corner circles + showroom yellow corner price tab
+      ctx.fillStyle = palette.blockB.fill;
+      ctx.fillRect(fx + fw - 26, fy - 5, 22, 9);
+      ctx.fillStyle = palette.blockA.fill;
+      [
+        [fx + 1, fy + 1],
+        [fx + 1, fy + fh - 1],
+        [fx + fw - 1, fy + fh - 1],
+      ].forEach(([cx, cy]) => {
+        ctx.beginPath();
+        ctx.arc(cx, cy, 4, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    } else if (theme === 'grand_budapest' || theme === 'space_terminal') {
+      // Concierge / space capsule corner medallions
+      ctx.fillStyle = theme === 'space_terminal' ? palette.blockA.fill : palette.blockB.fill;
+      [
+        [fx + 1, fy + 1],
+        [fx + fw - 1, fy + 1],
+        [fx + 1, fy + fh - 1],
+        [fx + fw - 1, fy + fh - 1],
+      ].forEach(([cx, cy]) => {
+        ctx.beginPath();
+        ctx.arc(cx, cy, 4.2, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    } else if (theme === 'de_stijl' || theme === 'kodak_cinema') {
+      // Crisp extending orthogonal primary ticks / slide-mount corners
+      ctx.fillStyle = palette.blockA.fill;
+      ctx.fillRect(fx - 3, fy - 3, 18, 4);
+      ctx.fillRect(fx - 3, fy - 3, 4, 18);
+      ctx.fillStyle = palette.blockB.fill;
+      ctx.fillRect(fx + fw - 15, fy + fh - 1, 18, 4);
+      ctx.fillRect(fx + fw - 1, fy + fh - 15, 4, 18);
+    } else if (theme === 'vinyl_lounge') {
+      // Glowing vacuum-tube amber dots on top rail
+      ctx.fillStyle = palette.blockA.fill;
+      ctx.globalAlpha = 0.65 + beatPulse * 0.35;
+      ctx.beginPath();
+      ctx.arc(fx + 18, fy - 2, 4.5, 0, Math.PI * 2);
+      ctx.arc(fx + fw - 18, fy - 2, 4.5, 0, Math.PI * 2);
+      ctx.fill();
     } else if (
       theme === 'monument_valley' ||
       theme === 'sennaar' ||
@@ -4716,7 +5180,10 @@ export class IluminadoCanvasRenderer {
       theme === 'transistor' ||
       theme === 'cityscape_deco' ||
       theme === 'fez' ||
-      theme === 'machinarium'
+      theme === 'machinarium' ||
+      theme === 'ukiyoe_wave' ||
+      theme === 'kinetic_bauhaus' ||
+      theme === 'synth_greenhouse'
     ) {
       // Architectural corner pins / rivets / deco studs matching classic worlds
       ctx.fillStyle = theme === 'machinarium' ? palette.blockA.highlight : palette.boardFrame;
@@ -4790,9 +5257,10 @@ export class IluminadoCanvasRenderer {
         }
       }
 
-      ctx.globalAlpha = 0.26;
+      ctx.globalAlpha = 0.32 + beatPulse * 0.08;
       ctx.strokeStyle = skin.palette.timelineBeam;
       ctx.lineWidth = 1.25;
+      ctx.setLineDash([4, 4]);
       const leftLowPy = colLowestPy[0] ?? pieceRows - 1;
       const leftBeamTop = boardY + Math.max(0, visualPieceY + Math.max(0, leftLowPy) + 1) * cellSize;
       const leftBeamBot = boardY + Math.max(0, (colBottomRows[0] ?? -1) + 1) * cellSize;
@@ -4812,6 +5280,7 @@ export class IluminadoCanvasRenderer {
         ctx.lineTo(boardX + (piece.x + pieceCols) * cellSize - 0.5, rightBeamBot);
         ctx.stroke();
       }
+      ctx.setLineDash([]);
     } else if (dir === 'up') {
       for (let px = 0; px < pieceCols; px++) {
         const topStopRow = colBottomRows[px] ?? -1;
@@ -4933,22 +5402,6 @@ export class IluminadoCanvasRenderer {
       }
 
       const style = getBlockStyle(skin.palette, gc.color);
-
-      if (gc.isPeggle) {
-        const radius = cellSize * 0.42;
-        ctx.fillStyle = style.fill;
-        ctx.globalAlpha = 0.24 + beatPulse * 0.08;
-        ctx.beginPath();
-        ctx.arc(cx + cellSize * 0.5, cy + cellSize * 0.5, radius, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = style.border;
-        ctx.globalAlpha = 0.68 + beatPulse * 0.14;
-        ctx.lineWidth = 1.75;
-        ctx.setLineDash([3, 3]);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        continue;
-      }
 
       const joinTop = !gc.isWild && hasGhostAt(gc.x, gc.y - 1, gc.color);
       const joinBot = !gc.isWild && hasGhostAt(gc.x, gc.y + 1, gc.color);
@@ -5399,11 +5852,19 @@ export class IluminadoCanvasRenderer {
       ctx.globalAlpha = baseAlpha;
     }
 
-    // Formed 2x2 square living pearl wash & deepening anticipation
+    // Formed 2x2 square living pearl wash & beat-synced glint
     if (fx.inSquare) {
       ctx.fillStyle = skin.palette.squareHighlight;
       ctx.globalAlpha = baseAlpha * (0.18 + fx.shimmerWave * 0.16);
       ctx.fillRect(left + 1, top + 1, Math.max(1, bw - 2), Math.max(1, bh - 2));
+      const beatAccent = Math.pow(1 - fx.beatPhase, 3);
+      if (beatAccent > 0.12) {
+        ctx.fillStyle = '#faf6ee';
+        ctx.globalAlpha = baseAlpha * beatAccent * 0.42;
+        ctx.beginPath();
+        ctx.arc(left + bw * 0.5, top + bh * 0.5, Math.max(1.5, size * 0.08), 0, Math.PI * 2);
+        ctx.fill();
+      }
       ctx.globalAlpha = baseAlpha;
     }
 
@@ -5645,112 +6106,6 @@ export class IluminadoCanvasRenderer {
       ctx.fillStyle = style.highlight;
       ctx.globalAlpha = baseAlpha * totalWash;
       ctx.fillRect(left, top, bw, bh);
-    }
-
-    ctx.restore();
-  }
-
-  private drawPeggleOrbCell(
-    ctx: CanvasRenderingContext2D,
-    x: number,
-    y: number,
-    size: number,
-    color: CellColor,
-    isChain: boolean,
-    skin: SkinConfig,
-    fx: {
-      inSquare: boolean;
-      chainMarked: boolean;
-      pendingClear: boolean;
-      sweptCol: boolean;
-      landFlash: number;
-      rippleGlow: number;
-      beatPhase: number;
-      timeSec: number;
-      shimmerWave: number;
-    }
-  ): void {
-    const style = getBlockStyle(skin.palette, color);
-    const dissolveWave = fx.pendingClear
-      ? 0.5 + 0.5 * Math.sin(fx.timeSec * 5.2)
-      : 0;
-    const scale = fx.pendingClear ? 0.9 - dissolveWave * 0.08 : 1;
-    const baseAlpha = fx.pendingClear ? 0.72 + dissolveWave * 0.22 : 1;
-    const cx = x + size * 0.5;
-    const cy = y + size * 0.5;
-    const r = Math.max(2, size * 0.44 * scale);
-
-    ctx.save();
-    ctx.globalAlpha = baseAlpha;
-
-    // Soft sphere radial body gradient
-    const orbGrad = ctx.createRadialGradient(
-      cx - r * 0.32,
-      cy - r * 0.32,
-      r * 0.1,
-      cx,
-      cy,
-      r
-    );
-    orbGrad.addColorStop(0, style.highlight);
-    orbGrad.addColorStop(0.55, style.fill);
-    orbGrad.addColorStop(1, style.fillGradientEnd);
-    ctx.fillStyle = orbGrad;
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Subtle lower rim shade & square glow wash
-    if (fx.inSquare) {
-      ctx.fillStyle = skin.palette.squareHighlight;
-      ctx.globalAlpha = baseAlpha * (0.24 + fx.shimmerWave * 0.18);
-      ctx.beginPath();
-      ctx.arc(cx, cy, r * 0.92, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.globalAlpha = baseAlpha;
-    }
-
-    // Glossy specular pearl highlight
-    ctx.fillStyle = '#faf6ee';
-    ctx.globalAlpha = baseAlpha * 0.72;
-    ctx.beginPath();
-    ctx.ellipse(cx - r * 0.34, cy - r * 0.34, r * 0.24, r * 0.14, -0.55, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.globalAlpha = baseAlpha;
-    ctx.strokeStyle = style.border;
-    ctx.lineWidth = Math.max(1.3, size * 0.055);
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.stroke();
-
-    if (isChain) {
-      const useDark =
-        getHexLuminance(style.fill) > 0.78 &&
-        getHexLuminance(style.emblemColor) < 0.45;
-      const arm = r * 0.55;
-      const thick = Math.max(2, r * 0.22);
-      ctx.fillStyle = useDark ? style.emblemColor : '#faf6ee';
-      ctx.fillRect(cx - arm, cy - thick * 0.5, arm * 2, thick);
-      ctx.fillRect(cx - thick * 0.5, cy - arm, thick, arm * 2);
-    }
-
-    if (fx.chainMarked || fx.sweptCol) {
-      ctx.strokeStyle = skin.palette.squareHighlight;
-      ctx.lineWidth = 2;
-      ctx.globalAlpha = baseAlpha * 0.75;
-      ctx.beginPath();
-      ctx.arc(cx, cy, r * 0.82, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-
-    const wash = Math.min(0.45, fx.landFlash * 0.36 + fx.rippleGlow);
-    if (wash > 0.01) {
-      ctx.fillStyle = style.highlight;
-      ctx.globalAlpha = baseAlpha * wash;
-      ctx.beginPath();
-      ctx.arc(cx, cy, r, 0, Math.PI * 2);
-      ctx.fill();
     }
 
     ctx.restore();
@@ -6175,6 +6530,120 @@ export class IluminadoCanvasRenderer {
         ctx.lineTo(x + w * 0.54, y + h * 0.64);
         ctx.lineTo(x + w * 0.72, y + h * 0.34);
         ctx.lineTo(x + w * 0.86, y + h * 0.56);
+        ctx.stroke();
+        break;
+      case 'scandi_birch':
+        // Warm Scandinavian birch veneer grain + corner dowel peg pins
+        ctx.strokeStyle = style.shade;
+        ctx.globalAlpha = 0.24;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x + w * 0.16, y + h * 0.28);
+        ctx.quadraticCurveTo(x + w * 0.5, y + h * 0.20, x + w * 0.84, y + h * 0.30);
+        ctx.moveTo(x + w * 0.16, y + h * 0.72);
+        ctx.quadraticCurveTo(x + w * 0.5, y + h * 0.80, x + w * 0.84, y + h * 0.70);
+        ctx.stroke();
+        ctx.fillStyle = style.emblemColor;
+        ctx.globalAlpha = 0.26;
+        ctx.beginPath();
+        ctx.arc(x + w * 0.22, y + h * 0.22, 1.5, 0, Math.PI * 2);
+        ctx.arc(x + w * 0.78, y + h * 0.78, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      case 'flatpack_blueprint':
+        // Flat-pack assembly manual dotted fold lines + hex screw circle
+        ctx.strokeStyle = style.emblemColor;
+        ctx.globalAlpha = 0.32;
+        ctx.lineWidth = 1;
+        ctx.setLineDash([2.5, 2.5]);
+        ctx.strokeRect(x + w * 0.18, y + h * 0.18, w * 0.64, h * 0.64);
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.moveTo(x + w * 0.18, y + h * 0.5);
+        ctx.lineTo(x + w * 0.42, y + h * 0.5);
+        ctx.stroke();
+        break;
+      case 'hotel_keycard':
+        // Concierge oval keytag crest + border hairline
+        ctx.strokeStyle = style.highlight;
+        ctx.globalAlpha = 0.35;
+        ctx.lineWidth = 1.1;
+        this.roundRect(ctx, x + w * 0.16, y + h * 0.16, w * 0.68, h * 0.68, 5);
+        ctx.stroke();
+        break;
+      case 'de_stijl_grid':
+        // Asymmetric Mondrian orthogonal bars splitting block quadrant
+        ctx.fillStyle = style.border;
+        ctx.globalAlpha = 0.34;
+        ctx.fillRect(x + w * 0.28, y + h * 0.12, 2, h * 0.76);
+        ctx.fillRect(x + w * 0.12, y + h * 0.64, w * 0.76, 2);
+        break;
+      case 'woodblock_wave':
+        // Seigaiha concentric wave arcs
+        ctx.strokeStyle = style.emblemColor;
+        ctx.globalAlpha = 0.26;
+        ctx.lineWidth = 1.1;
+        for (let r = 0.24; r <= 0.48; r += 0.12) {
+          ctx.beginPath();
+          ctx.arc(x + w * 0.5, y + h * 0.85, w * r, Math.PI * 1.15, Math.PI * 1.85);
+          ctx.stroke();
+        }
+        break;
+      case 'kodak_slide':
+        // 35mm cardboard slide mount frame + sprocket holes
+        ctx.strokeStyle = style.highlight;
+        ctx.globalAlpha = 0.34;
+        ctx.lineWidth = 1.4;
+        ctx.strokeRect(x + w * 0.18, y + h * 0.22, w * 0.64, h * 0.56);
+        ctx.fillStyle = style.emblemColor;
+        ctx.globalAlpha = 0.28;
+        ctx.fillRect(x + w * 0.24, y + h * 0.12, 3, 2);
+        ctx.fillRect(x + w * 0.48, y + h * 0.12, 3, 2);
+        ctx.fillRect(x + w * 0.72, y + h * 0.12, 3, 2);
+        break;
+      case 'bauhaus_arc':
+        // Kinetic quarter-circle counterweight arc
+        ctx.fillStyle = style.highlight;
+        ctx.globalAlpha = 0.24;
+        ctx.beginPath();
+        ctx.moveTo(x + w * 0.16, y + h * 0.84);
+        ctx.arc(x + w * 0.16, y + h * 0.84, w * 0.58, -Math.PI / 2, 0);
+        ctx.closePath();
+        ctx.fill();
+        break;
+      case 'terrarium_hex':
+        // Geodesic hexagonal dome rib lines
+        ctx.strokeStyle = style.emblemColor;
+        ctx.globalAlpha = 0.26;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x + w * 0.3, y + h * 0.18);
+        ctx.lineTo(x + w * 0.7, y + h * 0.18);
+        ctx.lineTo(x + w * 0.84, y + h * 0.5);
+        ctx.lineTo(x + w * 0.7, y + h * 0.82);
+        ctx.lineTo(x + w * 0.3, y + h * 0.82);
+        ctx.lineTo(x + w * 0.16, y + h * 0.5);
+        ctx.closePath();
+        ctx.stroke();
+        break;
+      case 'vinyl_groove':
+        // Concentric hi-fi LP microgrooves
+        ctx.strokeStyle = style.highlight;
+        ctx.globalAlpha = 0.24;
+        ctx.lineWidth = 0.9;
+        ctx.beginPath();
+        ctx.arc(x + w * 0.5, y + h * 0.5, w * 0.36, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(x + w * 0.5, y + h * 0.5, w * 0.24, 0, Math.PI * 2);
+        ctx.stroke();
+        break;
+      case 'space_porthole':
+        // Retro space-age molded porthole ring
+        ctx.strokeStyle = style.highlight;
+        ctx.globalAlpha = 0.36;
+        ctx.lineWidth = 1.6;
+        this.roundRect(ctx, x + w * 0.18, y + h * 0.18, w * 0.64, h * 0.64, w * 0.22);
         ctx.stroke();
         break;
     }

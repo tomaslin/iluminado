@@ -31,6 +31,7 @@ export interface ShiftDefinition {
   name: string;
   shortLabel: string;
   category: ShiftCategory;
+  requiresBricks: boolean;
   description: string;
 }
 
@@ -48,6 +49,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: '90° Board Rotate',
     shortLabel: '90° Rotate',
     category: 'core',
+    requiresBricks: true,
     description:
       'Turns the entire playfield 90° clockwise or counter-clockwise and drops stacks to the new floor.',
   },
@@ -56,6 +58,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Expand / Contract (±2)',
     shortLabel: 'Size Shift',
     category: 'core',
+    requiresBricks: false,
     description:
       'Grows or shrinks board width and height by up to 2 blocks while preserving your stacks.',
   },
@@ -64,6 +67,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Monochrome Line / Diagonal',
     shortLabel: 'Color Line',
     category: 'core',
+    requiresBricks: true,
     description:
       'Converts a single horizontal row, vertical column, or diagonal line into one uniform color.',
   },
@@ -72,6 +76,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Directional Gravity Flow',
     shortLabel: 'Gravity Flow',
     category: 'core',
+    requiresBricks: true,
     description:
       'Shifts gravity and piece entry to arrive from the left, right, or bottom edge instead of the top.',
   },
@@ -80,6 +85,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'The Split Canyon',
     shortLabel: 'Split Canyon',
     category: 'silhouette',
+    requiresBricks: false,
     description:
       'Cracks stacks left and right to carve an impassable 2-block-wide stone chasm down the center.',
   },
@@ -88,6 +94,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Hourglass / Funnel Walls',
     shortLabel: 'Funnel Walls',
     category: 'silhouette',
+    requiresBricks: false,
     description:
       'Steps neutral side bumpers inward by 1–2 blocks across middle or lower rows.',
   },
@@ -96,6 +103,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Twin Elevators',
     shortLabel: 'Twin Elevators',
     category: 'silhouette',
+    requiresBricks: true,
     description:
       'Lifts the left half up +2 blocks and lowers the right stage by 1 block into an asymmetric step.',
   },
@@ -104,6 +112,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Rolling Wave Floor',
     shortLabel: 'Wave Floor',
     category: 'silhouette',
+    requiresBricks: false,
     description:
       'Undulates the stone floor into a +0 to +2 sine wave, lifting stacks into rolling hills.',
   },
@@ -112,6 +121,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Octagon Cutoffs',
     shortLabel: 'Octagon Arena',
     category: 'silhouette',
+    requiresBricks: false,
     description:
       'Locks stepped neutral stone blocks into all four corners to form an octagonal playfield.',
   },
@@ -120,6 +130,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Floating Mid-Air Shelf',
     shortLabel: 'Mid-Air Shelf',
     category: 'obstacles',
+    requiresBricks: false,
     description:
       'Spawns a solid horizontal girder mid-air, turning the board into a two-story bunker.',
   },
@@ -128,6 +139,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Castle Battlements',
     shortLabel: 'Battlements',
     category: 'obstacles',
+    requiresBricks: false,
     description:
       'Raises 2-block neutral stone pillars every 3rd column from the floor to form narrow trenches.',
   },
@@ -136,6 +148,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Patrolling 2×2 Bumper',
     shortLabel: '2×2 Bumper',
     category: 'obstacles',
+    requiresBricks: false,
     description:
       'Suspends a metallic 2×2 obstacle mid-air that slides left and right on the beat.',
   },
@@ -144,6 +157,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Corner Bastion (4×4)',
     shortLabel: 'Corner Block',
     category: 'obstacles',
+    requiresBricks: false,
     description:
       'Seals a compact 4×4 stone bastion in one lower corner once per run while keeping main drop lanes open.',
   },
@@ -152,6 +166,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Bottom Plinth (4×3)',
     shortLabel: 'Bottom Plinth',
     category: 'obstacles',
+    requiresBricks: false,
     description:
       'Raises a low stone plinth along the bottom edge once per run without blocking central drops.',
   },
@@ -160,6 +175,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Side Margin Ledge (3×4)',
     shortLabel: 'Side Ledge',
     category: 'obstacles',
+    requiresBricks: false,
     description:
       'Places a stepped stone margin along the left or right wall once per run to narrow the wing gently.',
   },
@@ -168,6 +184,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: '2×1 / 1×2 Domino Bricks',
     shortLabel: '2×1 Bricks',
     category: 'bricks',
+    requiresBricks: false,
     description:
       'Transforms incoming falling pieces into nimble 2×1 / 1×2 domino bricks for one turn.',
   },
@@ -176,6 +193,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: '1×3 / 3×1 Trio Bricks',
     shortLabel: '1×3 Bricks',
     category: 'bricks',
+    requiresBricks: false,
     description:
       'Transforms incoming falling pieces into linear 1×3 and 3×1 trio bricks for one turn.',
   },
@@ -184,6 +202,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: '3×2 / 2×3 Slab Bricks',
     shortLabel: '3×2 Bricks',
     category: 'bricks',
+    requiresBricks: false,
     description:
       'Transforms incoming falling pieces into wide 3×2 / 2×3 six-tile slabs for one turn.',
   },
@@ -192,6 +211,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Tetromino Bricks',
     shortLabel: 'Tetrominoes',
     category: 'bricks',
+    requiresBricks: false,
     description:
       'Transforms incoming falling pieces into classic 4-tile I, O, T, S, Z, J, L shapes for one turn.',
   },
@@ -200,22 +220,16 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Obsidian Blocked Bricks',
     shortLabel: 'Blocked 2×2',
     category: 'bricks',
+    requiresBricks: false,
     description:
       'Mixes a solid dark obsidian block into occasional 2×2 pieces for one turn; shatters beside clears.',
-  },
-  {
-    id: 'brick_peggle',
-    name: 'Peggle Bounce Orb',
-    shortLabel: 'Peggle Orb',
-    category: 'bricks',
-    description:
-      'Turns incoming pieces into single bouncing orbs that ricochet randomly off blocks and walls for one turn.',
   },
   {
     id: 'three_color_mode',
     name: '3-Color Spectrum',
     shortLabel: '3 Colors',
     category: 'bricks',
+    requiresBricks: false,
     description:
       'Introduces a third block color onto the board and incoming queue for one turn.',
   },
@@ -224,6 +238,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Inside-Out Swap',
     shortLabel: 'Inside-Out',
     category: 'swaps',
+    requiresBricks: true,
     description:
       'Swaps outer columns with inner columns, flipping a central mountain into twin outer cliffs.',
   },
@@ -232,6 +247,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Sawtooth Shear',
     shortLabel: 'Sawtooth',
     category: 'swaps',
+    requiresBricks: true,
     description:
       'Juts even rows right and odd rows left to transform straight walls into jagged zigzag teeth.',
   },
@@ -240,6 +256,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Horizon Shear',
     shortLabel: 'Fault Line',
     category: 'swaps',
+    requiresBricks: true,
     description:
       'Cuts a glowing fault seam across the stack, sliding upper rows right and lower rows left.',
   },
@@ -248,15 +265,17 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'The Zipper Merge',
     shortLabel: 'Zipper Merge',
     category: 'swaps',
+    requiresBricks: true,
     description:
       'Interleaves top and bottom occupied rows cleanly like a zipper while keeping exact color ratios.',
   },
-  // --- 15 New Shifts ---
+  // --- 17 Additional Shifts ---
   {
     id: 'cyclotron_flow',
     name: 'Cyclotron Gravity Orbit',
     shortLabel: 'Orbit Flow',
     category: 'core',
+    requiresBricks: true,
     description:
       'Gravity orbits 90° clockwise after every dropped piece—top to right, bottom, left, and back.',
   },
@@ -265,6 +284,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Portal Edge Wrap',
     shortLabel: 'Portal Wrap',
     category: 'core',
+    requiresBricks: false,
     description:
       'Opens dimensional edges so steering past the left or right wall warps your piece to the opposite side.',
   },
@@ -273,6 +293,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Reverse Timeline Sweep',
     shortLabel: 'RTL Sweep',
     category: 'core',
+    requiresBricks: false,
     description:
       'Flips the beat-locked timeline beam to sweep from right to left across the playfield.',
   },
@@ -281,6 +302,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Split-Half Timeline',
     shortLabel: 'Split Line',
     category: 'core',
+    requiresBricks: false,
     description:
       'Splits the sweep bar horizontally at mid-screen so the top and bottom halves clear 4 beats apart.',
   },
@@ -289,6 +311,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Diagonal Slant Line',
     shortLabel: 'Slant Line',
     category: 'core',
+    requiresBricks: false,
     description:
       'Tilts the timeline sweep into a diagonal slash so upper rows clear ahead of lower rows.',
   },
@@ -297,6 +320,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Staircase Terraces',
     shortLabel: 'Terraces',
     category: 'silhouette',
+    requiresBricks: false,
     description:
       'Sculpts symmetrical 1–2–3 stone steps rising along both wings, funneling stacks toward the center.',
   },
@@ -305,6 +329,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Twin-Basin Center Spire',
     shortLabel: 'Center Spire',
     category: 'silhouette',
+    requiresBricks: false,
     description:
       'Raises a central stone monolith in the middle two columns to split play into twin flanking basins.',
   },
@@ -313,6 +338,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Central Dome Pedestal',
     shortLabel: 'Dome Mound',
     category: 'silhouette',
+    requiresBricks: false,
     description:
       'Lifts the center four columns into a vaulted arched mound while keeping outer valleys deep.',
   },
@@ -321,6 +347,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Springboard Floor',
     shortLabel: 'Spring Pads',
     category: 'obstacles',
+    requiresBricks: false,
     description:
       'Mounts amber trampoline pads along the floor that bounce incoming pieces skyward before locking.',
   },
@@ -329,6 +356,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Belt Conveyor Floor',
     shortLabel: 'Conveyor Belt',
     category: 'obstacles',
+    requiresBricks: false,
     description:
       'Drives a motorized track along the bottom row, shifting settled floor blocks one column every 2 beats.',
   },
@@ -337,6 +365,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Dual Twin Timeline',
     shortLabel: 'Twin Sweep',
     category: 'obstacles',
+    requiresBricks: false,
     description:
       'Splits the timeline into two synchronized beams sweeping 4 beats apart for double-tempo clears.',
   },
@@ -345,6 +374,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Crumble Crystal Ledges',
     shortLabel: 'Crumble Ledges',
     category: 'obstacles',
+    requiresBricks: false,
     description:
       'Suspends brittle crystal ledges mid-board; two impacts or adjacent clears crack and shatter them.',
   },
@@ -353,6 +383,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: '3-Tile Corner L-Bricks',
     shortLabel: 'L-Trio Bricks',
     category: 'bricks',
+    requiresBricks: false,
     description:
       'Carves incoming pieces into crisp 3-tile L-trominoes with a missing corner pocket for interlocking fits.',
   },
@@ -361,6 +392,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Chameleon Rotate',
     shortLabel: 'Chameleon',
     category: 'bricks',
+    requiresBricks: false,
     description:
       'Rotating a falling brick cycles every tile color forward, letting you paint matches mid-air.',
   },
@@ -369,6 +401,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Prism Wild Bricks',
     shortLabel: 'Prism Wild',
     category: 'bricks',
+    requiresBricks: false,
     description:
       'Embeds achromatic diamond Prism Wild tiles into incoming 2×2 bricks that match any adjacent color.',
   },
@@ -377,6 +410,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Mirror Symmetry Flip',
     shortLabel: 'Mirror Flip',
     category: 'swaps',
+    requiresBricks: true,
     description:
       'Reflects the entire occupied board horizontally across the center line in a crisp specular flip.',
   },
@@ -385,6 +419,7 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     name: 'Orbital Vortex Swirl',
     shortLabel: 'Vortex Swirl',
     category: 'swaps',
+    requiresBricks: true,
     description:
       'Rotates occupied blocks clockwise around concentric perimeter rings like a slow architectural whirlpool.',
   },
@@ -393,9 +428,24 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
 export const ALL_SHIFT_TYPES: ShiftType[] = SHIFT_DEFINITIONS.map((d) => d.id);
 export const VALID_SHIFT_SET = new Set<ShiftType>(ALL_SHIFT_TYPES);
 
+export const START_FRIENDLY_SHIFTS: ShiftType[] = SHIFT_DEFINITIONS.filter(
+  (d) => !d.requiresBricks
+).map((d) => d.id);
+
+export const POPULATED_BOARD_SHIFTS: ShiftType[] = SHIFT_DEFINITIONS.filter(
+  (d) => d.requiresBricks
+).map((d) => d.id);
+
+export const START_FRIENDLY_SHIFT_SET = new Set<ShiftType>(START_FRIENDLY_SHIFTS);
+
 const SHIFT_MAP = new Map<ShiftType, ShiftDefinition>(
   SHIFT_DEFINITIONS.map((d) => [d.id, d])
 );
+
+export function isShiftStartFriendly(type: ShiftType): boolean {
+  const def = SHIFT_MAP.get(type);
+  return def ? !def.requiresBricks : false;
+}
 
 export const OBSTACLE_SHIFT_SET = new Set<ShiftType>([
   'split_canyon',
@@ -421,7 +471,6 @@ export const TILE_TYPE_SHIFT_SET = new Set<ShiftType>([
   'brick_3x2',
   'brick_tetromino',
   'brick_blocked',
-  'brick_peggle',
   'three_color_mode',
   'brick_l_trio',
   'chameleon_rotate',
@@ -2040,11 +2089,40 @@ function applyBoardResizeShift(
 }
 
 /**
+ * Picks an opening shift appropriate for Level 1 (an unpopulated/starting board).
+ * Always prefers shifts marked start-ready (`!requiresBricks`) when any exist
+ * in `enabledShifts`, falling back to `enabledShifts` only if the user enabled
+ * exclusively populated-board shifts.
+ */
+export function pickStartShift(
+  enabledShifts: ShiftType[],
+  rng: () => number = Math.random,
+  board?: BoardState
+): ShiftType | null {
+  const valid = enabledShifts.filter((s) => VALID_SHIFT_SET.has(s));
+  if (valid.length === 0) return null;
+
+  const usedOneTimeSet = new Set<ShiftType>(board?.shiftScheduler?.usedOneTimeShifts ?? []);
+  let pool = valid.filter((s) => isShiftStartFriendly(s));
+  if (pool.length === 0) {
+    pool = valid;
+  }
+
+  const unusedOneTime = pool.filter((s) => !usedOneTimeSet.has(s));
+  if (unusedOneTime.length > 0) {
+    pool = unusedOneTime;
+  }
+
+  return pool[Math.floor(rng() * pool.length)];
+}
+
+/**
  * Picks the next enabled transformation rule while honoring:
  * - Standard 2x2 gameplay for ~2/3 of the run, shifting every ~3 levels to 1x2, 1x3, 2x3, tetromino, blocked, or 3-color
  * - Rotations happening frequently (~every 2 turns when enabled, never > 3 turn gap)
  * - At most 1 obstacle shift and at most 1 tile-type/color shift per 3-level stage window
  * - One-time edge/heavy obstacle shifts firing only once per run when alternatives exist
+ * - Preferring start-friendly (`!requiresBricks`) shifts when fewer than 6 player bricks occupy the board
  */
 export function pickNextShift(
   enabledShifts: ShiftType[],
@@ -2072,6 +2150,14 @@ export function pickNextShift(
     const usedOneTimeSet = new Set<ShiftType>(sched.usedOneTimeShifts);
     const turnsSinceTile = sched.turnsSinceTileShift ?? 1;
 
+    let playerCount = 0;
+    for (let r = 0; r < board.grid.length && playerCount < 6; r++) {
+      for (let c = 0; c < board.grid[r].length && playerCount < 6; c++) {
+        const cell = board.grid[r][c];
+        if (cell && !cell.isObstacle) playerCount++;
+      }
+    }
+
     // Never repeat rotate_90 immediately back-to-back when other shifts exist
     if (sched.turnsSinceRotation === 0 && pool.length > 1 && pool.includes('rotate_90')) {
       const nonRot = pool.filter((s) => s !== 'rotate_90');
@@ -2082,6 +2168,14 @@ export function pickNextShift(
     const withoutOneTime = pool.filter((s) => !usedOneTimeSet.has(s));
     if (withoutOneTime.length > 0) {
       pool = withoutOneTime;
+    }
+
+    // If board is sparse (< 6 player blocks), favor shifts that work well without a crowded stack
+    if (playerCount < 6) {
+      const startFriendly = pool.filter((s) => isShiftStartFriendly(s));
+      if (startFriendly.length > 0) {
+        pool = startFriendly;
+      }
     }
 
     // Per-stage-window cap: at most 1 obstacle shift (when alternatives exist)
@@ -2141,19 +2235,10 @@ export function pickNextShift(
       pool = nonTileCandidates;
     }
 
-    // If board is nearly empty (< 2 player blocks), prefer geometry/brick shifts over line_color_shift if available
-    if (pool.length > 1 && pool.includes('line_color_shift')) {
-      let playerCount = 0;
-      for (let r = 0; r < board.grid.length && playerCount < 2; r++) {
-        for (let c = 0; c < board.grid[r].length && playerCount < 2; c++) {
-          const cell = board.grid[r][c];
-          if (cell && !cell.isObstacle) playerCount++;
-        }
-      }
-      if (playerCount < 2) {
-        const nonLine = pool.filter((s) => s !== 'line_color_shift');
-        if (nonLine.length > 0) pool = nonLine;
-      }
+    // If board is nearly empty (< 2 player blocks), prefer non-line shifts if available
+    if (playerCount < 2 && pool.length > 1 && pool.includes('line_color_shift')) {
+      const nonLine = pool.filter((s) => s !== 'line_color_shift');
+      if (nonLine.length > 0) pool = nonLine;
     }
   }
 
@@ -2259,8 +2344,6 @@ export function applyBoardShift(
       ? 'tetromino'
       : shiftType === 'brick_blocked'
       ? 'blocked_2x2'
-      : shiftType === 'brick_peggle'
-      ? 'peggle_1x1'
       : shiftType === 'brick_l_trio'
       ? 'l_trio_2x2'
       : shiftType === 'prism_wild_bricks'
@@ -2378,7 +2461,6 @@ export function applyBoardShift(
     case 'brick_3x2':
     case 'brick_tetromino':
     case 'brick_blocked':
-    case 'brick_peggle':
       // Piece queue & active staging brick will update via syncQueueIfRulesChanged
       break;
     case 'three_color_mode':

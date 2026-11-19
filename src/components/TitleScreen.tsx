@@ -23,6 +23,7 @@ import {
   SavedProgress,
   SkinConfig,
 } from '../game/types';
+import { PWAInstallButton } from './PWAInstallButton';
 
 interface TitleScreenProps {
   selectedMode: GameMode;
@@ -129,82 +130,125 @@ const ModeArtworkSvg: React.FC<{
         })}
       </g>
 
-      {/* Mode-specific crisp isometric / architectural emblem */}
+      {/* Mode-specific crisp 2D / architectural emblem */}
       {mode === 'challenge' && (
-        <g transform="translate(90, 90)">
-          {/* Shadow extrusion */}
-          <polygon
-            points="-44,16 -8,42 46,16 46,32 -8,58 -44,32"
-            fill={frame}
-            opacity="0.35"
+        <g transform="translate(88, 92)">
+          {/* Subtle vertical timeline beam behind the block */}
+          <rect
+            x="-2"
+            y="-64"
+            width="4"
+            height="128"
+            rx="2"
+            fill={palette.timelineBeam}
+            fillOpacity="0.45"
           />
-          {/* Isometric 2x2 cube top & front faces */}
-          <polygon
-            points="0,-50 48,-24 0,2 -48,-24"
+
+          {/* Tactile drop shadow under base 3 tiles */}
+          <g fill={frame} fillOpacity="0.22" transform="translate(3, 5)">
+            <rect x="-46" y="-46" width="42" height="42" rx="9" />
+            <rect x="-46" y="4" width="42" height="42" rx="9" />
+            <rect x="4" y="4" width="42" height="42" rx="9" />
+          </g>
+
+          {/* Dashed origin socket for shifting top-right tile */}
+          <rect
+            x="4"
+            y="-46"
+            width="42"
+            height="42"
+            rx="8"
+            fill={frame}
+            fillOpacity="0.08"
+            stroke={palette.hudInk}
+            strokeOpacity="0.45"
+            strokeWidth="2.2"
+            strokeDasharray="5 4"
+          />
+
+          {/* Top-Left Tile */}
+          <rect
+            x="-46"
+            y="-46"
+            width="42"
+            height="42"
+            rx="9"
             fill={aFill}
             stroke={frame}
-            strokeWidth="2.5"
-            strokeLinejoin="round"
+            strokeWidth="3"
           />
-          <polygon
-            points="-48,-24 0,2 0,48 -48,22"
+          <circle cx="-25" cy="-25" r="7" fill={aHi} fillOpacity="0.55" />
+
+          {/* Bottom-Left Tile */}
+          <rect
+            x="-46"
+            y="4"
+            width="42"
+            height="42"
+            rx="9"
             fill={bFill}
             stroke={frame}
-            strokeWidth="2.5"
-            strokeLinejoin="round"
-          />
-          <polygon
-            points="0,2 48,-24 48,22 0,48"
-            fill={palette.hudInk}
-            stroke={frame}
-            strokeWidth="2.5"
-            strokeLinejoin="round"
-          />
-          {/* 4 isometric tiles on right face */}
-          <rect
-            x="9"
-            y="-4"
-            width="13"
-            height="13"
-            rx="2"
-            transform="skewY(-26)"
-            fill="#faf6ee"
+            strokeWidth="3"
           />
           <rect
-            x="27"
-            y="-4"
-            width="13"
-            height="13"
-            rx="2"
-            transform="skewY(-26)"
-            fill={aHi}
-          />
-          <rect
-            x="9"
-            y="14"
-            width="13"
-            height="13"
-            rx="2"
-            transform="skewY(-26)"
-            fill={aHi}
-          />
-          <rect
-            x="27"
-            y="14"
-            width="13"
-            height="13"
-            rx="2"
-            transform="skewY(-26)"
-            fill="#faf6ee"
-          />
-          {/* Faceted zen prism seal on left face */}
-          <polygon
-            points="-24,-4 -12,12 -24,28 -36,12"
+            x="-35"
+            y="15"
+            width="20"
+            height="20"
+            rx="4"
             fill="none"
             stroke="#faf6ee"
-            strokeOpacity="0.88"
+            strokeOpacity="0.42"
             strokeWidth="2"
           />
+
+          {/* Bottom-Right Tile */}
+          <rect
+            x="4"
+            y="4"
+            width="42"
+            height="42"
+            rx="9"
+            fill={aFill}
+            stroke={frame}
+            strokeWidth="3"
+          />
+          <polygon
+            points="25,15 35,25 25,35 15,25"
+            fill={aHi}
+            fillOpacity="0.6"
+          />
+
+          {/* Shifting & Transforming Top-Right Tile */}
+          <g transform="translate(11, -11)">
+            <rect
+              x="6"
+              y="-42"
+              width="42"
+              height="42"
+              rx="10"
+              fill={frame}
+              fillOpacity="0.24"
+            />
+            <rect
+              x="4"
+              y="-46"
+              width="42"
+              height="42"
+              rx="10"
+              fill={palette.hudAccent}
+              stroke={frame}
+              strokeWidth="3"
+            />
+            <polygon
+              points="25,-37 37,-25 25,-13 13,-25"
+              fill="#faf6ee"
+              stroke={frame}
+              strokeWidth="1.8"
+              strokeLinejoin="round"
+            />
+            <circle cx="25" cy="-25" r="3.5" fill={aFill} />
+          </g>
         </g>
       )}
 
@@ -554,6 +598,14 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
             <SlidersHorizontal className="w-3.5 h-3.5 shrink-0" aria-hidden="true" />
             <span>Shifts</span>
           </button>
+
+          {/* In-App Install Prompt (auto-hides in standalone mode) */}
+          <PWAInstallButton
+            skin={previewSkin}
+            chipBg={topChipBg}
+            chipBorder={topChipBorder}
+            heroInk={heroInk}
+          />
 
           {/* Audio Mute Toggle */}
           <button

@@ -55,7 +55,6 @@ const NEW_V3_SHIFTS: ShiftType[] = [
 
 const NEW_V4_SHIFTS: ShiftType[] = [
   'flow_direction',
-  'brick_peggle',
 ];
 
 export const NEW_V5_SHIFTS: ShiftType[] = [

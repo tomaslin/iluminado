@@ -126,6 +126,16 @@ const TRACK_TRIM_GAINS: Record<string, number> = {
   'music/world38.mp3': 0.86,
   'music/world39.mp3': 0.94,
   'music/world40.mp3': 0.88,
+  'music/world41.mp3': 1.58,
+  'music/world42.mp3': 1.48,
+  'music/world43.mp3': 1.12,
+  'music/world44.mp3': 0.82,
+  'music/world45.mp3': 0.92,
+  'music/world46.mp3': 1.52,
+  'music/world47.mp3': 0.82,
+  'music/world48.mp3': 0.76,
+  'music/world49.mp3': 1.18,
+  'music/world50.mp3': 0.88,
 };
 
 export function getTrackTrimGain(trackUrl?: string | null): number {
@@ -173,6 +183,8 @@ export class IluminadoAudioEngine {
   private activeBufferNode: AudioBufferSourceNode | null = null;
   private activeBufferGain: GainNode | null = null;
   private activeBufferUrl: string | null = null;
+  private activeBufferFadeEndCtxTime = 0;
+  private transitionBloomUntilCtxTime = 0;
   private fadingBufferNodes = new Set<{ node: AudioBufferSourceNode; gain: GainNode }>();
   private currentTempoScale = 1;
   private lastClockCtxTime: number | null = null;
@@ -380,16 +392,44 @@ export class IluminadoAudioEngine {
     return safeDt * (effectiveBpm / 60);
   }
 
+  private touchBufferLru(url: string, decoded: AudioBuffer): void {
+    this.audioBuffers.delete(url);
+    this.audioBuffers.set(url, decoded);
+  }
+
+  private touchRawLru(url: string, raw: ArrayBuffer): void {
+    this.rawTrackCache.delete(url);
+    this.rawTrackCache.set(url, raw);
+  }
+
   private trimBufferCaches(keepUrl?: string): void {
-    while (this.audioBuffers.size > 4) {
+    while (this.audioBuffers.size > 10) {
       const oldestKey = this.audioBuffers.keys().next().value;
-      if (!oldestKey || oldestKey === keepUrl || oldestKey === this.desiredTrackUrl) break;
-      this.audioBuffers.delete(oldestKey);
+      if (!oldestKey) break;
+      if (oldestKey === keepUrl || oldestKey === this.desiredTrackUrl) {
+        const val = this.audioBuffers.get(oldestKey);
+        this.audioBuffers.delete(oldestKey);
+        if (val) this.audioBuffers.set(oldestKey, val);
+        const nextOldest = this.audioBuffers.keys().next().value;
+        if (!nextOldest || nextOldest === oldestKey) break;
+        this.audioBuffers.delete(nextOldest);
+      } else {
+        this.audioBuffers.delete(oldestKey);
+      }
     }
-    while (this.rawTrackCache.size > 5) {
+    while (this.rawTrackCache.size > 18) {
       const oldestKey = this.rawTrackCache.keys().next().value;
-      if (!oldestKey || oldestKey === keepUrl || oldestKey === this.desiredTrackUrl) break;
-      this.rawTrackCache.delete(oldestKey);
+      if (!oldestKey) break;
+      if (oldestKey === keepUrl || oldestKey === this.desiredTrackUrl) {
+        const val = this.rawTrackCache.get(oldestKey);
+        this.rawTrackCache.delete(oldestKey);
+        if (val) this.rawTrackCache.set(oldestKey, val);
+        const nextOldest = this.rawTrackCache.keys().next().value;
+        if (!nextOldest || nextOldest === oldestKey) break;
+        this.rawTrackCache.delete(nextOldest);
+      } else {
+        this.rawTrackCache.delete(oldestKey);
+      }
     }
   }
 
@@ -398,7 +438,10 @@ export class IluminadoAudioEngine {
       return Promise.resolve(null);
     }
     const existing = this.rawTrackCache.get(url);
-    if (existing) return Promise.resolve(existing);
+    if (existing) {
+      this.touchRawLru(url, existing);
+      return Promise.resolve(existing);
+    }
     const inflight = this.rawFetchPromises.get(url);
     if (inflight) return inflight;
 
@@ -406,7 +449,7 @@ export class IluminadoAudioEngine {
       .then((res) => (res.ok ? res.arrayBuffer() : null))
       .then((buf) => {
         if (buf && buf.byteLength > 0) {
-          this.rawTrackCache.set(url, buf);
+          this.touchRawLru(url, buf);
           this.trimBufferCaches(url);
           return buf;
         }
@@ -426,7 +469,10 @@ export class IluminadoAudioEngine {
       return Promise.resolve(null);
     }
     const cached = this.audioBuffers.get(url);
-    if (cached) return Promise.resolve(cached);
+    if (cached) {
+      this.touchBufferLru(url, cached);
+      return Promise.resolve(cached);
+    }
     const inflight = this.decodePromises.get(url);
     if (inflight) return inflight;
 
@@ -438,7 +484,7 @@ export class IluminadoAudioEngine {
       })
       .then((decoded) => {
         if (decoded) {
-          this.audioBuffers.set(url, decoded);
+          this.touchBufferLru(url, decoded);
           this.trimBufferCaches(url);
           return decoded;
         }
@@ -460,6 +506,22 @@ export class IluminadoAudioEngine {
     } else {
       void this.fetchTrackBytes(url);
     }
+  }
+
+  public preloadTracks(urls: Array<string | undefined | null>): void {
+    if (typeof window === 'undefined') return;
+    const unique = Array.from(
+      new Set(urls.filter((u): u is string => Boolean(u && u.length > 0)))
+    );
+    unique.forEach((url, idx) => {
+      if (idx < 2) {
+        this.preloadTrack(url);
+      } else {
+        window.setTimeout(() => {
+          this.preloadTrack(url);
+        }, idx * 240);
+      }
+    });
   }
 
   private attachAudioElementToGraph(
@@ -527,14 +589,17 @@ export class IluminadoAudioEngine {
       onDone?.();
       return;
     }
-    const stepMs = durationMs >= 1000 ? 45 : 25;
+    const stepMs = durationMs >= 1000 ? 40 : 22;
     const steps = Math.max(1, Math.round(durationMs / stepMs));
     let step = 0;
+    const fadingOut = clampedTarget < startVol;
     const id = window.setInterval(() => {
       step++;
       const linearT = Math.min(1, step / steps);
-      // Smooth S-curve crossfade so outgoing and incoming worlds breathe organically
-      const easedT = linearT * linearT * (3 - 2 * linearT);
+      // Equal-power sine/cosine curve so crossfades maintain constant perceived energy
+      const easedT = fadingOut
+        ? 1 - Math.cos(linearT * Math.PI * 0.5)
+        : Math.sin(linearT * Math.PI * 0.5);
       this.setElementVolume(el, startVol + (clampedTarget - startVol) * easedT);
       if (linearT >= 1) {
         window.clearInterval(id);
@@ -543,6 +608,44 @@ export class IluminadoAudioEngine {
       }
     }, stepMs);
     this.audioFadeTimers.set(el, id);
+  }
+
+  private createEqualPowerCurve(
+    direction: 'in' | 'out',
+    startLevel = 1,
+    points = 32
+  ): Float32Array<ArrayBuffer> {
+    const buf = new ArrayBuffer(points * 4);
+    const curve = new Float32Array(buf);
+    for (let i = 0; i < points; i++) {
+      const t = i / (points - 1);
+      if (direction === 'in') {
+        curve[i] = Math.max(0.0005, Math.sin(t * Math.PI * 0.5) * startLevel);
+      } else {
+        curve[i] = Math.max(0.0001, Math.cos(t * Math.PI * 0.5) * startLevel);
+      }
+    }
+    return curve;
+  }
+
+  private cancelAudioParamSafe(
+    param: AudioParam | null | undefined,
+    atTime: number
+  ): void {
+    if (!param) return;
+    try {
+      if (typeof param.cancelAndHoldAtTime === 'function') {
+        param.cancelAndHoldAtTime(atTime);
+      } else {
+        param.cancelScheduledValues(atTime);
+      }
+    } catch {
+      try {
+        param.cancelScheduledValues(atTime);
+      } catch {
+        // Ignore if parameter cannot be cancelled
+      }
+    }
   }
 
   private cleanupAudioElement(el: HTMLAudioElement): void {
@@ -567,6 +670,7 @@ export class IluminadoAudioEngine {
     this.activeBufferNode = null;
     this.activeBufferGain = null;
     this.activeBufferUrl = null;
+    this.activeBufferFadeEndCtxTime = 0;
     if (!node || !gain) return;
 
     if (!this.ctx || fadeMs <= 0) {
@@ -584,13 +688,25 @@ export class IluminadoAudioEngine {
     this.fadingBufferNodes.add(entry);
     const now = this.ctx.currentTime;
     const fadeSec = Math.max(0.05, fadeMs / 1000);
+    this.cancelAudioParamSafe(gain.gain, now);
+    const startGain = clamp(gain.gain.value, 0.0005, 1);
     try {
-      gain.gain.cancelScheduledValues(now);
-      gain.gain.setValueAtTime(Math.max(0.0001, gain.gain.value), now);
-      gain.gain.linearRampToValueAtTime(0.0001, now + fadeSec);
-      node.stop(now + fadeSec + 0.04);
+      gain.gain.setValueAtTime(startGain, now);
+      gain.gain.setValueCurveAtTime(
+        this.createEqualPowerCurve('out', startGain),
+        now + 0.001,
+        fadeSec
+      );
+      node.stop(now + fadeSec + 0.05);
     } catch {
-      // Ignore already stopped
+      try {
+        this.cancelAudioParamSafe(gain.gain, now);
+        gain.gain.setValueAtTime(startGain, now);
+        gain.gain.linearRampToValueAtTime(0.0001, now + fadeSec);
+        node.stop(now + fadeSec + 0.05);
+      } catch {
+        // Ignore already stopped
+      }
     }
     node.onended = () => {
       this.fadingBufferNodes.delete(entry);
@@ -668,7 +784,9 @@ export class IluminadoAudioEngine {
       );
     }
 
-    this.musicFilter?.frequency.setTargetAtTime(targetCutoff, now, 0.12);
+    if (now >= this.transitionBloomUntilCtxTime) {
+      this.musicFilter?.frequency.setTargetAtTime(targetCutoff, now, 0.12);
+    }
     this.musicLowShelf?.gain.setTargetAtTime(targetLowShelf, now, 0.14);
     this.musicBusGain?.gain.setTargetAtTime(targetBusGain, now, 0.12);
   }
@@ -692,8 +810,21 @@ export class IluminadoAudioEngine {
         ? ((startOffsetSec % buffer.duration) + buffer.duration) % buffer.duration
         : 0;
     const fadeSec = Math.max(0.05, fadeMs / 1000);
-    gain.gain.setValueAtTime(0.0005, now);
-    gain.gain.linearRampToValueAtTime(1, now + fadeSec);
+    this.cancelAudioParamSafe(gain.gain, now);
+    try {
+      gain.gain.setValueAtTime(0.0005, now);
+      gain.gain.setValueCurveAtTime(
+        this.createEqualPowerCurve('in', 1),
+        now + 0.001,
+        fadeSec
+      );
+      this.activeBufferFadeEndCtxTime = now + 0.001 + fadeSec + 0.02;
+    } catch {
+      this.cancelAudioParamSafe(gain.gain, now);
+      gain.gain.setValueAtTime(0.0005, now);
+      gain.gain.linearRampToValueAtTime(1, now + fadeSec);
+      this.activeBufferFadeEndCtxTime = now + fadeSec + 0.02;
+    }
 
     src.connect(gain);
     gain.connect(this.musicTrimGain);
@@ -737,7 +868,20 @@ export class IluminadoAudioEngine {
     const decoded = isWebAudioRouted ? this.audioBuffers.get(targetUrl) : undefined;
     if (decoded && this.ctx && this.musicTrimGain) {
       if (this.activeBufferNode && this.activeBufferUrl === targetUrl) {
-        this.activeBufferGain?.gain.setTargetAtTime(1, this.ctx.currentTime, 0.08);
+        if (
+          this.activeBufferGain &&
+          this.ctx.currentTime >= this.activeBufferFadeEndCtxTime
+        ) {
+          this.cancelAudioParamSafe(
+            this.activeBufferGain.gain,
+            this.ctx.currentTime
+          );
+          this.activeBufferGain.gain.setTargetAtTime(
+            1,
+            this.ctx.currentTime,
+            0.08
+          );
+        }
         return;
       }
       const crossfadeMs = this.desiredMode === 'playing' ? 4800 : 750;
@@ -1034,13 +1178,16 @@ export class IluminadoAudioEngine {
       style === 'dark_zouk' ||
       style === 'dub_techno' ||
       style === 'uk_garage' ||
-      style === 'miami_boogie'
+      style === 'miami_boogie' ||
+      style === 'nordic_synth' ||
+      style === 'kraut_motorik'
         ? 105
         : style === 'heavy_metal' ||
           style === 'alt_rock' ||
           style === 'post_rock' ||
           style === 'industrial_synth' ||
-          style === 'constructivist_march'
+          style === 'constructivist_march' ||
+          style === 'koto_taiko'
         ? 145
         : 120;
     const endHz =
@@ -1049,11 +1196,17 @@ export class IluminadoAudioEngine {
       style === 'reggaeton' ||
       style === 'dub_techno' ||
       style === 'uk_garage' ||
-      style === 'industrial_synth'
+      style === 'industrial_synth' ||
+      style === 'nordic_synth' ||
+      style === 'koto_taiko'
         ? 36
         : 44;
     const dur =
-      style === 'trap' || style === 'kizomba' || style === 'dub_techno' || style === 'industrial_synth'
+      style === 'trap' ||
+      style === 'kizomba' ||
+      style === 'dub_techno' ||
+      style === 'industrial_synth' ||
+      style === 'koto_taiko'
         ? 0.28
         : 0.16;
     this.scheduleTone(
@@ -1065,7 +1218,7 @@ export class IluminadoAudioEngine {
       vol,
       0.003,
       500,
-      style === 'heavy_metal' || style === 'constructivist_march' ? 0.25 : 0,
+      style === 'heavy_metal' || style === 'constructivist_march' || style === 'koto_taiko' ? 0.25 : 0,
       endHz
     );
     if (
@@ -1074,7 +1227,8 @@ export class IluminadoAudioEngine {
       style === 'liquid_dnb' ||
       style === 'post_rock' ||
       style === 'industrial_synth' ||
-      style === 'constructivist_march'
+      style === 'constructivist_march' ||
+      style === 'kraut_motorik'
     ) {
       // Beater click transient
       this.scheduleNoise(when, this.stemPercGain, 0.018, 'bandpass', 3200, 1.8, vol * 0.28);
@@ -1089,13 +1243,15 @@ export class IluminadoAudioEngine {
       style === 'cumbia_dub' ||
       style === 'afrobeat_jazz' ||
       style === 'andean_cumbia' ||
-      style === 'shamisen_chill'
+      style === 'shamisen_chill' ||
+      style === 'de_stijl_minimal' ||
+      style === 'space_age_lounge'
     ) {
       // Crisp wooden clave / rim knock or bongo slap
       this.scheduleTone(
         when,
         this.stemPercGain,
-        style === 'bossa_nova' || style === 'shamisen_chill' ? 880 : 1150,
+        style === 'bossa_nova' || style === 'shamisen_chill' || style === 'space_age_lounge' ? 880 : 1150,
         0.055,
         'triangle',
         vol * 0.65,
@@ -1114,7 +1270,9 @@ export class IluminadoAudioEngine {
       style === 'tango_nuevo' ||
       style === 'cat_step_jazz' ||
       style === 'cubist_chamber' ||
-      style === 'botanical_waltz'
+      style === 'botanical_waltz' ||
+      style === 'chamber_waltz' ||
+      style === 'tokyo_jazz_kissa'
     ) {
       // Brushed snare sweep / crisp bandoneon slap
       this.scheduleNoise(when, this.stemPercGain, 0.09, 'bandpass', 2800, 0.9, vol * 0.45);
@@ -1129,7 +1287,9 @@ export class IluminadoAudioEngine {
         style === 'city_pop' ||
         style === 'industrial_synth' ||
         style === 'miami_boogie' ||
-        style === 'memphis_electro'
+        style === 'memphis_electro' ||
+        style === 'nordic_synth' ||
+        style === 'analog_funk_70s'
         ? 0.18
         : 0.11,
       'highpass',
@@ -1142,20 +1302,24 @@ export class IluminadoAudioEngine {
   private scheduleHat(when: number, vol: number, open: boolean, style: MusicStyleId): void {
     const dur = open ? 0.13 : 0.038;
     const freq =
-      style === 'swing' || style === 'ethio_jazz' || style === 'cat_step_jazz' || style === 'cubist_chamber'
+      style === 'swing' ||
+      style === 'ethio_jazz' ||
+      style === 'cat_step_jazz' ||
+      style === 'cubist_chamber' ||
+      style === 'tokyo_jazz_kissa'
         ? 4600
         : style === 'bachata' || style === 'cumbia_dub' || style === 'andean_cumbia'
         ? 6200 // güira scrape
-        : style === 'trap' || style === 'uk_garage' || style === 'industrial_synth'
+        : style === 'trap' || style === 'uk_garage' || style === 'industrial_synth' || style === 'nordic_synth'
         ? 7800
         : 6400;
     this.scheduleNoise(
       when,
       this.stemPercGain,
       dur,
-      style === 'swing' || style === 'cat_step_jazz' ? 'bandpass' : 'highpass',
+      style === 'swing' || style === 'cat_step_jazz' || style === 'tokyo_jazz_kissa' ? 'bandpass' : 'highpass',
       freq,
-      style === 'swing' || style === 'cat_step_jazz' ? 2.6 : 1.0,
+      style === 'swing' || style === 'cat_step_jazz' || style === 'tokyo_jazz_kissa' ? 2.6 : 1.0,
       vol
     );
   }
@@ -1323,7 +1487,13 @@ export class IluminadoAudioEngine {
       }
       this.scheduleHat(when, 0.06, false, style);
       this.scheduleHat(when + sixteenthDur, 0.04, false, style);
-    } else if (style === 'ambient' || style === 'dark_ambient' || style === 'cathedral_organ') {
+    } else if (
+      style === 'ambient' ||
+      style === 'dark_ambient' ||
+      style === 'cathedral_organ' ||
+      style === 'solarpunk_ambient' ||
+      style === 'de_stijl_minimal'
+    ) {
       // Minimal atmospheric pulse & soft tactile ticks
       if (col === 0 || col === 8) {
         this.scheduleKick(when, 0.16, style);
@@ -1346,20 +1516,26 @@ export class IluminadoAudioEngine {
       style === 'industrial_synth' ||
       style === 'miami_boogie' ||
       style === 'memphis_electro' ||
-      style === 'constructivist_march'
+      style === 'constructivist_march' ||
+      style === 'nordic_synth' ||
+      style === 'kraut_motorik' ||
+      style === 'analog_funk_70s'
     ) {
       // Four-on-the-floor / driving motorik pulse with crisp offbeat hats & claps
-      if (col % 4 === 0 || (style === 'constructivist_march' && col % 4 === 2)) {
+      if (
+        col % 4 === 0 ||
+        ((style === 'constructivist_march' || style === 'kraut_motorik') && col % 4 === 2)
+      ) {
         this.scheduleKick(when, 0.32, style);
       }
       if (col === 4 || col === 12) {
         this.scheduleSnare(when, 0.24, style);
       }
-      if (col % 4 === 2 || style === 'memphis_electro') {
+      if (col % 4 === 2 || style === 'memphis_electro' || style === 'nordic_synth') {
         this.scheduleHat(when, col % 2 === 1 ? 0.07 : 0.04, col % 4 === 2, style);
       }
-    } else if (style === 'cat_step_jazz') {
-      // Bouncy swung pizzicato ride + light rim taps
+    } else if (style === 'cat_step_jazz' || style === 'tokyo_jazz_kissa' || style === 'space_age_lounge') {
+      // Bouncy swung jazz ride + light rim taps
       if (col === 0 || col === 6 || col === 8) {
         this.scheduleKick(when, 0.22, style);
       }
@@ -1370,10 +1546,10 @@ export class IluminadoAudioEngine {
         this.scheduleHat(when, col % 4 === 2 ? 0.08 : 0.045, col % 4 === 2, style);
       }
     } else {
-      // Country, Jazz Fusion, Bossa, Alt Rock, Synthwave, Chiptune, Trip-Hop, Blues Rock, Afrobeat, Neo Soul, Cumbia, City Pop, Ethio-Jazz, Tango Nuevo, Post-Rock, Shamisen Chill, Cubist Chamber, Andean Cumbia, Botanical Waltz
+      // Country, Jazz Fusion, Bossa, Alt Rock, Synthwave, Chiptune, Trip-Hop, Blues Rock, Afrobeat, Neo Soul, Cumbia, City Pop, Ethio-Jazz, Tango Nuevo, Post-Rock, Shamisen Chill, Cubist Chamber, Andean Cumbia, Botanical Waltz, Chamber Waltz, Studio Orchestral, Koto Taiko
       if (
         col % 4 === 0 ||
-        ((style === 'alt_rock' || style === 'post_rock' || style === 'afrobeat_jazz' || style === 'andean_cumbia') && col === 10)
+        ((style === 'alt_rock' || style === 'post_rock' || style === 'afrobeat_jazz' || style === 'andean_cumbia' || style === 'koto_taiko') && col === 10)
       ) {
         this.scheduleKick(when, 0.28 * music.intensity, style);
       }
@@ -1498,58 +1674,154 @@ export class IluminadoAudioEngine {
 
   // ======================== SFX AS LIVE INSTRUMENTATION ========================
 
-  public playMove(skin?: SkinConfig): void {
-    if (!this.canSchedule() || !this.ctx) return;
-    const now = this.ctx.currentTime;
+  private getSkinSfxProfile(skin?: SkinConfig): {
+    family: 'wood_marimba' | 'analog_synth' | 'jazz_fender' | 'chip_minimal' | 'cathedral_glass' | 'rock_crunch' | 'dub_club';
+    leadWave: OscillatorType;
+    landWave: OscillatorType;
+    brightnessHz: number;
+    drive: number;
+  } {
     const style = skin?.music.styleId ?? 'ambient';
-    if (style === 'chiptune_funk') {
-      // Crisp 8-bit square navigation blip
-      this.scheduleTone(now, this.stemPercGain, 920, 0.025, 'square', 0.045, 0.002, 2600);
-    } else if (
+    if (style === 'chiptune_funk' || style === 'de_stijl_minimal') {
+      return {
+        family: 'chip_minimal',
+        leadWave: 'square',
+        landWave: 'triangle',
+        brightnessHz: 3200,
+        drive: 0.08,
+      };
+    }
+    if (
       style === 'salsa' ||
       style === 'bachata' ||
       style === 'bossa_nova' ||
       style === 'cumbia_dub' ||
       style === 'afrobeat_jazz' ||
-      style === 'flamenco_house' ||
-      style === 'tango_nuevo' ||
       style === 'shamisen_chill' ||
       style === 'andean_cumbia' ||
-      style === 'botanical_waltz'
+      style === 'botanical_waltz' ||
+      style === 'chamber_waltz' ||
+      style === 'koto_taiko'
     ) {
-      // Soft woodblock / shaker tick
-      this.scheduleTone(now, this.stemPercGain, 980, 0.032, 'triangle', 0.075, 0.002, 2400);
-    } else if (
+      return {
+        family: 'wood_marimba',
+        leadWave: 'triangle',
+        landWave: 'sine',
+        brightnessHz: 2600,
+        drive: 0.04,
+      };
+    }
+    if (
       style === 'heavy_metal' ||
       style === 'alt_rock' ||
-      style === 'post_rock' ||
+      style === 'blues_rock' ||
       style === 'industrial_synth' ||
       style === 'constructivist_march'
     ) {
-      // Palm-muted pick scratch / metallic click
-      this.scheduleNoise(now, this.stemPercGain, 0.028, 'bandpass', 2200, 2.0, 0.09);
-    } else if (
+      return {
+        family: 'rock_crunch',
+        leadWave: 'sawtooth',
+        landWave: 'triangle',
+        brightnessHz: 3400,
+        drive: Math.max(0.28, skin?.music.distortion ?? 0.35),
+      };
+    }
+    if (
+      style === 'synthwave' ||
+      style === 'miami_boogie' ||
+      style === 'memphis_electro' ||
+      style === 'nordic_synth' ||
+      style === 'city_pop' ||
+      style === 'analog_funk_70s' ||
+      style === 'kraut_motorik'
+    ) {
+      return {
+        family: 'analog_synth',
+        leadWave: skin?.music.waveform ?? 'sawtooth',
+        landWave: 'sine',
+        brightnessHz: 3600,
+        drive: 0.14,
+      };
+    }
+    if (
+      style === 'swing' ||
+      style === 'jazz_fusion' ||
+      style === 'ethio_jazz' ||
+      style === 'cat_step_jazz' ||
+      style === 'tokyo_jazz_kissa' ||
+      style === 'neo_soul' ||
+      style === 'space_age_lounge' ||
+      style === 'cubist_chamber' ||
+      style === 'tango_nuevo' ||
+      style === 'flamenco_house'
+    ) {
+      return {
+        family: 'jazz_fender',
+        leadWave: 'sine',
+        landWave: 'sine',
+        brightnessHz: 2800,
+        drive: 0.05,
+      };
+    }
+    if (
       style === 'trap' ||
       style === 'reggaeton' ||
-      style === 'liquid_dnb' ||
-      style === 'uk_garage' ||
-      style === 'memphis_electro'
-    ) {
-      // Tight high-transient hi-hat tick
-      this.scheduleNoise(now, this.stemPercGain, 0.024, 'highpass', 7200, 1.4, 0.08);
-    } else if (
       style === 'kizomba' ||
       style === 'dark_zouk' ||
-      style === 'neo_soul' ||
       style === 'dub_techno' ||
-      style === 'miami_boogie' ||
-      style === 'cat_step_jazz'
+      style === 'uk_garage' ||
+      style === 'liquid_dnb' ||
+      style === 'funk_fusion' ||
+      style === 'country'
     ) {
-      // Warm brushed shaker tick
-      this.scheduleNoise(now, this.stemPercGain, 0.028, 'bandpass', 4400, 1.5, 0.07);
+      return {
+        family: 'dub_club',
+        leadWave: skin?.music.waveform === 'sawtooth' ? 'triangle' : (skin?.music.waveform ?? 'triangle'),
+        landWave: 'sine',
+        brightnessHz: 3100,
+        drive: 0.1,
+      };
+    }
+    return {
+      family: 'cathedral_glass',
+      leadWave: 'sine',
+      landWave: 'sine',
+      brightnessHz: 4200,
+      drive: 0,
+    };
+  }
+
+  public playMove(skin?: SkinConfig): void {
+    if (!this.canSchedule() || !this.ctx) return;
+    const now = this.ctx.currentTime;
+    const profile = this.getSkinSfxProfile(skin);
+    const root = skin?.music.rootMidi ?? 60;
+    const rootTickFreq = midiToFreq(root + 24);
+
+    if (profile.family === 'chip_minimal') {
+      this.scheduleTone(now, this.stemPercGain, rootTickFreq * 1.12, 0.024, 'square', 0.042, 0.002, 2600);
+    } else if (profile.family === 'wood_marimba') {
+      // Tuned marimba / wooden clave tick in the song's key
+      this.scheduleTone(now, this.stemPercGain, rootTickFreq, 0.036, 'triangle', 0.072, 0.002, 2400, 0, rootTickFreq * 0.85);
+    } else if (profile.family === 'rock_crunch') {
+      // Palm-muted pick scratch + low pick thump
+      this.scheduleNoise(now, this.stemPercGain, 0.028, 'bandpass', 2300, 2.0, 0.085);
+      this.scheduleTone(now, this.stemPercGain, midiToFreq(root), 0.032, 'triangle', 0.038, 0.002, 1100, 0.2);
+    } else if (profile.family === 'analog_synth') {
+      // Crisp analog hat tick + tiny filter chirp
+      this.scheduleNoise(now, this.stemPercGain, 0.024, 'highpass', 6800, 1.4, 0.072);
+      this.scheduleTone(now, this.stemPercGain, rootTickFreq * 1.5, 0.022, 'sawtooth', 0.026, 0.002, 3200, 0, rootTickFreq);
+    } else if (profile.family === 'jazz_fender') {
+      // Brushed ride tick + soft Rhodes key-click
+      this.scheduleNoise(now, this.stemPercGain, 0.028, 'bandpass', 4300, 1.6, 0.064);
+      this.scheduleTone(now, this.stemPercGain, rootTickFreq, 0.025, 'sine', 0.03, 0.002, 2200);
+    } else if (profile.family === 'dub_club') {
+      // Tight high-transient hi-hat tick
+      this.scheduleNoise(now, this.stemPercGain, 0.024, 'highpass', 7200, 1.4, 0.075);
     } else {
-      // Crisp hi-hat tick
-      this.scheduleNoise(now, this.stemPercGain, 0.03, 'highpass', 5800, 1.2, 0.075);
+      // Crystalline glass tap in key
+      this.scheduleTone(now, this.stemPercGain, rootTickFreq * 1.5, 0.042, 'sine', 0.044, 0.002, 4200);
+      this.scheduleNoise(now, this.stemPercGain, 0.022, 'highpass', 5800, 1.2, 0.038);
     }
   }
 
@@ -1557,57 +1829,98 @@ export class IluminadoAudioEngine {
     if (!this.canSchedule() || !this.ctx) return;
     const now = this.ctx.currentTime;
     const { music } = skin;
+    const profile = this.getSkinSfxProfile(skin);
     const chord = music.chords[this.rotateCursor % music.chords.length];
     const deg = chord[this.rotateCursor % chord.length] ?? 0;
     this.rotateCursor = (this.rotateCursor + 1) % 16;
 
     const freq = midiToFreq(music.rootMidi + 12 + deg);
-    this.scheduleTone(
-      now,
-      this.stemLeadGain,
-      freq,
-      0.095,
-      music.waveform,
-      0.11,
-      0.003,
-      2800,
-      music.distortion * 0.5
-    );
+
+    if (profile.family === 'chip_minimal') {
+      this.scheduleTone(now, this.stemLeadGain, freq, 0.045, 'square', 0.068, 0.002, 3200);
+      this.scheduleTone(now + 0.028, this.stemLeadGain, freq * 1.25, 0.055, 'square', 0.052, 0.002, 3400);
+    } else if (profile.family === 'wood_marimba') {
+      // Wooden koto/marimba pluck + octave harmonic ping
+      this.scheduleTone(now, this.stemLeadGain, freq, 0.11, 'triangle', 0.115, 0.002, 2600);
+      this.scheduleTone(now, this.stemLeadGain, freq * 2, 0.045, 'sine', 0.04, 0.001, 4200);
+    } else if (profile.family === 'jazz_fender') {
+      // Warm Rhodes bell-tine transient + sine body
+      this.scheduleTone(now, this.stemLeadGain, freq, 0.13, 'sine', 0.105, 0.003, 2800);
+      this.scheduleTone(now, this.stemLeadGain, freq * 3, 0.035, 'sine', 0.03, 0.002, 4600);
+    } else if (profile.family === 'cathedral_glass') {
+      // Soft glass-harp chime with fifth shimmer
+      this.scheduleTone(now, this.stemLeadGain, freq, 0.16, 'sine', 0.095, 0.008, 4200);
+      this.scheduleTone(now + 0.014, this.stemLeadGain, freq * 1.5, 0.14, 'triangle', 0.042, 0.008, 4400);
+    } else if (profile.family === 'rock_crunch') {
+      // Crunchy guitar harmonic fifth pinch
+      this.scheduleTone(now, this.stemLeadGain, freq, 0.09, 'sawtooth', 0.082, 0.002, 2900, profile.drive);
+      this.scheduleTone(now, this.stemLeadGain, freq * 1.5, 0.08, 'sawtooth', 0.052, 0.002, 2700, profile.drive * 0.7);
+    } else {
+      // Analog synth / dub stab
+      this.scheduleTone(
+        now,
+        this.stemLeadGain,
+        freq,
+        0.1,
+        profile.leadWave,
+        0.105,
+        0.003,
+        profile.brightnessHz,
+        profile.drive * 0.5
+      );
+    }
   }
 
   public playLand(skin?: SkinConfig): void {
     if (!this.canSchedule() || !this.ctx) return;
     const now = this.ctx.currentTime;
     const root = skin?.music.rootMidi ?? 60;
-    const style = skin?.music.styleId ?? 'ambient';
+    const profile = this.getSkinSfxProfile(skin);
     const subGain = skin?.music.subBassGain ?? 0.5;
-    // Soft ceramic/wooden tap transient + warm low body locked to root key
-    this.scheduleTone(
-      now,
-      this.stemPercGain,
-      midiToFreq(root) * 1.15,
-      0.048,
-      'triangle',
-      0.065,
-      0.002,
-      1400,
-      0,
-      midiToFreq(root - 5)
-    );
-    this.scheduleTone(
-      now,
-      this.stemPercGain,
-      midiToFreq(root - 12) * 1.35,
-      0.11,
-      'sine',
-      0.145,
-      0.003,
-      680,
-      style === 'heavy_metal' ? 0.16 : 0,
-      midiToFreq(root - 24)
-    );
-    if (subGain >= 0.8) {
-      // Sub-octave weight punch for deep groove stages
+
+    if (profile.family === 'wood_marimba') {
+      // Taiko/conga/marimba resonant wood knock locked to song root
+      this.scheduleTone(now, this.stemPercGain, midiToFreq(root + 5), 0.045, 'triangle', 0.068, 0.002, 1600, 0, midiToFreq(root - 2));
+      this.scheduleTone(now, this.stemPercGain, midiToFreq(root - 12) * 1.4, 0.13, 'sine', 0.14, 0.003, 720, 0, midiToFreq(root - 24));
+    } else if (profile.family === 'chip_minimal') {
+      this.scheduleTone(now, this.stemPercGain, midiToFreq(root + 7), 0.036, 'square', 0.048, 0.002, 1800, 0, midiToFreq(root - 12));
+      this.scheduleTone(now, this.stemPercGain, midiToFreq(root - 12), 0.09, 'triangle', 0.12, 0.002, 900);
+    } else if (profile.family === 'cathedral_glass') {
+      // Felt piano hammer + airy resonant low octave
+      this.scheduleTone(now, this.stemPercGain, midiToFreq(root), 0.09, 'sine', 0.075, 0.004, 1500);
+      this.scheduleTone(now, this.stemPercGain, midiToFreq(root - 12), 0.14, 'sine', 0.115, 0.006, 620);
+    } else if (profile.family === 'rock_crunch') {
+      // Tight kick-drum beater thud + damped string chug
+      this.scheduleNoise(now, this.stemPercGain, 0.02, 'bandpass', 2600, 1.8, 0.065);
+      this.scheduleTone(now, this.stemPercGain, midiToFreq(root - 12) * 1.5, 0.11, 'triangle', 0.145, 0.002, 820, 0.22, midiToFreq(root - 24));
+    } else {
+      // Warm ceramic/synth tap transient + tight sub body locked to root key
+      this.scheduleTone(
+        now,
+        this.stemPercGain,
+        midiToFreq(root) * 1.15,
+        0.048,
+        profile.landWave,
+        0.065,
+        0.002,
+        1400,
+        0,
+        midiToFreq(root - 5)
+      );
+      this.scheduleTone(
+        now,
+        this.stemPercGain,
+        midiToFreq(root - 12) * 1.35,
+        0.11,
+        'sine',
+        0.145,
+        0.003,
+        680,
+        profile.drive * 0.4,
+        midiToFreq(root - 24)
+      );
+    }
+    if (subGain >= 0.78) {
       this.scheduleTone(
         now,
         this.stemPercGain,
@@ -1628,18 +1941,36 @@ export class IluminadoAudioEngine {
     if (!this.canSchedule() || !this.ctx) return;
     const now = this.ctx.currentTime;
     const root = skin.music.rootMidi + 12;
-    this.scheduleVocalPad(now, root, 0.22, 0.11);
-    this.scheduleTone(
-      now + 0.02,
-      this.stemLeadGain,
-      midiToFreq(root + 7),
-      0.24,
-      skin.music.waveform,
-      0.1,
-      0.01,
-      3000,
-      skin.music.distortion * 0.35
-    );
+    const profile = this.getSkinSfxProfile(skin);
+    const chord = skin.music.chords[0] ?? [0, 4, 7];
+    const thirdOrFourth = chord[1] ?? 4;
+
+    if (profile.family === 'wood_marimba') {
+      this.scheduleTone(now, this.stemLeadGain, midiToFreq(root), 0.19, 'triangle', 0.1, 0.002, 2600);
+      this.scheduleTone(now + 0.032, this.stemLeadGain, midiToFreq(root + thirdOrFourth), 0.21, 'triangle', 0.09, 0.002, 2800);
+      this.scheduleTone(now + 0.064, this.stemLeadGain, midiToFreq(root + 7), 0.24, 'sine', 0.08, 0.004, 3000);
+    } else if (profile.family === 'jazz_fender') {
+      // Lush Rhodes maj7/min7 double-stop chime
+      this.scheduleTone(now, this.stemLeadGain, midiToFreq(root), 0.24, 'sine', 0.09, 0.004, 2800);
+      this.scheduleTone(now + 0.025, this.stemLeadGain, midiToFreq(root + thirdOrFourth), 0.25, 'sine', 0.08, 0.004, 3000);
+      this.scheduleTone(now + 0.05, this.stemLeadGain, midiToFreq(root + (chord[3] ?? 11)), 0.28, 'triangle', 0.055, 0.006, 3200);
+    } else if (profile.family === 'chip_minimal') {
+      this.scheduleTone(now, this.stemLeadGain, midiToFreq(root), 0.08, 'square', 0.072, 0.002, 3200);
+      this.scheduleTone(now + 0.045, this.stemLeadGain, midiToFreq(root + 7), 0.12, 'square', 0.072, 0.002, 3400);
+    } else {
+      this.scheduleVocalPad(now, root, 0.22, 0.105);
+      this.scheduleTone(
+        now + 0.02,
+        this.stemLeadGain,
+        midiToFreq(root + 7),
+        0.24,
+        profile.leadWave,
+        0.095,
+        0.01,
+        profile.brightnessHz,
+        profile.drive * 0.35
+      );
+    }
   }
 
   public playSweepColumnNote(
@@ -1650,6 +1981,7 @@ export class IluminadoAudioEngine {
     if (!this.canSchedule() || !this.ctx) return;
     const now = this.ctx.currentTime;
     const { music } = skin;
+    const profile = this.getSkinSfxProfile(skin);
     const scale = music.scale.length > 0 ? music.scale : [0, 2, 4, 7, 9];
     const stepIdx = Math.max(0, sweepSquareCount);
     const octaveShift = Math.floor(stepIdx / scale.length) * 12;
@@ -1660,23 +1992,23 @@ export class IluminadoAudioEngine {
       now,
       this.stemLeadGain,
       freq,
-      0.16,
-      music.waveform === 'sawtooth' ? 'triangle' : music.waveform,
-      0.085,
-      0.004,
-      3200,
-      music.distortion * 0.2
+      profile.family === 'chip_minimal' ? 0.1 : 0.17,
+      profile.family === 'rock_crunch' ? 'triangle' : profile.leadWave,
+      profile.family === 'chip_minimal' ? 0.068 : 0.088,
+      profile.family === 'cathedral_glass' ? 0.01 : 0.004,
+      profile.brightnessHz,
+      profile.drive * 0.25
     );
-    if (cellsCleared >= 4) {
+    if (cellsCleared >= 4 || profile.family === 'jazz_fender' || profile.family === 'cathedral_glass') {
       this.scheduleTone(
-        now + 0.015,
+        now + 0.016,
         this.stemLeadGain,
         freq * 1.5,
         0.18,
         'sine',
-        0.055,
+        cellsCleared >= 4 ? 0.06 : 0.036,
         0.006,
-        3600
+        4000
       );
     }
   }
@@ -1685,18 +2017,19 @@ export class IluminadoAudioEngine {
     if (!this.canSchedule() || !this.ctx) return;
     const now = this.ctx.currentTime;
     const { music } = skin;
+    const profile = this.getSkinSfxProfile(skin);
     const chord = music.chords[0] ?? [0, 4, 7];
-    chord.slice(0, 3).forEach((semi, idx) => {
+    chord.slice(0, 4).forEach((semi, idx) => {
       this.scheduleTone(
         now + idx * 0.035,
         this.stemLeadGain,
         midiToFreq(music.rootMidi + 12 + semi),
-        0.26,
-        music.waveform,
-        0.085,
+        profile.family === 'cathedral_glass' ? 0.36 : 0.26,
+        profile.leadWave,
+        profile.family === 'chip_minimal' ? 0.06 : 0.082,
         0.006,
-        3200,
-        music.distortion * 0.25
+        profile.brightnessHz,
+        profile.drive * 0.25
       );
     });
     if (this.musicFilter) {
@@ -1704,43 +2037,11 @@ export class IluminadoAudioEngine {
     }
   }
 
-  public playPeggleBounce(skin: SkinConfig, bounceIdx: number = 0): void {
-    if (!this.canSchedule() || !this.ctx) return;
-    const now = this.ctx.currentTime;
-    const { music } = skin;
-    const scale = music.scale.length > 0 ? music.scale : [0, 2, 4, 7, 9];
-    const semi = scale[Math.abs(bounceIdx) % scale.length];
-    const octaveBonus = Math.min(12, Math.floor(Math.max(0, bounceIdx) / scale.length) * 12);
-    const freq = midiToFreq(music.rootMidi + 12 + octaveBonus + semi);
-    this.scheduleTone(
-      now,
-      this.stemLeadGain,
-      freq,
-      0.13,
-      'sine',
-      0.095,
-      0.002,
-      4800,
-      0,
-      freq * 1.18
-    );
-    this.scheduleTone(
-      now + 0.014,
-      this.stemLeadGain,
-      freq * 2,
-      0.09,
-      'triangle',
-      0.042,
-      0.002,
-      5400
-    );
-    this.triggerHaptic(6);
-  }
-
   public playFlowShift(skin: SkinConfig): void {
     if (!this.canSchedule() || !this.ctx) return;
     const now = this.ctx.currentTime;
     const { music } = skin;
+    const profile = this.getSkinSfxProfile(skin);
     const intervals = [0, 7, 12, 19];
     intervals.forEach((semi, i) => {
       const t = now + i * 0.04;
@@ -1749,10 +2050,10 @@ export class IluminadoAudioEngine {
         this.stemLeadGain,
         midiToFreq(music.rootMidi + 12 + semi),
         0.24,
-        'triangle',
-        0.072,
+        profile.family === 'chip_minimal' ? 'square' : 'triangle',
+        profile.family === 'chip_minimal' ? 0.055 : 0.072,
         0.008,
-        3600
+        profile.brightnessHz
       );
     });
     this.triggerHaptic([10, 14]);
@@ -1762,6 +2063,7 @@ export class IluminadoAudioEngine {
     if (!this.canSchedule() || !this.ctx) return;
     const now = this.ctx.currentTime;
     const { music } = skin;
+    const profile = this.getSkinSfxProfile(skin);
     const root = music.rootMidi + 12;
     const scale = music.scale;
     const stepCount = squares >= 4 ? 5 : 3;
@@ -1769,20 +2071,20 @@ export class IluminadoAudioEngine {
 
     for (let idx = 0; idx < stepCount; idx++) {
       const interval = scale[(idx + bonusOffset) % scale.length];
-      const t = now + idx * 0.042;
+      const t = now + idx * (profile.family === 'chip_minimal' ? 0.034 : 0.044);
       this.scheduleTone(
         t,
         this.stemLeadGain,
         midiToFreq(root + interval),
-        0.32,
-        music.waveform,
-        0.13,
+        profile.family === 'cathedral_glass' ? 0.4 : 0.32,
+        profile.leadWave,
+        profile.family === 'chip_minimal' ? 0.088 : 0.12,
         0.005,
-        3600,
-        music.distortion * 0.4
+        profile.brightnessHz,
+        profile.drive * 0.35
       );
       if (idx === stepCount - 1) {
-        this.scheduleVocalPad(t, root + interval, 0.42, 0.12);
+        this.scheduleVocalPad(t, root + interval, 0.44, 0.12);
       }
     }
     if (squares >= 2 && this.musicFilter) {
@@ -1799,22 +2101,60 @@ export class IluminadoAudioEngine {
     if (!this.canSchedule() || !this.ctx) return;
     const now = this.ctx.currentTime;
     const root = skin.music.rootMidi + 12;
-    [0, 4, 7, 11, 14].forEach((semi, i) => {
+    const profile = this.getSkinSfxProfile(skin);
+    const chord = skin.music.chords[1] ?? skin.music.chords[0] ?? [0, 4, 7, 11];
+    const chainIntervals = [0, chord[1] ?? 4, chord[2] ?? 7, chord[3] ?? 11, 14];
+    chainIntervals.forEach((semi, i) => {
       const t = now + i * 0.036;
-      this.scheduleVocalPad(t, root + semi, 0.35, 0.11);
+      this.scheduleVocalPad(t, root + semi, 0.36, 0.105);
+      this.scheduleTone(
+        t,
+        this.stemLeadGain,
+        midiToFreq(root + 12 + semi),
+        0.22,
+        profile.leadWave,
+        profile.family === 'chip_minimal' ? 0.05 : 0.065,
+        0.008,
+        profile.brightnessHz
+      );
     });
     this.triggerHaptic([12, 18, 24]);
   }
 
   public playSkinTransition(skin: SkinConfig): void {
     if (!this.canSchedule() || !this.ctx) return;
-    // Whisper-soft ambient harmonic swell so world transitions glide transparently in the background
     const now = this.ctx.currentTime;
     const root = skin.music.rootMidi + 12;
-    [0, 7].forEach((semi, i) => {
-      const t = now + i * 0.22;
-      this.scheduleVocalPad(t, root + semi, 1.4, 0.042);
+    const scale = skin.music.scale.length >= 4 ? skin.music.scale : [0, 2, 4, 7, 9];
+    const shimmerNotes = [
+      root,
+      root + (scale[1] ?? 4),
+      root + (scale[3] ?? 7),
+      root + 12,
+    ];
+    shimmerNotes.forEach((midi, i) => {
+      const t = now + i * 0.095;
+      this.scheduleTone(
+        t,
+        this.stemLeadGain,
+        midiToFreq(midi),
+        0.55,
+        'triangle',
+        0.055,
+        0.025,
+        4200
+      );
     });
+    this.scheduleVocalPad(now + 0.06, root, 1.45, 0.048);
+    this.scheduleVocalPad(now + 0.24, root + 7, 1.45, 0.042);
+
+    // Gentle celebratory lowpass bloom as the new world enters
+    if (this.musicFilter) {
+      this.cancelAudioParamSafe(this.musicFilter.frequency, now);
+      this.musicFilter.frequency.setValueAtTime(4200, now);
+      this.musicFilter.frequency.setTargetAtTime(14500, now + 0.03, 0.36);
+      this.transitionBloomUntilCtxTime = now + 1.0;
+    }
   }
 
   public playGameOver(): void {

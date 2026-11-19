@@ -11,8 +11,7 @@ export type PieceShapeMode =
   | 'rect_3x2'
   | 'tetromino'
   | 'blocked_2x2'
-  | 'prism_wild_2x2'
-  | 'peggle_1x1';
+  | 'prism_wild_2x2';
 
 export type TetrominoKind = 'I' | 'O' | 'T' | 'S' | 'Z' | 'J' | 'L';
 
@@ -48,7 +47,6 @@ export type ShiftType =
   | 'brick_3x2'
   | 'brick_tetromino'
   | 'brick_blocked'
-  | 'brick_peggle'
   | 'chameleon_rotate'
   | 'prism_wild_bricks'
   | 'three_color_mode'
@@ -97,7 +95,6 @@ export interface Cell {
   id: number;
   color: CellColor;
   isChain: boolean;
-  isPeggle?: boolean;
   isWild?: boolean;
   isObstacle?: boolean;
   obstacleFixed?: boolean;
@@ -117,7 +114,6 @@ export interface PieceCellData {
   color: CellColor;
   isChain: boolean;
   isBlocked?: boolean;
-  isPeggle?: boolean;
   isWild?: boolean;
 }
 
@@ -129,10 +125,6 @@ export interface Piece {
   cells: PieceCell[][]; // rows x cols bounding grid, null for empty tetromino slots
   shapeMode?: PieceShapeMode;
   tetrominoKind?: TetrominoKind;
-  isPeggle?: boolean;
-  peggleVel?: -1 | 1;
-  peggleBounces?: number;
-  peggleTrail?: Array<{ x: number; y: number }>;
   springBounced?: boolean;
 }
 
@@ -207,7 +199,17 @@ export type SkinVisualTheme =
   | 'stained_glass'
   | 'constructivist'
   | 'botanical_herbarium'
-  | 'memphis_milano';
+  | 'memphis_milano'
+  | 'scandi_showroom'
+  | 'grand_budapest'
+  | 'ghibli_express'
+  | 'de_stijl'
+  | 'ukiyoe_wave'
+  | 'kodak_cinema'
+  | 'kinetic_bauhaus'
+  | 'synth_greenhouse'
+  | 'vinyl_lounge'
+  | 'space_terminal';
 
 export type BlockTextureStyle =
   | 'carved_stone'
@@ -252,7 +254,17 @@ export type BlockTextureStyle =
   | 'constructivist_wedge'
   | 'leaf_vein'
   | 'petal_press'
-  | 'memphis_squiggle';
+  | 'memphis_squiggle'
+  | 'scandi_birch'
+  | 'flatpack_blueprint'
+  | 'hotel_keycard'
+  | 'de_stijl_grid'
+  | 'woodblock_wave'
+  | 'kodak_slide'
+  | 'bauhaus_arc'
+  | 'terrarium_hex'
+  | 'vinyl_groove'
+  | 'space_porthole';
 
 export type BlockFillVariant =
   | 'satin'
@@ -323,7 +335,17 @@ export type MusicStyleId =
   | 'cathedral_organ'
   | 'constructivist_march'
   | 'botanical_waltz'
-  | 'memphis_electro';
+  | 'memphis_electro'
+  | 'nordic_synth'
+  | 'chamber_waltz'
+  | 'studio_orchestral'
+  | 'de_stijl_minimal'
+  | 'koto_taiko'
+  | 'analog_funk_70s'
+  | 'kraut_motorik'
+  | 'solarpunk_ambient'
+  | 'tokyo_jazz_kissa'
+  | 'space_age_lounge';
 
 export interface SkinConfig {
   id: string;

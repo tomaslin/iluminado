@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GameHud } from './components/GameHud';
 import { GameModals } from './components/GameModals';
+import { OfflineIndicator } from './components/OfflineIndicator';
 import { ShiftSettingsModal } from './components/ShiftSettingsModal';
 import { TitleScreen } from './components/TitleScreen';
 import { IluminadoAudioEngine, computeStemLevels } from './game/audio';
@@ -47,6 +48,7 @@ import {
   applyBoardShift,
   getShiftLabel,
   pickNextShift,
+  pickStartShift,
   stepConveyorFloor,
   stepPatrollingBumper,
   tickShiftEffects,
@@ -219,6 +221,16 @@ export default function App() {
     }, 5000);
     return () => window.clearInterval(id);
   }, []);
+
+  // Preload current preview world and neighboring soundtracks while browsing the title screen
+  useEffect(() => {
+    const total = SKINS.length;
+    const urls = [0, 1, -1, 2].map(
+      (offset) =>
+        getSkinByIndex((previewSkinIdx + offset + total) % total).music.audioTrackUrl
+    );
+    audioRef.current.preloadTracks(urls);
+  }, [previewSkinIdx]);
 
   const simRef = useRef<SimState>({
     status: 'title',
@@ -669,10 +681,41 @@ export default function App() {
         board2 = createInitialBoardState(chainFreq, Math.random, startOrientation);
       }
 
+      let openingShiftLabel: string | null = null;
+      if (mode !== 'puzzle') {
+        const startShift = pickStartShift(
+          progressRef.current.enabledShifts,
+          activeDailyRng ?? Math.random,
+          board
+        );
+        if (startShift) {
+          const startShiftRes = applyBoardShift(board, startShift, {
+            animateBricks: false,
+            level: 1,
+            chainFrequency: chainFreq,
+            rng: activeDailyRng ?? Math.random,
+          });
+          if (board2) {
+            applyBoardShift(board2, startShift, {
+              animateBricks: false,
+              level: 1,
+              chainFrequency: chainFreq,
+            });
+          }
+          if (startShiftRes.applied) {
+            openingShiftLabel = startShiftRes.label;
+          }
+        }
+      }
+
       const upcomingIdx =
         startDeck.length > 1
           ? startDeck[1]
           : (startSkinIndex + 1) % SKINS.length;
+      const thirdIdx =
+        startDeck.length > 2
+          ? startDeck[2]
+          : (upcomingIdx + 1) % SKINS.length;
 
       const sim = simRef.current;
       sim.status = 'playing';
@@ -725,8 +768,19 @@ export default function App() {
       p2DasRef.current = { dir: 0, hold: 0, repeat: 0 };
       syncBodyState('playing');
       audioRef.current.syncWorldMusic(startSkin, 'playing');
-      audioRef.current.preloadTrack(startSkin.music.audioTrackUrl);
-      audioRef.current.preloadTrack(getSkinByIndex(upcomingIdx).music.audioTrackUrl);
+      audioRef.current.preloadTracks([
+        startSkin.music.audioTrackUrl,
+        getSkinByIndex(upcomingIdx).music.audioTrackUrl,
+        getSkinByIndex(thirdIdx).music.audioTrackUrl,
+      ]);
+      if (openingShiftLabel) {
+        rendererRef.current.spawnScorePopup(
+          0,
+          'OPENING SHIFT',
+          openingShiftLabel,
+          startSkin.palette.hudAccent
+        );
+      }
       setHud(buildHudSnapshot(sim));
     },
     [
@@ -944,7 +998,7 @@ export default function App() {
         if (res.bouncePositions?.length) {
           audioRef.current.playRotate(skin);
           for (const pt of res.bouncePositions) {
-            rendererRef.current.spawnPeggleBounce(boardIdx, pt.x, pt.y, skin);
+            rendererRef.current.spawnSpringBounce(boardIdx, pt.x, pt.y, skin);
           }
         }
         if (res.landed) {
@@ -1332,20 +1386,25 @@ export default function App() {
             effectiveBpm / Math.max(1, skin.bpm)
           );
 
-          // Preload the next world's MP3 cleanly ahead of stage transition
+          // Preload the next two worlds' MP3s early so transitions stay instantaneous
           if (sim.mode === 'challenge' || sim.mode === 'skin_edit') {
             const { stageSquares, stageGoal } = computeStageProgressMetrics(
               sim.progression,
               skin
             );
-            if (stageSquares / Math.max(1, stageGoal) >= 0.6) {
+            if (stageSquares / Math.max(1, stageGoal) >= 0.25) {
               let upcomingIdx: number | null = null;
+              let followUpIdx: number | null = null;
               if (sim.mode === 'challenge' && sim.challengeVariant !== 'shuffle') {
                 const loopForever =
                   sim.challengeVariant === 'endless' || sim.challengeVariant === 'zen';
                 if (loopForever || sim.skinDeckPos + 1 < sim.skinDeck.length) {
                   upcomingIdx =
                     sim.skinDeck[(sim.skinDeckPos + 1) % sim.skinDeck.length];
+                }
+                if (loopForever || sim.skinDeckPos + 2 < sim.skinDeck.length) {
+                  followUpIdx =
+                    sim.skinDeck[(sim.skinDeckPos + 2) % sim.skinDeck.length];
                 }
               } else if (sim.mode === 'skin_edit') {
                 if (sim.playlistPos + 1 < sim.playlistSkinIds.length) {
@@ -1359,12 +1418,15 @@ export default function App() {
                 }
               }
               if (upcomingIdx !== null) {
-                const preloadKey = `${sim.skinIndex}->${upcomingIdx}`;
+                const preloadKey = `${sim.skinIndex}->${upcomingIdx}->${followUpIdx ?? ''}`;
                 if (sim.preloadedNextKey !== preloadKey) {
                   sim.preloadedNextKey = preloadKey;
-                  audioRef.current.preloadTrack(
-                    getSkinByIndex(upcomingIdx).music.audioTrackUrl
-                  );
+                  audioRef.current.preloadTracks([
+                    getSkinByIndex(upcomingIdx).music.audioTrackUrl,
+                    followUpIdx !== null
+                      ? getSkinByIndex(followUpIdx).music.audioTrackUrl
+                      : undefined,
+                  ]);
                 }
               }
             }
@@ -1851,7 +1913,7 @@ export default function App() {
               if (res.bouncePositions?.length) {
                 audioRef.current.playRotate(skin);
                 for (const pt of res.bouncePositions) {
-                  rendererRef.current.spawnPeggleBounce(0, pt.x, pt.y, skin);
+                  rendererRef.current.spawnSpringBounce(0, pt.x, pt.y, skin);
                 }
               }
               if (res.landed) {
@@ -2162,6 +2224,10 @@ export default function App() {
         skin={hud.status === 'title' ? getSkinByIndex(previewSkinIdx) : activeSkin}
         onChangeEnabledShifts={handleChangeEnabledShifts}
         onClose={() => setIsShiftSettingsOpen(false)}
+      />
+
+      <OfflineIndicator
+        skin={hud.status === 'title' ? getSkinByIndex(previewSkinIdx) : activeSkin}
       />
     </div>
   );

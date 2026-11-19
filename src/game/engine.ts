@@ -21,7 +21,6 @@ export const PORTRAIT_COLS = 10;
 export const PORTRAIT_ROWS = 14;
 export const LOCK_DELAY_SEC = 0.45;
 export const MAX_LOCK_RESETS = 6;
-export const MAX_PEGGLE_BOUNCES = 5;
 
 export function getGravityVector(dir?: GravityDirection): { gx: number; gy: number } {
   switch (dir) {
@@ -263,21 +262,6 @@ export function generateRandomPiece(
     typeof boardCols === 'number'
       ? getSpawnColForWidth(boardCols, pieceCols)
       : Math.max(0, spawnX - Math.floor((pieceCols - 2) / 2));
-
-  if (shapeMode === 'peggle_1x1') {
-    const color = pickPieceColor(colorCount, rng);
-    const isChain = rng() < chainFrequency;
-    return {
-      x: resolveSpawnX(1),
-      y: -1,
-      shapeMode: 'peggle_1x1',
-      isPeggle: true,
-      peggleVel: rng() < 0.5 ? -1 : 1,
-      peggleBounces: 0,
-      peggleTrail: [],
-      cells: [[{ color, isChain, isPeggle: true }]],
-    };
-  }
 
   if (shapeMode === 'domino_2x1') {
     const c0 = pickPieceColor(colorCount, rng);
@@ -628,7 +612,6 @@ function clonePieceCell(cell: PieceCell): PieceCell {
     : {
         color: cell.color,
         isChain: cell.isChain,
-        ...(cell.isPeggle ? { isPeggle: true } : {}),
         ...(cell.isWild ? { isWild: true } : {}),
       };
 }
@@ -722,7 +705,6 @@ export interface GhostCellLanding {
   y: number;
   color: CellColor;
   isBlocked?: boolean;
-  isPeggle?: boolean;
   isWild?: boolean;
 }
 
@@ -801,7 +783,6 @@ export function getPieceLandingColumns(
             y: gy,
             color: pCell.color,
             isBlocked: pCell.isBlocked,
-            isPeggle: pCell.isPeggle || piece.isPeggle,
             isWild: pCell.isWild,
           });
         }
@@ -865,7 +846,6 @@ export function getPieceLandingColumns(
             y: gy,
             color: pCell.color,
             isBlocked: pCell.isBlocked,
-            isPeggle: pCell.isPeggle || piece.isPeggle,
             isWild: pCell.isWild,
           });
         }
@@ -925,7 +905,6 @@ export function getPieceLandingColumns(
             y: row,
             color: pCell.color,
             isBlocked: pCell.isBlocked,
-            isPeggle: pCell.isPeggle || piece.isPeggle,
             isWild: pCell.isWild,
           });
         }
@@ -953,7 +932,6 @@ export function getPieceLandingColumns(
             y: row,
             color: pCell.color,
             isBlocked: pCell.isBlocked,
-            isPeggle: pCell.isPeggle || piece.isPeggle,
             isWild: pCell.isWild,
           });
         }
@@ -1073,16 +1051,6 @@ export function steerPiece(state: BoardState, delta: -1 | 1): boolean {
 
 export function rotateActivePiece(state: BoardState, direction: 'cw' | 'ccw' = 'cw'): boolean {
   if (!state.activePiece || state.isGameOver) return false;
-  if (state.activePiece.isPeggle) {
-    const { gx, gy } = getGravityVector(state.gravityDirection);
-    const wasGrounded = !canPlacePiece(state, state.activePiece, gx, gy);
-    state.activePiece = {
-      ...state.activePiece,
-      peggleVel: state.activePiece.peggleVel === 1 ? -1 : 1,
-    };
-    refreshLockResetOnManipulate(state, wasGrounded);
-    return true;
-  }
 
   const rotated =
     direction === 'cw'
@@ -1508,7 +1476,6 @@ function buildPlacedGridCell(
         id: allocCellId(),
         color: pCell.color,
         isChain: pCell.isChain,
-        ...(pCell.isPeggle ? { isPeggle: true } : {}),
         ...(pCell.isWild ? { isWild: true } : {}),
         chainMarked: false,
         inSquare: false,
@@ -1894,7 +1861,6 @@ export function lockActivePiece(
     ...popped,
     x: nextPos.x,
     y: nextPos.y,
-    ...(popped.isPeggle ? { peggleBounces: 0, peggleTrail: [] } : {}),
   };
   const queuedPiece = generateRandomPiece(chainFrequency, rng, fallbackSpawnX, genOpts);
   const queuedPos = getPieceInitialPos(state, queuedPiece);
@@ -1925,135 +1891,6 @@ export function lockActivePiece(
     chainActivated,
     zenTrimmed,
   };
-}
-
-function stepPeggleOneStep(
-  state: BoardState,
-  piece: Piece,
-  rng: () => number
-): {
-  stepped: boolean;
-  bounced: boolean;
-  bouncePos: { x: number; y: number } | null;
-  nextPiece: Piece;
-} {
-  const dir = state.gravityDirection ?? 'down';
-  const { gx, gy } = getGravityVector(dir);
-  const perpX = gy !== 0 ? 1 : 0;
-  const perpY = gx !== 0 ? 1 : 0;
-  const bounces = piece.peggleBounces ?? 0;
-  const inActiveBoard = !isPieceInStaging(state, piece);
-  const rows = state.grid.length;
-  const cols = state.grid[0]?.length ?? state.cols ?? BOARD_COLS;
-
-  const appendTrail = (p: Piece): Array<{ x: number; y: number }> => [
-    ...(p.peggleTrail ?? []).slice(-6),
-    { x: p.x, y: p.y },
-  ];
-
-  const forwardX = piece.x + gx;
-  const forwardY = piece.y + gy;
-  const hitCellAhead =
-    inActiveBoard &&
-    forwardX >= 0 &&
-    forwardX < cols &&
-    forwardY >= 0 &&
-    forwardY < rows &&
-    state.grid[forwardY][forwardX] !== null;
-  const canMoveForward = canPlacePiece(state, piece, gx, gy);
-
-  // 1. Ricochet laterally off a block/obstacle peak ahead onto a lower open lane
-  if (!canMoveForward && hitCellAhead && bounces < MAX_PEGGLE_BOUNCES) {
-    const pref: -1 | 1 = piece.peggleVel ?? (rng() < 0.5 ? -1 : 1);
-    const sides: Array<-1 | 1> = [pref, pref === 1 ? -1 : 1];
-    for (const side of sides) {
-      const sx = side * perpX;
-      const sy = side * perpY;
-      if (canPlacePiece(state, piece, sx + gx, sy + gy)) {
-        const nextVel: -1 | 1 = rng() < 0.65 ? side : side === 1 ? -1 : 1;
-        return {
-          stepped: true,
-          bounced: true,
-          bouncePos: { x: piece.x, y: piece.y },
-          nextPiece: {
-            ...piece,
-            x: piece.x + sx + gx,
-            y: piece.y + sy + gy,
-            peggleVel: nextVel,
-            peggleBounces: bounces + 1,
-            peggleTrail: appendTrail(piece),
-          },
-        };
-      }
-      if (
-        canPlacePiece(state, piece, sx, sy) &&
-        canPlacePiece(state, { ...piece, x: piece.x + sx, y: piece.y + sy }, gx, gy)
-      ) {
-        return {
-          stepped: true,
-          bounced: true,
-          bouncePos: { x: piece.x, y: piece.y },
-          nextPiece: {
-            ...piece,
-            x: piece.x + sx + gx,
-            y: piece.y + sy + gy,
-            peggleVel: side,
-            peggleBounces: bounces + 1,
-            peggleTrail: appendTrail(piece),
-          },
-        };
-      }
-    }
-  }
-
-  // 2. Normal advance along gravity, with playful random mid-air Peggle ricochet & wall caroms
-  if (canMoveForward) {
-    const nextVel: -1 | 1 = piece.peggleVel ?? (rng() < 0.5 ? -1 : 1);
-    if (inActiveBoard && bounces < MAX_PEGGLE_BOUNCES - 1 && rng() < 0.36) {
-      const trySides: Array<{ s: -1 | 1; wallFlip: boolean }> = [
-        { s: nextVel, wallFlip: false },
-        { s: nextVel === 1 ? -1 : 1, wallFlip: true },
-      ];
-      for (const { s, wallFlip } of trySides) {
-        const dx = gx + s * perpX;
-        const dy = gy + s * perpY;
-        if (canPlacePiece(state, piece, dx, dy)) {
-          const flipped: -1 | 1 = wallFlip
-            ? s
-            : rng() < 0.28
-            ? (s === 1 ? -1 : 1)
-            : s;
-          return {
-            stepped: true,
-            bounced: true,
-            bouncePos: { x: piece.x, y: piece.y },
-            nextPiece: {
-              ...piece,
-              x: piece.x + dx,
-              y: piece.y + dy,
-              peggleVel: flipped,
-              peggleBounces: bounces + 1,
-              peggleTrail: appendTrail(piece),
-            },
-          };
-        }
-      }
-    }
-
-    return {
-      stepped: true,
-      bounced: false,
-      bouncePos: null,
-      nextPiece: {
-        ...piece,
-        x: forwardX,
-        y: forwardY,
-        peggleTrail: inActiveBoard ? appendTrail(piece) : piece.peggleTrail,
-      },
-    };
-  }
-
-  return { stepped: false, bounced: false, bouncePos: null, nextPiece: piece };
 }
 
 function trySpringBouncePiece(
@@ -2145,34 +1982,6 @@ export function softDropStep(
   }
   state.orientationGraceTimer = 0;
 
-  if (state.activePiece.isPeggle) {
-    const step = stepPeggleOneStep(state, state.activePiece, rng);
-    if (step.stepped) {
-      state.activePiece = step.nextPiece;
-      state.gravityAccum = 0;
-      state.lockTimer = 0;
-      if (!isPieceInStaging(state, state.activePiece)) {
-        state.score += 1;
-      }
-      return {
-        moved: true,
-        landed: false,
-        squaresFormed: 0,
-        chainActivated: false,
-        zenTrimmed: false,
-        bouncePositions: step.bouncePos ? [step.bouncePos] : undefined,
-      };
-    }
-    const res = lockActivePiece(state, chainFrequency, rng, options);
-    return {
-      moved: false,
-      landed: res.landed,
-      squaresFormed: res.squaresFormed,
-      chainActivated: res.chainActivated,
-      zenTrimmed: res.zenTrimmed,
-    };
-  }
-
   const { gx, gy } = getGravityVector(state.gravityDirection);
   if (canPlacePiece(state, state.activePiece, gx, gy)) {
     state.activePiece = {
@@ -2230,46 +2039,30 @@ export function hardDropPiece(
   let rowsDropped = 0;
   const bouncePositions: Array<{ x: number; y: number }> = [];
 
-  if (state.activePiece.isPeggle) {
-    const maxSteps = (state.cols + state.rows) * 2 + 12;
-    for (let i = 0; i < maxSteps; i++) {
-      const step = stepPeggleOneStep(state, state.activePiece, rng);
-      if (!step.stepped) break;
-      state.activePiece = step.nextPiece;
-      rowsDropped++;
-      if (step.bouncePos) {
-        bouncePositions.push(step.bouncePos);
-      }
-      if (!isPieceInStaging(state, state.activePiece)) {
-        state.score += 1;
-      }
+  const { gx, gy } = getGravityVector(state.gravityDirection);
+  const maxSteps = state.cols + state.rows + 8;
+  while (rowsDropped < maxSteps && canPlacePiece(state, state.activePiece, gx, gy)) {
+    state.activePiece = {
+      ...state.activePiece,
+      x: state.activePiece.x + gx,
+      y: state.activePiece.y + gy,
+    };
+    rowsDropped++;
+    if (!isPieceInStaging(state, state.activePiece)) {
+      state.score += 1;
     }
-  } else {
-    const { gx, gy } = getGravityVector(state.gravityDirection);
-    const maxSteps = state.cols + state.rows + 8;
-    while (rowsDropped < maxSteps && canPlacePiece(state, state.activePiece, gx, gy)) {
-      state.activePiece = {
-        ...state.activePiece,
-        x: state.activePiece.x + gx,
-        y: state.activePiece.y + gy,
-      };
-      rowsDropped++;
-      if (!isPieceInStaging(state, state.activePiece)) {
-        state.score += 1;
-      }
-    }
-    if (trySpringBouncePiece(state, bouncePositions)) {
-      return {
-        rowsDropped,
-        landed: false,
-        squaresFormed: 0,
-        chainActivated: false,
-        zenTrimmed: false,
-        bouncePositions,
-        finalPieceX: state.activePiece.x,
-        finalPieceY: state.activePiece.y,
-      };
-    }
+  }
+  if (trySpringBouncePiece(state, bouncePositions)) {
+    return {
+      rowsDropped,
+      landed: false,
+      squaresFormed: 0,
+      chainActivated: false,
+      zenTrimmed: false,
+      bouncePositions,
+      finalPieceX: state.activePiece.x,
+      finalPieceY: state.activePiece.y,
+    };
   }
 
   const finalPieceX = state.activePiece.x;
@@ -2327,31 +2120,13 @@ export function stepPassiveGravity(
     state.gravityAccum = Math.max(state.gravityAccum, 1) + leftoverDt * gravitySpeed;
   }
 
-  // If grounded (and for Peggle, cannot ricochet off a shoulder onto an open pocket)
+  // If grounded
   const canContinueMoving = () => {
     if (!state.activePiece) return false;
-    if (canPlacePiece(state, state.activePiece, gx, gy)) return true;
-    return false;
+    return canPlacePiece(state, state.activePiece, gx, gy);
   };
 
-  if (!canContinueMoving() && !(state.activePiece.isPeggle && state.gravityAccum >= 1)) {
-    // Check if Peggle ball sitting atop a shoulder can bounce sideways immediately
-    if (state.activePiece.isPeggle) {
-      const probe = stepPeggleOneStep(state, state.activePiece, rng);
-      if (probe.stepped) {
-        state.activePiece = probe.nextPiece;
-        state.lockTimer = 0;
-        state.gravityAccum = 0;
-        return {
-          moved: true,
-          landed: false,
-          squaresFormed: 0,
-          chainActivated: false,
-          zenTrimmed: false,
-          bouncePositions: probe.bouncePos ? [probe.bouncePos] : undefined,
-        };
-      }
-    }
+  if (!canContinueMoving()) {
     const springBounce: Array<{ x: number; y: number }> = [];
     if (trySpringBouncePiece(state, springBounce)) {
       return {
@@ -2383,35 +2158,13 @@ export function stepPassiveGravity(
   }
 
   state.lockTimer = 0;
-  // Slightly perkier passive cadence for Peggle balls so arcs read briskly
-  const speedMul = state.activePiece.isPeggle ? 1.28 : 1;
-  state.gravityAccum += dt * gravitySpeed * speedMul;
+  state.gravityAccum += dt * gravitySpeed;
   let movedAny = false;
   const bouncePositions: Array<{ x: number; y: number }> = [];
 
   while (state.gravityAccum >= 1) {
     state.gravityAccum -= 1;
-    if (state.activePiece.isPeggle) {
-      const step = stepPeggleOneStep(state, state.activePiece, rng);
-      if (step.stepped) {
-        state.activePiece = step.nextPiece;
-        movedAny = true;
-        if (step.bouncePos) {
-          bouncePositions.push(step.bouncePos);
-        }
-        if (!canPlacePiece(state, state.activePiece, gx, gy)) {
-          // Allow one immediate shoulder bounce check on next frame if still eligible, otherwise lock delay
-          const probeNext = stepPeggleOneStep(state, state.activePiece, rng);
-          if (!probeNext.stepped) {
-            state.gravityAccum = 0;
-            break;
-          }
-        }
-      } else {
-        state.gravityAccum = 0;
-        break;
-      }
-    } else if (canPlacePiece(state, state.activePiece, gx, gy)) {
+    if (canPlacePiece(state, state.activePiece, gx, gy)) {
       state.activePiece = {
         ...state.activePiece,
         x: state.activePiece.x + gx,

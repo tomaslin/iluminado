@@ -3,6 +3,7 @@ import {
   ALL_SHIFT_TYPES,
   SHIFT_CATEGORY_LABELS,
   SHIFT_DEFINITIONS,
+  START_FRIENDLY_SHIFTS,
   ShiftCategory,
 } from '../game/shifts';
 import { ShiftType, SkinConfig } from '../game/types';
@@ -51,10 +52,20 @@ export const ShiftSettingsModal: React.FC<ShiftSettingsModalProps> = ({
   };
 
   const applyPreset = (
-    preset: 'all' | 'classic' | 'silhouette' | 'obstacles' | 'bricks' | 'swaps' | 'none'
+    preset:
+      | 'all'
+      | 'start_ready'
+      | 'classic'
+      | 'silhouette'
+      | 'obstacles'
+      | 'bricks'
+      | 'swaps'
+      | 'none'
   ) => {
     if (preset === 'all') {
       onChangeEnabledShifts([...ALL_SHIFT_TYPES]);
+    } else if (preset === 'start_ready') {
+      onChangeEnabledShifts([...START_FRIENDLY_SHIFTS]);
     } else if (preset === 'classic') {
       onChangeEnabledShifts(['rotate_90']);
     } else if (preset === 'none') {
@@ -99,14 +110,14 @@ export const ShiftSettingsModal: React.FC<ShiftSettingsModalProps> = ({
               className="text-[11px] font-semibold uppercase tracking-wider font-mono-tabular"
               style={{ color: palette.hudAccent }}
             >
-              Level-Up Mutations · {enabledShifts.length} of{' '}
+              Opening + Level-Up Mutations · {enabledShifts.length} of{' '}
               {ALL_SHIFT_TYPES.length} Active
             </div>
             <h2 className="font-display text-2xl sm:text-3xl font-semibold tracking-tight mt-0.5">
               Board Shift Rules
             </h2>
             <p className="text-xs sm:text-sm mt-1" style={{ color: palette.hudMuted }}>
-              Exactly one active transformation fires per level up. Customize which shifts can appear.
+              Runs begin with one Start-Ready shift and evolve on every level up. Brick-dependent shifts unlock as stacks grow.
             </p>
           </div>
           <button
@@ -129,6 +140,7 @@ export const ShiftSettingsModal: React.FC<ShiftSettingsModalProps> = ({
           {(
             [
               ['all', `All (${ALL_SHIFT_TYPES.length})`],
+              ['start_ready', `Start-Ready (${START_FRIENDLY_SHIFTS.length})`],
               ['classic', '90° Rotate Only'],
               ['silhouette', 'Reshapes Only'],
               ['obstacles', 'Obstacles Only'],
@@ -187,11 +199,29 @@ export const ShiftSettingsModal: React.FC<ShiftSettingsModalProps> = ({
                         }}
                       >
                         <div className="min-w-0">
-                          <div className="text-sm font-semibold leading-snug">
-                            {item.name}
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="text-sm font-semibold leading-snug">
+                              {item.name}
+                            </span>
+                            <span
+                              className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded-md font-mono-tabular"
+                              style={{
+                                backgroundColor: item.requiresBricks
+                                  ? 'rgba(32, 28, 44, 0.08)'
+                                  : 'rgba(32, 28, 44, 0.05)',
+                                color: item.requiresBricks
+                                  ? palette.hudMuted
+                                  : palette.hudAccent,
+                                border: item.requiresBricks
+                                  ? '1px solid rgba(32, 28, 44, 0.1)'
+                                  : `1px solid ${palette.hudAccent}`,
+                              }}
+                            >
+                              {item.requiresBricks ? 'Needs Bricks' : 'Start-Ready'}
+                            </span>
                           </div>
                           <div
-                            className="text-[11px] leading-snug mt-0.5"
+                            className="text-[11px] leading-snug mt-1"
                             style={{ color: palette.hudMuted }}
                           >
                             {item.description}

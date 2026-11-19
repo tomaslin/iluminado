@@ -340,7 +340,6 @@ export function computeCpuBestMove(state: BoardState): CpuTargetPlan {
           id: 0,
           color: pCell.color,
           isChain: pCell.isChain,
-          ...(pCell.isPeggle ? { isPeggle: true } : {}),
           ...(pCell.isWild ? { isWild: true } : {}),
           chainMarked: false,
           inSquare: false,

@@ -110,59 +110,6 @@ export const PiecePreview: React.FC<PiecePreviewProps> = ({
 
           const style = getBlockStyle(skin.palette, pCell.color);
 
-          if (pCell.isPeggle || piece.isPeggle) {
-            const radius = effCell * 0.44;
-            const chainFill =
-              getHexLuminance(style.fill) > 0.78 &&
-              getHexLuminance(style.emblemColor) < 0.45
-                ? style.emblemColor
-                : '#faf6ee';
-            return (
-              <g key={`${py}-${px}`}>
-                <circle
-                  cx={cx}
-                  cy={cy}
-                  r={radius}
-                  fill={style.fill}
-                  stroke={style.border}
-                  strokeWidth={1.35}
-                />
-                <circle
-                  cx={cx - radius * 0.28}
-                  cy={cy - radius * 0.28}
-                  r={radius * 0.26}
-                  fill={style.highlight}
-                  opacity={0.75}
-                />
-                <circle
-                  cx={cx - radius * 0.34}
-                  cy={cy - radius * 0.34}
-                  r={radius * 0.12}
-                  fill="#faf6ee"
-                  opacity={0.85}
-                />
-                {pCell.isChain && (
-                  <g>
-                    <rect
-                      x={cx - effCell * 0.22}
-                      y={cy - effCell * 0.07}
-                      width={effCell * 0.44}
-                      height={effCell * 0.14}
-                      fill={chainFill}
-                    />
-                    <rect
-                      x={cx - effCell * 0.07}
-                      y={cy - effCell * 0.22}
-                      width={effCell * 0.14}
-                      height={effCell * 0.44}
-                      fill={chainFill}
-                    />
-                  </g>
-                )}
-              </g>
-            );
-          }
-
           const baseR =
             pCell.color === 0
               ? Math.max(2, Math.round(effCell * 0.22))
