@@ -16,6 +16,7 @@ import {
   StageProgressionState,
   advanceSweepStageProgression,
   advanceTimedStageProgression,
+  applyMetronomeChargeBonus,
   computeEncoreState,
   computeStageProgressMetrics,
   computeTimeAttackPaceDelta,
@@ -31,8 +32,11 @@ import {
   rotateActivePiece,
   softDropStep,
   steerPiece,
+  stepCeilingPressSweep,
   stepPassiveGravity,
+  stepRisingTideSweep,
   stepTimelineColumn,
+  swapHeldPiece,
   transformBoardForOrientation,
 } from './game/engine';
 import {
@@ -47,6 +51,8 @@ import {
   advanceShiftStageTurn,
   applyBoardShift,
   getShiftLabel,
+  getShiftPolarity,
+  getSweepBeatsForShift,
   pickNextShift,
   pickStartShift,
   stepConveyorFloor,
@@ -104,6 +110,7 @@ interface SimState {
   level: number;
   progression: StageProgressionState;
   beatAccum: number;
+  sweepPhase: number;
   lastStepCol: number;
   hadClearsThisSweep: boolean;
   p2HadClearsThisSweep: boolean;
@@ -234,7 +241,7 @@ export default function App() {
     audioRef.current.preloadTracks(urls);
   }, [previewSkinIdx]);
 
-  // Keep AudioEngine volume & mute state synced on mount
+  // Keep AudioEngine volume, mute & renderer accessibility state synced on mount
   useEffect(() => {
     audioRef.current.setMuted(progressRef.current.muted);
     audioRef.current.setHapticsEnabled(progressRef.current.hapticsEnabled);
@@ -244,6 +251,10 @@ export default function App() {
     audioRef.current.setSfxVolume(
       progressRef.current.sfxVolume ?? DEFAULT_SFX_VOLUME
     );
+    rendererRef.current.setAccessibility({
+      reducedMotion: Boolean(progressRef.current.reducedMotion),
+      patternMode: Boolean(progressRef.current.patternMode),
+    });
   }, []);
 
   const simRef = useRef<SimState>({
@@ -271,6 +282,7 @@ export default function App() {
       stageTimeSec: 0,
     },
     beatAccum: 0,
+    sweepPhase: 0,
     lastStepCol: -1,
     hadClearsThisSweep: false,
     p2HadClearsThisSweep: false,
@@ -389,10 +401,21 @@ export default function App() {
       status: sim.status,
       mode: sim.mode,
       orientation: sim.board?.orientation ?? orientationRef.current,
+      gravityDirection: sim.board?.gravityDirection ?? 'down',
       boardCols: sim.board?.cols ?? fallbackDims.cols,
       boardRows: sim.board?.rows ?? fallbackDims.rows,
       activeShift: sim.board?.activeShift ?? null,
       activeShiftLabel: getShiftLabel(sim.board?.activeShift ?? null),
+      upcomingShift: sim.board?.upcomingShift ?? null,
+      upcomingShiftLabel: getShiftLabel(sim.board?.upcomingShift ?? null),
+      upcomingShiftPolarity: getShiftPolarity(sim.board?.upcomingShift ?? null),
+      heldPiece: sim.board?.heldPiece ? { ...sim.board.heldPiece } : null,
+      stashUsedThisTurn: Boolean(sim.board?.stashUsedThisTurn),
+      vetoTokens: sim.board?.vetoTokens ?? 0,
+      beatChargeAccum: sim.board?.beatChargeAccum ?? 0,
+      risingTideRows: sim.board?.risingTideRows ?? 0,
+      ceilingLockRows: sim.board?.ceilingLockRows ?? 0,
+      sweepBeats: getSweepBeatsForShift(sim.board?.activeShift ?? null),
       pieceShapeMode: sim.board?.pieceShapeMode ?? 'standard_2x2',
       colorCount: sim.board?.colorCount ?? 2,
       enabledShiftCount: progressRef.current.enabledShifts.length,
@@ -437,6 +460,8 @@ export default function App() {
       timeAttackPbFraction: pace.pbFraction,
       timeAttackCurrentFraction: pace.currentFraction,
       hasNextStage,
+      reducedMotion: Boolean(progressRef.current.reducedMotion),
+      patternMode: Boolean(progressRef.current.patternMode),
     };
   }, [dailyDateKey]);
 
@@ -457,6 +482,36 @@ export default function App() {
     },
     [buildHudSnapshot]
   );
+
+  const toggleReducedMotion = useCallback(() => {
+    setProgress((prev) => {
+      const nextVal = !prev.reducedMotion;
+      const next: SavedProgress = { ...prev, reducedMotion: nextVal };
+      progressRef.current = next;
+      saveProgress(next);
+      rendererRef.current.setAccessibility({
+        reducedMotion: nextVal,
+        patternMode: Boolean(next.patternMode),
+      });
+      setHud(buildHudSnapshot(simRef.current));
+      return next;
+    });
+  }, [buildHudSnapshot]);
+
+  const togglePatternMode = useCallback(() => {
+    setProgress((prev) => {
+      const nextVal = !prev.patternMode;
+      const next: SavedProgress = { ...prev, patternMode: nextVal };
+      progressRef.current = next;
+      saveProgress(next);
+      rendererRef.current.setAccessibility({
+        reducedMotion: Boolean(next.reducedMotion),
+        patternMode: nextVal,
+      });
+      setHud(buildHudSnapshot(simRef.current));
+      return next;
+    });
+  }, [buildHudSnapshot]);
 
   const syncBodyState = useCallback((status: GameStatus) => {
     document.body.dataset.state = status;
@@ -771,6 +826,7 @@ export default function App() {
         stageTimeSec: 0,
       };
       sim.beatAccum = 0;
+      sim.sweepPhase = 0;
       sim.lastStepCol = -1;
       sim.hadClearsThisSweep = false;
       sim.p2HadClearsThisSweep = false;
@@ -1011,7 +1067,7 @@ export default function App() {
   );
 
   const handlePlayerAction = useCallback(
-    (player: 1 | 2, action: 'left' | 'right' | 'rotate' | 'rotate_ccw' | 'hard_drop') => {
+    (player: 1 | 2, action: 'left' | 'right' | 'rotate' | 'rotate_ccw' | 'hard_drop' | 'hold') => {
       const sim = simRef.current;
       if (sim.status !== 'playing') return;
       audioRef.current.unlock();
@@ -1033,8 +1089,19 @@ export default function App() {
           if (player === 1) rendererRef.current.triggerMoveShift(1);
         }
       } else if (action === 'rotate' || action === 'rotate_ccw') {
-        if (rotateActivePiece(targetBoard, action === 'rotate_ccw' ? 'ccw' : 'cw')) {
+        const rotDir = action === 'rotate_ccw' ? 'ccw' : 'cw';
+        if (rotateActivePiece(targetBoard, rotDir)) {
           audioRef.current.playRotate(skin);
+          rendererRef.current.triggerPieceRotateTween(boardIdx, rotDir);
+        }
+      } else if (action === 'hold') {
+        const pieceRng =
+          player === 1 && sim.mode === 'daily' && sim.dailyRng
+            ? sim.dailyRng
+            : Math.random;
+        if (swapHeldPiece(targetBoard, chainFreq, pieceRng)) {
+          audioRef.current.playRotate(skin);
+          setHud(buildHudSnapshot(sim));
         }
       } else if (action === 'hard_drop') {
         const gravDir = targetBoard.gravityDirection ?? 'down';
@@ -1084,6 +1151,18 @@ export default function App() {
           const effectiveDropBpm = skin.bpm + sim.encoreBonusBpm;
           rendererRef.current.triggerLandRipple(boardIdx, landCol, landRow);
           audioRef.current.playLand(skin, effectiveDropBpm, sim.beatAccum);
+          const met = applyMetronomeChargeBonus(
+            targetBoard,
+            ((sim.beatAccum % 1) + 1) % 1
+          );
+          if (met.onBeat) {
+            rendererRef.current.spawnScorePopup(
+              boardIdx,
+              `+${met.bonusPoints}`,
+              met.tokenGranted ? 'BEAT VETO TOKEN!' : 'ON-BEAT CHARGE',
+              skin.palette.hudAccent
+            );
+          }
           if (res.squaresFormed > 0) {
             audioRef.current.playSquareFormed(
               skin,
@@ -1224,6 +1303,12 @@ export default function App() {
           e.preventDefault();
           if (!e.repeat) handlePlayerAction(1, 'rotate_ccw');
         } else if (
+          (e.code === 'KeyC' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') &&
+          sim.board?.activeShift === 'stash_hold'
+        ) {
+          e.preventDefault();
+          if (!e.repeat) handlePlayerAction(1, 'hold');
+        } else if (
           e.code === 'ArrowDown' ||
           e.code === 'KeyS' ||
           e.code === 'KeyC' ||
@@ -1341,7 +1426,7 @@ export default function App() {
         }
         if (res1.transformed) {
           rendererRef.current.triggerOrientationShift(prevViewportOrientation, nextOrientation);
-          const timelineNorm = (sim.beatAccum % 8) / 8;
+          const timelineNorm = ((sim.sweepPhase % 1) + 1) % 1;
           const liveCols = sim.board.cols || BOARD_COLS;
           sim.lastStepCol = Math.floor(timelineNorm * liveCols) % liveCols;
           const skin = getSkinByIndex(sim.skinIndex);
@@ -1500,6 +1585,7 @@ export default function App() {
 
           const chainFreq = sim.mode === 'puzzle' ? 0 : skin.chainFrequency;
           const prevBeat = sim.beatAccum;
+          const prevSweepPhase = sim.sweepPhase;
           const activeTrackUrl = skin.music.audioTrackUrl ?? null;
           const rawBufBeat = audioRef.current.getBufferBeatPosition();
           const syncState = bufferClockSyncRef.current;
@@ -1528,18 +1614,16 @@ export default function App() {
                 sim.beatAccum = prevBeat + forwardShift;
                 syncState.trackUrl = activeTrackUrl;
                 syncState.lastRawBufBeat = rawBufBeat;
-                const cols = sim.board.cols || BOARD_COLS;
-                const newNorm = (sim.beatAccum % 8) / 8;
-                const isRtl = sim.board.activeShift === 'reverse_sweep';
-                sim.lastStepCol = isRtl
-                  ? Math.max(0, cols - 1 - (Math.floor(newNorm * cols) % cols))
-                  : Math.floor(newNorm * cols) % cols;
               }
             }
           } else {
             syncState.trackUrl = null;
             sim.beatAccum += audioRef.current.consumeTimelineBeatDelta(dt, effectiveBpm);
           }
+
+          const beatDelta = Math.max(0, sim.beatAccum - prevBeat);
+          const sweepBeats = getSweepBeatsForShift(sim.board.activeShift);
+          sim.sweepPhase += beatDelta / sweepBeats;
 
           // Beat-synced movement for patrolling 2x2 bumper & conveyor floor (steps every 2 beats)
           if (Math.floor(sim.beatAccum / 2) > Math.floor(prevBeat / 2)) {
@@ -1555,9 +1639,9 @@ export default function App() {
             }
           }
 
-          const prevSweepIdx = Math.floor(prevBeat / 8);
-          const currSweepIdx = Math.floor(sim.beatAccum / 8);
-          const timelineNorm = (sim.beatAccum % 8) / 8;
+          const prevSweepIdx = Math.floor(prevSweepPhase);
+          const currSweepIdx = Math.floor(sim.sweepPhase);
+          const timelineNorm = ((sim.sweepPhase % 1) + 1) % 1;
           const liveCols = sim.board.cols || BOARD_COLS;
           const isRtlSweep = sim.board.activeShift === 'reverse_sweep';
           const isTwinSweep = sim.board.activeShift === 'twin_sweep';
@@ -1566,15 +1650,32 @@ export default function App() {
             : Math.floor(timelineNorm * liveCols) % liveCols;
           const twinOffset = Math.floor(liveCols / 2);
 
-          // DJ-style Shift riser: filter sweeps down over the final bar before a Shift triggers
+          // DJ-style Shift riser + Telegraph upcoming shift during the final sweep before trigger
           if (sim.mode !== 'puzzle' && !skin.finalStageTimerSec) {
+            const pendingSquares = Math.max(
+              sim.board.squares.length,
+              sim.board.sweepState.squaresThisSweep
+            );
             const squaresIntoLevel =
-              sim.progression.levelSquaresCleared + sim.board.squares.length;
+              sim.progression.levelSquaresCleared + pendingSquares;
             const shiftReady = squaresIntoLevel >= Math.max(1, skin.squaresPerLevel);
+            if (shiftReady && !sim.board.upcomingShift) {
+              const previewRng =
+                sim.mode === 'daily' && sim.dailyRng ? sim.dailyRng : Math.random;
+              sim.board.upcomingShift = pickNextShift(
+                progressRef.current.enabledShifts,
+                sim.board.activeShift,
+                previewRng,
+                sim.board
+              );
+            } else if (!shiftReady && sim.board.upcomingShift) {
+              sim.board.upcomingShift = null;
+            }
             audioRef.current.updateShiftRiser(
               shiftReady && timelineNorm >= 0.5 ? (timelineNorm - 0.5) / 0.5 : 0
             );
           } else {
+            if (sim.board.upcomingShift) sim.board.upcomingShift = null;
             audioRef.current.updateShiftRiser(0);
           }
 
@@ -1651,6 +1752,8 @@ export default function App() {
             sim.encoreBonusBpm = 0;
             sim.encoreIntensity = 0;
             sim.preloadedNextKey = null;
+            sim.board.upcomingShift = null;
+            if (sim.board2) sim.board2.upcomingShift = null;
             bufferClockSyncRef.current = { trackUrl: null, lastRawBufBeat: 0 };
             const nextSkin = getSkinByIndex(nextIdx);
             audioRef.current.playSkinTransition(nextSkin);
@@ -1678,6 +1781,9 @@ export default function App() {
             sim.hadClearsThisSweep = false;
 
             if (ev1) {
+              if (ev1.clearedPositions.length > 0) {
+                rendererRef.current.spawnClearBurst(0, ev1.clearedPositions, skin);
+              }
               if (ev1.squaresCleared > 0 || ev1.cellsRemoved > 0) {
                 audioRef.current.playSweepClear(
                   ev1.squaresCleared,
@@ -1720,6 +1826,9 @@ export default function App() {
               : null;
             if (sim.board2) {
               sim.p2HadClearsThisSweep = false;
+              if (ev2 && ev2.clearedPositions.length > 0) {
+                rendererRef.current.spawnClearBurst(1, ev2.clearedPositions, skin);
+              }
 
               // VS Counter-play: 4+ squares first cancel pending incoming garbage, then queue net pressure for the next sweep
               const p1Out = ev1 && ev1.squaresCleared >= 4 ? ev1.squaresCleared : 0;
@@ -1868,12 +1977,15 @@ export default function App() {
             );
             sim.level = sim.progression.level;
             if (progRes.leveledUp && sim.mode !== 'puzzle') {
-              const chosenShift = pickNextShift(
-                progressRef.current.enabledShifts,
-                sim.board.activeShift,
-                Math.random,
-                sim.board
-              );
+              const chosenShift =
+                sim.board.upcomingShift ??
+                pickNextShift(
+                  progressRef.current.enabledShifts,
+                  sim.board.activeShift,
+                  Math.random,
+                  sim.board
+                );
+              sim.board.upcomingShift = null;
               if (chosenShift) {
                 const shiftRes = applyBoardShift(sim.board, chosenShift, {
                   animateBricks: true,
@@ -1895,6 +2007,10 @@ export default function App() {
                   if (shiftRes.didRotate90) {
                     rendererRef.current.triggerBoardRotate90(shiftRes.rotateDir);
                   }
+                  rendererRef.current.triggerShiftActivationFlash(
+                    getShiftPolarity(chosenShift) ?? 'neutral'
+                  );
+                  rendererRef.current.triggerBoardTremor(0.6);
                   const activeSkinForShift = getSkinByIndex(sim.skinIndex);
                   audioRef.current.playShiftChord(activeSkinForShift);
                   rendererRef.current.spawnScorePopup(
@@ -1904,6 +2020,25 @@ export default function App() {
                     activeSkinForShift.palette.hudAccent
                   );
                 }
+              }
+            } else if (!progRes.shouldTransitionSkin) {
+              const sweepRng =
+                sim.mode === 'daily' && sim.dailyRng ? sim.dailyRng : Math.random;
+              const tideChanged = stepRisingTideSweep(
+                sim.board,
+                ev1?.squaresCleared ?? 0,
+                sweepRng
+              );
+              const pressChanged = stepCeilingPressSweep(
+                sim.board,
+                ev1?.squaresCleared ?? 0
+              );
+              if (sim.board2) {
+                stepRisingTideSweep(sim.board2, ev2?.squaresCleared ?? 0, Math.random);
+                stepCeilingPressSweep(sim.board2, ev2?.squaresCleared ?? 0);
+              }
+              if (tideChanged || pressChanged) {
+                rendererRef.current.triggerBoardTremor(0.55);
               }
             }
             if (progRes.shouldTransitionSkin) {
@@ -2052,6 +2187,18 @@ export default function App() {
                     : (res.finalPieceY ?? preY) + 0.5;
                 rendererRef.current.triggerLandRipple(0, landCol, landRow);
                 audioRef.current.playLand(skin, effectiveBpm, sim.beatAccum);
+                const met = applyMetronomeChargeBonus(
+                  sim.board,
+                  ((sim.beatAccum % 1) + 1) % 1
+                );
+                if (met.onBeat) {
+                  rendererRef.current.spawnScorePopup(
+                    0,
+                    `+${met.bonusPoints}`,
+                    met.tokenGranted ? 'BEAT VETO TOKEN!' : 'ON-BEAT CHARGE',
+                    skin.palette.hudAccent
+                  );
+                }
                 if (res.squaresFormed > 0) {
                   audioRef.current.playSquareFormed(
                     skin,
@@ -2246,8 +2393,8 @@ export default function App() {
 
       // Render Canvas
       if (ctx) {
-        const beatPhase = sim.beatAccum % 1;
-        const timelineNorm = (sim.beatAccum % 8) / 8;
+        const beatPhase = ((sim.beatAccum % 1) + 1) % 1;
+        const timelineNorm = ((sim.sweepPhase % 1) + 1) % 1;
         const spectrum = audioRef.current.getSpectrumSnapshot();
         rendererRef.current.render(ctx, width, height, {
           skin,
@@ -2274,7 +2421,7 @@ export default function App() {
         const timeBucket = sim.timeRemaining !== null ? Math.ceil(sim.timeRemaining) : -1;
         const stageSecBucket = skin.finalStageTimerSec ? Math.floor(sim.progression.stageTimeSec) : 0;
         const taElapsedBucket = sim.mode === 'time_attack' ? Math.floor(sim.timeElapsed) : 0;
-        const sig = `${sim.status}|${sim.skinIndex}|${sim.progression.level}|${sim.progression.levelSquaresCleared}|${sim.progression.skinLevelsCleared}|${stageSecBucket}|${taElapsedBucket}|${b?.score ?? 0}|${b?.squaresClearedTotal ?? 0}|${b?.sweepState.squaresThisSweep ?? 0}|${b?.comboLevel ?? 0}|${b?.maxCombo ?? 0}|${b?.pendingGarbage ?? 0}|${b2?.pendingGarbage ?? 0}|${sim.encoreBonusBpm}|${timeBucket}|${b2?.score ?? 0}|${sim.missionChainCleared}|${b?.cols ?? 0}x${b?.rows ?? 0}|${b?.activeShift ?? ''}`;
+        const sig = `${sim.status}|${sim.skinIndex}|${sim.progression.level}|${sim.progression.levelSquaresCleared}|${sim.progression.skinLevelsCleared}|${stageSecBucket}|${taElapsedBucket}|${b?.score ?? 0}|${b?.squaresClearedTotal ?? 0}|${b?.sweepState.squaresThisSweep ?? 0}|${b?.comboLevel ?? 0}|${b?.maxCombo ?? 0}|${b?.pendingGarbage ?? 0}|${b2?.pendingGarbage ?? 0}|${sim.encoreBonusBpm}|${timeBucket}|${b2?.score ?? 0}|${sim.missionChainCleared}|${b?.cols ?? 0}x${b?.rows ?? 0}|${b?.activeShift ?? ''}|${b?.upcomingShift ?? ''}|${b?.heldPiece ? 1 : 0}|${b?.stashUsedThisTurn ? 1 : 0}|${b?.risingTideRows ?? 0}|${b?.ceilingLockRows ?? 0}|${b?.beatChargeAccum ?? 0}|${b?.vetoTokens ?? 0}`;
         if (sig !== lastHudSignature) {
           lastHudSignature = sig;
           setHud(buildHudSnapshot(sim));
@@ -2325,6 +2472,10 @@ export default function App() {
           dailySpec={dailySpec}
           onStart={() => startNewGame()}
           onOpenShiftSettings={() => setIsShiftSettingsOpen(true)}
+          reducedMotion={Boolean(progress.reducedMotion)}
+          patternMode={Boolean(progress.patternMode)}
+          onToggleReducedMotion={toggleReducedMotion}
+          onTogglePatternMode={togglePatternMode}
         />
       )}
 
@@ -2354,6 +2505,10 @@ export default function App() {
           onNextStage={handleNextStage}
           onOpenShiftSettings={() => setIsShiftSettingsOpen(true)}
           onBackToMenu={returnToTitle}
+          reducedMotion={Boolean(progress.reducedMotion)}
+          patternMode={Boolean(progress.patternMode)}
+          onToggleReducedMotion={toggleReducedMotion}
+          onTogglePatternMode={togglePatternMode}
         />
       )}
 

@@ -3444,3 +3444,58 @@ export function computeTimeAttackPaceDelta(
   };
 }
 
+/**
+ * Computes 0..1 proximity falloff for a tile based on how close the active sweep beam(s)
+ * are ahead of or passing through the tile's column.
+ */
+export function computeBeamProximity(
+  col: number,
+  beamCols: number[],
+  boardCols: number,
+  isRtl: boolean = false,
+  horizonCols: number = 4
+): number {
+  if (boardCols <= 0 || beamCols.length === 0) return 0;
+  let best = 0;
+  for (let i = 0; i < beamCols.length; i++) {
+    const beamCol = ((beamCols[i] % boardCols) + boardCols) % boardCols;
+    const aheadDist = isRtl
+      ? (beamCol - col + boardCols) % boardCols
+      : (col - beamCol + boardCols) % boardCols;
+    if (aheadDist <= horizonCols) {
+      const prox = 1 - aheadDist / (horizonCols + 0.5);
+      if (prox > best) best = prox;
+    }
+  }
+  return Math.max(0, Math.min(1, best));
+}
+
+/**
+ * Counts marked (inSquare / chainMarked / pendingClear) cells within the next `lookaheadCols`
+ * columns ahead of `beamCol` in the sweep direction.
+ */
+export function countMarkedAheadOfBeam(
+  grid: (Cell | null)[][],
+  beamCol: number,
+  isRtl: boolean = false,
+  lookaheadCols: number = 4
+): number {
+  const rows = grid.length;
+  const cols = grid[0]?.length ?? 0;
+  if (rows === 0 || cols === 0) return 0;
+  const normBeam = ((beamCol % cols) + cols) % cols;
+  let count = 0;
+  const maxStep = Math.min(cols - 1, lookaheadCols);
+  for (let step = 0; step <= maxStep; step++) {
+    const c = isRtl
+      ? (normBeam - step + cols) % cols
+      : (normBeam + step) % cols;
+    for (let r = 0; r < rows; r++) {
+      const cell = grid[r][c];
+      if (cell && (cell.inSquare || cell.chainMarked || cell.pendingClear)) {
+        count++;
+      }
+    }
+  }
+  return count;
+}

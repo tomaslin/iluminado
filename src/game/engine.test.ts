@@ -11,10 +11,13 @@ import {
   StageProgressionState,
   advanceSweepStageProgression,
   advanceTimedStageProgression,
+  applyMetronomeChargeBonus,
   calculateSweepScore,
+  computeBeamProximity,
   computeEncoreState,
   computeStageProgressMetrics,
   computeTimeAttackPaceDelta,
+  countMarkedAheadOfBeam,
   createInitialBoardState,
   createPieceFromPattern,
   detectBoardMarks,
@@ -34,8 +37,11 @@ import {
   settleBoard,
   softDropStep,
   steerPiece,
+  stepCeilingPressSweep,
   stepPassiveGravity,
+  stepRisingTideSweep,
   stepTimelineColumn,
+  swapHeldPiece,
   transformBoardForOrientation,
 } from './engine';
 import { computeCpuBestMove, checkPuzzlePatternMatch, PUZZLE_LEVELS } from './modes';
@@ -71,6 +77,7 @@ import {
   DEFAULT_SFX_VOLUME,
   NEW_V5_SHIFTS,
   NEW_V6_SHIFTS,
+  NEW_V7_SHIFTS,
   applyDailyResultToProgress,
   applyTimeAttackSplitsToProgress,
   getEffectiveDailyStreak,
@@ -87,6 +94,8 @@ import {
   TILE_TYPE_SHIFT_SET,
   advanceShiftStageTurn,
   applyBoardShift,
+  getShiftPolarity,
+  getSweepBeatsForShift,
   isShiftStartFriendly,
   pickNextShift,
   pickStartShift,
@@ -208,14 +217,14 @@ test('timeline sweep preserves overlapping squares until rightmost column and co
   assert.equal(event.pointsAwarded, 80 + 10000);
 });
 
-test('scoring formula applies 4x-16x consecutive combo multipliers and resets on < 4 squares', () => {
+test('scoring formula applies 4x-16x consecutive combo multipliers, size bonus, 1-sweep grace, and resets on second < 4 sweep', () => {
   assert.equal(calculateSweepScore(1, 3), 40);
   assert.equal(calculateSweepScore(3, 4), 120);
-  assert.equal(calculateSweepScore(4, 1), 160 * 4);
-  assert.equal(calculateSweepScore(5, 2), 200 * 8);
-  assert.equal(calculateSweepScore(5, 3), 200 * 12);
-  assert.equal(calculateSweepScore(5, 4), 200 * 16);
-  assert.equal(calculateSweepScore(5, 9), 200 * 16); // capped at 16x
+  assert.equal(calculateSweepScore(4, 1), 220 * 4);
+  assert.equal(calculateSweepScore(5, 2), 350 * 8);
+  assert.equal(calculateSweepScore(5, 3), 350 * 12);
+  assert.equal(calculateSweepScore(5, 4), 350 * 16);
+  assert.equal(calculateSweepScore(5, 9), 350 * 16); // capped at 16x
 
   // Full sweep progression test
   const state = createInitialBoardState(0);
@@ -237,12 +246,17 @@ test('scoring formula applies 4x-16x consecutive combo multipliers and resets on
   assert.equal(state.comboLevel, 1);
   // Single color bonus also triggers because only color 1 remains!
   assert.equal(ev1?.singleColorBonus, true);
-  assert.equal(ev1?.pointsAwarded, 160 * 4 + 1000);
+  assert.equal(ev1?.pointsAwarded, 220 * 4 + 1000);
 
-  // Sweep with 0 squares breaks combo
+  // First sweep with 0 squares uses 1-sweep grace; second consecutive empty sweep breaks combo
   const ev2 = finalizeSweep(state, false);
   assert.equal(ev2, null);
+  assert.equal(state.comboLevel, 1);
+  assert.equal(state.comboGraceUsed, true);
+  const ev3 = finalizeSweep(state, false);
+  assert.equal(ev3, null);
   assert.equal(state.comboLevel, 0);
+  assert.equal(state.comboGraceUsed, false);
 });
 
 test('Chain Block marks 4-directional connected same-color blocks and excludes them from 2x2 square scoring', () => {
@@ -551,7 +565,10 @@ test('finalizeSweep preserves total cellsRemoved cleared mid-sweep and retains p
   assert.equal(state.comboLevel, 1);
   assert.equal(state.maxCombo, 1);
 
-  // Subsequent empty sweep breaks comboLevel back to 0, but maxCombo stays 1
+  // First empty sweep uses 1-sweep grace; second empty sweep breaks comboLevel back to 0 while maxCombo stays 1
+  finalizeSweep(state, false);
+  assert.equal(state.comboLevel, 1);
+  assert.equal(state.maxCombo, 1);
   finalizeSweep(state, false);
   assert.equal(state.comboLevel, 0);
   assert.equal(state.maxCombo, 1);
@@ -1431,9 +1448,9 @@ test('Dramatic swaps (inside_out_swap, horizon_shear, zipper_merge) preserve exa
   }
 });
 
-test('All 42 shift types execute cleanly without crashing or causing premature game over', () => {
+test('All 52 shift types execute cleanly without crashing or causing premature game over', () => {
   const rng = createSeededRng('all-shifts-smoke');
-  assert.equal(ALL_SHIFT_TYPES.length, 42);
+  assert.equal(ALL_SHIFT_TYPES.length, 52);
   for (const shiftType of ALL_SHIFT_TYPES) {
     const state = createInitialBoardState(0);
     for (let c = 3; c < state.cols - 3; c++) {
@@ -1739,11 +1756,11 @@ test('Shift scheduler enforces 3-level windows, frequent ~2-turn rotations, and 
     assert.equal(state.isGameOver, false);
   }
 
-  // Rotation happens frequently (every 2-3 turns, mostly 2 turns)
-  assert.ok(rotIndices.length >= 6, `rotate_90 should recur frequently (got ${rotIndices.length})`);
+  // Gentle rotation cadence: recurs periodically without dominating or repeating within 2 turns
+  assert.ok(rotIndices.length >= 2 && rotIndices.length <= 6, `rotate_90 should follow gentle cadence (got ${rotIndices.length})`);
   for (let i = 1; i < rotIndices.length; i++) {
     const gap = rotIndices[i] - rotIndices[i - 1];
-    assert.ok(gap >= 2 && gap <= 3, `rotation gap ${gap} should be 2 or 3 turns`);
+    assert.ok(gap >= 2, `rotation gap ${gap} should never repeat within 2 turns`);
   }
 
   // Most turns remain standard 2x2 (~2/3), with special tile shifts occurring roughly every ~3 levels and never back-to-back
@@ -1841,15 +1858,26 @@ test('storage.ts persists and sanitizes enabledShifts including explicit empty a
       assert.ok(migratedV4.enabledShifts.includes(s), `v4->v6 migration should enable ${s}`);
     }
 
-    // v5 save merges only NEW_V6_SHIFTS without overriding v5 choices
+    // v5 save merges NEW_V6_SHIFTS & NEW_V7_SHIFTS without overriding v5 choices
     store.set(
       'iluminado_progress_v2',
       JSON.stringify({ enabledShifts: ['rotate_90', 'twin_sweep'], shiftCatalogVersion: 5 })
     );
     const migratedV5 = loadProgress();
     assert.equal(migratedV5.enabledShifts.includes('mirror_flip'), false);
-    for (const s of NEW_V6_SHIFTS) {
-      assert.ok(migratedV5.enabledShifts.includes(s), `v5->v6 migration should enable ${s}`);
+    for (const s of [...NEW_V6_SHIFTS, ...NEW_V7_SHIFTS]) {
+      assert.ok(migratedV5.enabledShifts.includes(s), `v5->v7 migration should enable ${s}`);
+    }
+
+    // v6 save merges NEW_V7_SHIFTS without overriding v6 choices
+    store.set(
+      'iluminado_progress_v2',
+      JSON.stringify({ enabledShifts: ['rotate_90', 'split_half_sweep'], shiftCatalogVersion: 6 })
+    );
+    const migratedV6 = loadProgress();
+    assert.equal(migratedV6.enabledShifts.includes('diagonal_slant_sweep'), false);
+    for (const s of NEW_V7_SHIFTS) {
+      assert.ok(migratedV6.enabledShifts.includes(s), `v6->v7 migration should enable ${s}`);
     }
 
     assert.equal(getPreviousDateKey('2026-11-16'), '2026-11-15');
@@ -2276,7 +2304,7 @@ test('partial 1x1 overflow entry forms a 2x2 square at row 0 and continues until
   assert.equal(state1x1.activePiece, null);
 });
 
-test('Shift classification partitions all 42 shifts into Start-Ready vs Needs-Bricks and pickStartShift prioritizes Start-Ready on opening boards', () => {
+test('Shift classification partitions all 52 shifts into Start-Ready vs Needs-Bricks and pickStartShift prioritizes Start-Ready on opening boards', () => {
   assert.equal(
     START_FRIENDLY_SHIFTS.length + POPULATED_BOARD_SHIFTS.length,
     ALL_SHIFT_TYPES.length
@@ -2428,11 +2456,98 @@ test('storage persists and sanitizes musicVolume and sfxVolume with sensible def
   };
 
   try {
-    saveProgress({ ...loadedDefault, musicVolume: 0.35, sfxVolume: 0.62 });
+    saveProgress({
+      ...loadedDefault,
+      musicVolume: 0.35,
+      sfxVolume: 0.62,
+      reducedMotion: true,
+      patternMode: true,
+    });
     const reloaded = loadProgress();
     assert.equal(reloaded.musicVolume, 0.35);
     assert.equal(reloaded.sfxVolume, 0.62);
+    assert.equal(reloaded.reducedMotion, true);
+    assert.equal(reloaded.patternMode, true);
   } finally {
     delete (globalThis as unknown as { localStorage?: Storage }).localStorage;
   }
 });
+
+test('V7 shifts, sweep timing, beam anticipation helpers, and hold/metronome mechanics behave deterministically', () => {
+  const rng = createSeededRng('v7-mechanics');
+
+  // Sweep beat rates & polarity metadata
+  assert.equal(getSweepBeatsForShift('double_time_sweep'), 4);
+  assert.equal(getSweepBeatsForShift('half_time_sweep'), 16);
+  assert.equal(getSweepBeatsForShift(null), 8);
+  assert.equal(getShiftPolarity('crash_gem'), 'boon');
+  assert.equal(getShiftPolarity('frost_tiles'), 'bane');
+  assert.equal(getShiftPolarity('rotate_90'), 'neutral');
+
+  // Beam proximity & lookahead count
+  assert.ok(computeBeamProximity(5, [5], 16, false) > 0.9);
+  assert.ok(computeBeamProximity(7, [5], 16, false) > computeBeamProximity(9, [5], 16, false));
+  assert.equal(computeBeamProximity(13, [5], 16, false), 0);
+
+  const b = createInitialBoardState(0, rng);
+  b.grid[8][6] = { ...makeCell(0), inSquare: true };
+  b.grid[8][7] = { ...makeCell(0), inSquare: true };
+  assert.equal(countMarkedAheadOfBeam(b.grid, 5, false, 4), 2);
+  assert.equal(countMarkedAheadOfBeam(b.grid, 10, false, 4), 0);
+
+  // Rising Tide pushes rows up on small sweeps (< 4 sq) and recedes on big sweeps (>= 4 sq)
+  applyBoardShift(b, 'rising_tide', { animateBricks: false, rng });
+  assert.equal(b.risingTideRows, 1);
+  assert.equal(stepRisingTideSweep(b, 0, rng), true);
+  assert.equal(b.risingTideRows, 2);
+  assert.equal(stepRisingTideSweep(b, 4, rng), true);
+  assert.equal(b.risingTideRows, 1);
+
+  // Ceiling Press descends shutters outside spawn chute and lifts on 4+ sweeps
+  const cp = createInitialBoardState(0, rng);
+  applyBoardShift(cp, 'ceiling_press', { animateBricks: false, rng });
+  assert.equal(cp.ceilingLockRows, 1);
+  assert.equal(cp.grid[0][7], null);
+  assert.equal(cp.grid[0][0]?.isObstacle, true);
+  assert.equal(stepCeilingPressSweep(cp, 1), true);
+  assert.equal(cp.ceilingLockRows, 2);
+  assert.equal(stepCeilingPressSweep(cp, 4), true);
+  assert.equal(cp.ceilingLockRows, 1);
+
+  // Stash Hold swaps once per drop
+  const holdBoard = createInitialBoardState(0, rng);
+  applyBoardShift(holdBoard, 'stash_hold', { animateBricks: false, rng });
+  const initialActive = holdBoard.activePiece;
+  assert.equal(swapHeldPiece(holdBoard, 0, rng), true);
+  assert.equal(holdBoard.stashUsedThisTurn, true);
+  assert.ok(holdBoard.heldPiece !== null);
+  assert.notEqual(holdBoard.activePiece, initialActive);
+  assert.equal(swapHeldPiece(holdBoard, 0, rng), false);
+
+  // Metronome Beat Charge grants +150 on-beat and awards a Veto Token every 3 charges
+  const metBoard = createInitialBoardState(0, rng);
+  applyBoardShift(metBoard, 'metronome_charge', { animateBricks: false, rng });
+  assert.equal(applyMetronomeChargeBonus(metBoard, 0.5).onBeat, false);
+  const c1 = applyMetronomeChargeBonus(metBoard, 0.05);
+  const c2 = applyMetronomeChargeBonus(metBoard, 0.95);
+  const c3 = applyMetronomeChargeBonus(metBoard, 0.02);
+  assert.equal(c1.onBeat, true);
+  assert.equal(c2.onBeat, true);
+  assert.equal(c3.tokenGranted, true);
+  assert.equal(metBoard.vetoTokens, 1);
+  assert.equal(metBoard.score, 450);
+
+  // Frost Tiles crack (HP 2 -> 1) on first clear sweep then shatter on second
+  const frostBoard = createInitialBoardState(0, rng);
+  for (let r = 8; r <= 9; r++) {
+    for (let c = 4; c <= 5; c++) {
+      frostBoard.grid[r][c] = makeCell(0);
+    }
+  }
+  frostBoard.grid[8][4]!.frostHp = 2;
+  frostBoard.squares = detectBoardMarks(frostBoard.grid);
+  for (let c = 0; c < frostBoard.cols; c++) stepTimelineColumn(frostBoard, c);
+  finalizeSweep(frostBoard, true);
+  assert.equal(frostBoard.grid[9][4]?.frostHp, 1, 'frost tile drops to cracked HP 1 and falls');
+});
+

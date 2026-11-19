@@ -57,7 +57,27 @@ export type ShiftType =
   | 'mirror_flip'
   | 'vortex_swirl'
   | 'split_half_sweep'
-  | 'diagonal_slant_sweep';
+  | 'diagonal_slant_sweep'
+  | 'double_time_sweep'
+  | 'half_time_sweep'
+  | 'lantern_sweep'
+  | 'crash_gem'
+  | 'anchored_viruses'
+  | 'rising_tide'
+  | 'ceiling_press'
+  | 'frost_tiles'
+  | 'stash_hold'
+  | 'metronome_charge';
+
+export type ShiftPolarity = 'boon' | 'bane' | 'neutral';
+
+export interface ShiftDraftOption {
+  id: ShiftType;
+  name: string;
+  shortLabel: string;
+  polarity: ShiftPolarity;
+  description: string;
+}
 
 export type ObstacleVisualStyle =
   | 'stone'
@@ -96,6 +116,9 @@ export interface Cell {
   color: CellColor;
   isChain: boolean;
   isWild?: boolean;
+  isCrashGem?: boolean;
+  isVirus?: boolean;
+  frostHp?: number;
   isObstacle?: boolean;
   obstacleFixed?: boolean;
   obstacleStyle?: ObstacleVisualStyle;
@@ -115,6 +138,7 @@ export interface PieceCellData {
   isChain: boolean;
   isBlocked?: boolean;
   isWild?: boolean;
+  isCrashGem?: boolean;
 }
 
 export type PieceCell = PieceCellData | null;
@@ -450,6 +474,15 @@ export interface BoardState {
   squares: SquareCoord[];
   sweepState: SweepState;
   comboLevel: number; // consecutive sweeps with >= 4 squares
+  comboGraceUsed?: boolean;
+  vetoTokens?: number;
+  upcomingShift?: ShiftType | null;
+  shiftDraftChoices?: ShiftDraftOption[] | null;
+  heldPiece?: Piece | null;
+  stashUsedThisTurn?: boolean;
+  ceilingLockRows?: number;
+  risingTideRows?: number;
+  beatChargeAccum?: number;
   score: number;
   squaresClearedTotal: number;
   stageSquaresCleared: number;
@@ -510,6 +543,16 @@ export interface HudSnapshot {
   boardRows: number;
   activeShift: ShiftType | null;
   activeShiftLabel: string | null;
+  upcomingShift?: ShiftType | null;
+  upcomingShiftLabel?: string | null;
+  upcomingShiftPolarity?: ShiftPolarity | null;
+  heldPiece?: Piece | null;
+  stashUsedThisTurn?: boolean;
+  vetoTokens?: number;
+  beatChargeAccum?: number;
+  risingTideRows?: number;
+  ceilingLockRows?: number;
+  sweepBeats?: number;
   pieceShapeMode?: PieceShapeMode;
   colorCount?: 2 | 3;
   enabledShiftCount: number;
@@ -555,6 +598,8 @@ export interface HudSnapshot {
   timeAttackPbFraction: number | null;
   timeAttackCurrentFraction: number | null;
   hasNextStage: boolean;
+  reducedMotion?: boolean;
+  patternMode?: boolean;
 }
 
 export interface SavedProgress {
@@ -570,4 +615,6 @@ export interface SavedProgress {
   lastDailyCompletedDate: string | null;
   timeAttackSplits?: Record<string, number[]>;
   enabledShifts: ShiftType[];
+  reducedMotion?: boolean;
+  patternMode?: boolean;
 }

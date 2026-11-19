@@ -11,7 +11,32 @@ interface GameHudProps {
   onToggleMute: () => void;
   onPause: () => void;
   onRestart: () => void;
-  onTouchAction: (action: 'left' | 'right' | 'rotate' | 'hard_drop') => void;
+  onTouchAction: (action: 'left' | 'right' | 'rotate' | 'hard_drop' | 'hold') => void;
+}
+
+function getPolarityColors(
+  polarity: HudSnapshot['upcomingShiftPolarity'],
+  fallbackAccent: string
+): { fg: string; bg: string; border: string } {
+  if (polarity === 'boon') {
+    return {
+      fg: '#1b6e44',
+      bg: 'rgba(31, 122, 76, 0.14)',
+      border: 'rgba(31, 122, 76, 0.34)',
+    };
+  }
+  if (polarity === 'bane') {
+    return {
+      fg: '#a63343',
+      bg: 'rgba(184, 58, 75, 0.14)',
+      border: 'rgba(184, 58, 75, 0.34)',
+    };
+  }
+  return {
+    fg: fallbackAccent,
+    bg: 'rgba(32, 28, 44, 0.07)',
+    border: 'rgba(32, 28, 44, 0.16)',
+  };
 }
 
 function formatTime(seconds: number): string {
@@ -296,15 +321,41 @@ export const GameHud: React.FC<GameHudProps> = ({
             </div>
           </div>
 
-          {/* Right Wing: Next preview + Rotate / Slam Action Buttons */}
+          {/* Right Wing: Next preview + Hold (if stash_hold) + Rotate / Slam Action Buttons */}
           <div className="w-[118px] flex flex-col gap-1.5 pointer-events-auto">
             {hud.nextPieces[0] && (
               <div className="px-2.5 py-1.5 rounded-xl flex items-center justify-between gap-2" style={cardStyle}>
                 <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: palette.hudMuted }}>
                   Next
                 </span>
-                <PiecePreview piece={hud.nextPieces[0]} skin={skin} cellSize={13} />
+                <PiecePreview piece={hud.nextPieces[0]} skin={skin} cellSize={18} patternMode={hud.patternMode} />
               </div>
+            )}
+            {hud.activeShift === 'stash_hold' && (
+              <button
+                type="button"
+                tabIndex={-1}
+                data-testid="hold-piece-button-compact"
+                disabled={hud.stashUsedThisTurn}
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  onTouchAction('hold');
+                }}
+                className="px-2.5 py-1 rounded-xl flex items-center justify-between gap-1.5 cursor-pointer disabled:opacity-55"
+                style={cardStyle}
+                aria-label="Hold Piece"
+              >
+                <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: palette.hudMuted }}>
+                  Hold
+                </span>
+                {hud.heldPiece ? (
+                  <PiecePreview piece={hud.heldPiece} skin={skin} cellSize={12} patternMode={hud.patternMode} />
+                ) : (
+                  <span className="text-[9px] font-mono-tabular" style={{ color: palette.hudMuted }}>
+                    Empty
+                  </span>
+                )}
+              </button>
             )}
 
             <button
@@ -476,7 +527,58 @@ export const GameHud: React.FC<GameHudProps> = ({
                   {hud.activeShiftLabel}
                 </div>
               )}
+
+              {hud.upcomingShiftLabel && (() => {
+                const pol = getPolarityColors(hud.upcomingShiftPolarity, palette.hudAccent);
+                return (
+                  <div
+                    data-testid="next-shift-chip"
+                    className="mt-1.5 px-2 py-1 rounded-lg text-[10px] font-mono-tabular font-bold leading-tight"
+                    style={{
+                      color: pol.fg,
+                      backgroundColor: pol.bg,
+                      border: `1px solid ${pol.border}`,
+                    }}
+                    title={`Next Shift: ${hud.upcomingShiftLabel}`}
+                  >
+                    <div className="text-[8px] uppercase tracking-wider opacity-80">Next Shift</div>
+                    <div className="truncate">{hud.upcomingShiftLabel}</div>
+                  </div>
+                );
+              })()}
             </div>
+
+            {hud.activeShift === 'stash_hold' && (
+              <button
+                type="button"
+                tabIndex={-1}
+                data-testid="hold-piece-button"
+                disabled={hud.stashUsedThisTurn}
+                onClick={(e) => {
+                  e.currentTarget.blur();
+                  onTouchAction('hold');
+                }}
+                className="px-3 py-2 rounded-xl flex items-center justify-between gap-2 pointer-events-auto cursor-pointer disabled:opacity-55 disabled:cursor-default transition-transform active:scale-95"
+                style={cardStyle}
+                title="Stash / Hold Piece (C or Shift)"
+              >
+                <div className="text-left">
+                  <div className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: palette.hudMuted }}>
+                    Hold
+                  </div>
+                  <div className="text-[9px] font-mono-tabular" style={{ color: palette.hudMuted }}>
+                    C / Shift
+                  </div>
+                </div>
+                {hud.heldPiece ? (
+                  <PiecePreview piece={hud.heldPiece} skin={skin} cellSize={16} patternMode={hud.patternMode} />
+                ) : (
+                  <span className="text-[10px] font-mono-tabular px-1.5 py-1 rounded border border-dashed border-[#201c2c]/25" style={{ color: palette.hudMuted }}>
+                    Empty
+                  </span>
+                )}
+              </button>
+            )}
 
             {/* Next Queue Card */}
             <div className="px-3 py-2.5 rounded-xl flex flex-col items-center" style={cardStyle}>
@@ -490,12 +592,18 @@ export const GameHud: React.FC<GameHudProps> = ({
                 {hud.nextPieces.slice(0, 3).map((piece, idx) => (
                   <div
                     key={idx}
-                    style={{ opacity: idx === 0 ? 1 : idx === 1 ? 0.82 : 0.62 }}
+                    className={idx === 2 ? 'p-1 rounded-lg' : undefined}
+                    style={{
+                      opacity: idx === 0 ? 1 : idx === 1 ? 0.86 : 0.78,
+                      border: idx === 2 ? `1px solid ${palette.boardFrame}38` : undefined,
+                      backgroundColor: idx === 2 ? 'rgba(32, 28, 44, 0.045)' : undefined,
+                    }}
                   >
                     <PiecePreview
                       piece={piece}
                       skin={skin}
-                      cellSize={idx === 0 ? 18 : 14}
+                      cellSize={idx === 0 ? 20 : 16}
+                      patternMode={hud.patternMode}
                     />
                   </div>
                 ))}
@@ -613,10 +721,50 @@ export const GameHud: React.FC<GameHudProps> = ({
                 </div>
               </div>
             )}
+            {hud.upcomingShiftLabel && (() => {
+              const pol = getPolarityColors(hud.upcomingShiftPolarity, palette.hudAccent);
+              return (
+                <div
+                  className="px-2 py-0.5 rounded-md text-[10px] font-mono-tabular font-bold truncate max-w-[112px]"
+                  style={{
+                    color: pol.fg,
+                    backgroundColor: pol.bg,
+                    border: `1px solid ${pol.border}`,
+                  }}
+                >
+                  Next: {hud.upcomingShiftLabel}
+                </div>
+              );
+            })()}
+            {hud.activeShift === 'stash_hold' && (
+              <button
+                type="button"
+                tabIndex={-1}
+                data-testid="hold-piece-button-mobile"
+                disabled={hud.stashUsedThisTurn}
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  onTouchAction('hold');
+                }}
+                className="pointer-events-auto flex items-center gap-1 px-2 py-0.5 rounded-lg border border-[#201c2c]/15 cursor-pointer disabled:opacity-55"
+                aria-label="Hold Piece"
+              >
+                <span className="text-[10px] font-semibold uppercase" style={{ color: palette.hudMuted }}>
+                  Hold
+                </span>
+                {hud.heldPiece ? (
+                  <PiecePreview piece={hud.heldPiece} skin={skin} cellSize={12} patternMode={hud.patternMode} />
+                ) : (
+                  <span className="text-[9px] font-mono-tabular" style={{ color: palette.hudMuted }}>
+                    Empty
+                  </span>
+                )}
+              </button>
+            )}
             {hud.nextPieces[0] && (
               <div className="flex items-center gap-1.5">
                 <span style={{ color: palette.hudMuted }}>Next</span>
-                <PiecePreview piece={hud.nextPieces[0]} skin={skin} cellSize={13} />
+                <PiecePreview piece={hud.nextPieces[0]} skin={skin} cellSize={18} patternMode={hud.patternMode} />
               </div>
             )}
           </div>
@@ -732,6 +880,8 @@ export const GameHud: React.FC<GameHudProps> = ({
         >
           {hud.mode === 'battle_2p'
             ? 'P1: A D Move · W Rotate · S Slam   ·   P2: ← → Move · ↑ Rotate · ↓ Slam   ·   Esc Pause'
+            : hud.activeShift === 'stash_hold'
+            ? '← → Move · ↑ Rotate · ↓ Slam · C Hold · Z CCW · Esc Pause'
             : '← → Move · ↑ Rotate · ↓ Slam · Z CCW · Esc Pause'}
         </div>
       </div>

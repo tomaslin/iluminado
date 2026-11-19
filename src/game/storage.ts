@@ -28,6 +28,8 @@ function createDefaultProgress(): SavedProgress {
     lastDailyCompletedDate: null,
     timeAttackSplits: {},
     enabledShifts: [...ALL_SHIFT_TYPES],
+    reducedMotion: false,
+    patternMode: false,
   };
 }
 
@@ -90,6 +92,19 @@ export const NEW_V6_SHIFTS: ShiftType[] = [
   'diagonal_slant_sweep',
 ];
 
+export const NEW_V7_SHIFTS: ShiftType[] = [
+  'double_time_sweep',
+  'half_time_sweep',
+  'lantern_sweep',
+  'crash_gem',
+  'anchored_viruses',
+  'rising_tide',
+  'ceiling_press',
+  'frost_tiles',
+  'stash_hold',
+  'metronome_charge',
+];
+
 function migrateEnabledShifts(
   parsed: Partial<SavedProgress> & { shiftCatalogVersion?: number }
 ): ShiftType[] {
@@ -104,7 +119,7 @@ function migrateEnabledShifts(
     )
   );
   const ver = parsed.shiftCatalogVersion ?? 1;
-  if (ver >= 6 || filtered.length === 0) {
+  if (ver >= 7 || filtered.length === 0) {
     return filtered;
   }
   const merged = new Set<ShiftType>(filtered);
@@ -128,7 +143,12 @@ function migrateEnabledShifts(
       merged.add(s);
     }
   }
-  for (const s of NEW_V6_SHIFTS) {
+  if (ver < 6) {
+    for (const s of NEW_V6_SHIFTS) {
+      merged.add(s);
+    }
+  }
+  for (const s of NEW_V7_SHIFTS) {
     merged.add(s);
   }
   return Array.from(merged);
@@ -179,6 +199,8 @@ export function loadProgress(): SavedProgress {
           : null,
       timeAttackSplits: sanitizeTimeAttackSplits(parsed.timeAttackSplits),
       enabledShifts: migrateEnabledShifts(parsed),
+      reducedMotion: Boolean(parsed.reducedMotion),
+      patternMode: Boolean(parsed.patternMode),
     };
   } catch {
     return defaults;
@@ -189,7 +211,7 @@ export function saveProgress(progress: SavedProgress): void {
   try {
     localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ ...progress, shiftCatalogVersion: 6 })
+      JSON.stringify({ ...progress, shiftCatalogVersion: 7 })
     );
   } catch {
     // Ignore storage quota errors in private browsing

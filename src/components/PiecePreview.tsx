@@ -6,6 +6,7 @@ interface PiecePreviewProps {
   piece: Piece;
   skin: SkinConfig;
   cellSize?: number;
+  patternMode?: boolean;
 }
 
 function buildSelectiveRoundedRectPath(
@@ -36,6 +37,7 @@ export const PiecePreview: React.FC<PiecePreviewProps> = ({
   piece,
   skin,
   cellSize = 20,
+  patternMode = false,
 }) => {
   const total = cellSize * 2;
   const pieceRows = Math.max(1, piece.cells.length);
@@ -151,6 +153,10 @@ export const PiecePreview: React.FC<PiecePreviewProps> = ({
           const rBL = !jBottom && !jLeft ? baseR : 0;
 
           const strokeWidth = style.strokeVariant === 'painterly' ? 1.4 : 1.05;
+          const symInk =
+            getHexLuminance(style.fill) > 0.72 && getHexLuminance(style.emblemColor) < 0.45
+              ? style.emblemColor
+              : '#faf6ee';
 
           return (
             <g key={`${py}-${px}`}>
@@ -236,6 +242,49 @@ export const PiecePreview: React.FC<PiecePreviewProps> = ({
                   stroke={style.border}
                   strokeWidth={strokeWidth}
                 />
+              )}
+              {pCell.isCrashGem && (
+                <g>
+                  <polygon
+                    points={`${cx},${cy - effCell * 0.34} ${cx + effCell * 0.34},${cy} ${cx},${cy + effCell * 0.34} ${cx - effCell * 0.34},${cy}`}
+                    fill="#faf6ee"
+                    fillOpacity={0.78}
+                    stroke={style.border}
+                    strokeWidth={0.95}
+                  />
+                  <polygon
+                    points={`${cx},${cy - effCell * 0.16} ${cx + effCell * 0.16},${cy} ${cx},${cy + effCell * 0.16} ${cx - effCell * 0.16},${cy}`}
+                    fill={style.highlight}
+                  />
+                </g>
+              )}
+              {patternMode && !pCell.isWild && !pCell.isChain && !pCell.isCrashGem && (
+                pCell.color === 0 ? (
+                  <circle
+                    cx={cx}
+                    cy={cy}
+                    r={effCell * 0.16}
+                    fill="none"
+                    stroke={symInk}
+                    strokeWidth={Math.max(1.2, effCell * 0.1)}
+                    opacity={0.86}
+                  />
+                ) : pCell.color === 1 ? (
+                  <polygon
+                    points={`${cx},${cy - effCell * 0.2} ${cx + effCell * 0.2},${cy} ${cx},${cy + effCell * 0.2} ${cx - effCell * 0.2},${cy}`}
+                    fill={symInk}
+                    opacity={0.82}
+                  />
+                ) : (
+                  <polygon
+                    points={`${cx},${cy - effCell * 0.2} ${cx + effCell * 0.2},${cy + effCell * 0.17} ${cx - effCell * 0.2},${cy + effCell * 0.17}`}
+                    fill="none"
+                    stroke={symInk}
+                    strokeWidth={Math.max(1.2, effCell * 0.1)}
+                    strokeLinejoin="round"
+                    opacity={0.86}
+                  />
+                )
               )}
               {pCell.isChain && (() => {
                 const chainFill =

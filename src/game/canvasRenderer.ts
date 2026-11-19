@@ -3,10 +3,13 @@ import {
   BOARD_ROWS,
   LOCK_DELAY_SEC,
   canPlacePiece,
+  computeBeamProximity,
+  countMarkedAheadOfBeam,
   getDiagonalSlantSpan,
   getGravityVector,
   getPieceLandingColumns,
 } from './engine';
+import { getShiftPolarity, getSweepBeatsForShift } from './shifts';
 import { getBlockStyle, getHexLuminance, isHexColorDark } from './skins';
 import {
   BlockStyle,
@@ -16,6 +19,7 @@ import {
   CellColor,
   GravityDirection,
   Piece,
+  ShiftPolarity,
   SkinConfig,
 } from './types';
 
@@ -25,6 +29,7 @@ interface Particle {
   y: number;
   vx: number;
   vy: number;
+  gravity: number;
   size: number;
   alpha: number;
   life: number;
@@ -32,7 +37,26 @@ interface Particle {
   color: string;
   rotation: number;
   vRot: number;
-  shape: SkinConfig['particleShape'] | 'star' | 'diamond';
+  isGlint: boolean;
+  shape: SkinConfig['particleShape'] | 'star' | 'diamond' | 'spark';
+}
+
+interface GhostClearCell {
+  active: boolean;
+  boardIdx: 0 | 1;
+  gx: number;
+  gy: number;
+  color: CellColor;
+  life: number;
+  maxLife: number;
+  delay: number;
+}
+
+interface PieceVisualSmoothState {
+  pieceRef: Piece | null;
+  smoothX: number;
+  smoothY: number;
+  rotAngle: number;
 }
 
 interface ClearRing {
@@ -58,6 +82,8 @@ interface SweepFlare {
 
 interface FloatingPopup {
   active: boolean;
+  boardIdx: 0 | 1;
+  followBoard: boolean;
   x: number;
   y: number;
   text: string;
@@ -126,7 +152,9 @@ export interface BoardViewportRect {
   cellSize: number;
 }
 
-const MAX_PARTICLES = 180;
+const MAX_PARTICLES = 260;
+const MAX_GHOST_CLEARS = 96;
+const MAX_BLOCK_SPRITES = 720;
 const MAX_RINGS = 64;
 const MAX_FLARES = 36;
 const MAX_POPUPS = 16;
@@ -143,6 +171,7 @@ export class IluminadoCanvasRenderer {
     y: 0,
     vx: 0,
     vy: 0,
+    gravity: 340,
     size: 6,
     alpha: 1,
     life: 0,
@@ -150,9 +179,22 @@ export class IluminadoCanvasRenderer {
     color: '#faf6ee',
     rotation: 0,
     vRot: 0,
+    isGlint: false,
     shape: 'square',
   }));
   private particleCursor = 0;
+
+  private ghostClears: GhostClearCell[] = Array.from({ length: MAX_GHOST_CLEARS }, () => ({
+    active: false,
+    boardIdx: 0,
+    gx: 0,
+    gy: 0,
+    color: 0,
+    life: 0,
+    maxLife: 0.3,
+    delay: 0,
+  }));
+  private ghostClearCursor = 0;
 
   private clearRings: ClearRing[] = Array.from({ length: MAX_RINGS }, () => ({
     active: false,
@@ -179,6 +221,8 @@ export class IluminadoCanvasRenderer {
 
   private popups: FloatingPopup[] = Array.from({ length: MAX_POPUPS }, () => ({
     active: false,
+    boardIdx: 0,
+    followBoard: true,
     x: 0,
     y: 0,
     text: '',
@@ -249,6 +293,24 @@ export class IluminadoCanvasRenderer {
   private rotateAnimDir: 'cw' | 'ccw' = 'cw';
   private rotateFromCellSize: number | null = null;
 
+  private reducedMotion = false;
+  private patternMode = false;
+  private boardShake = 0;
+  private boardZoomKick = 0;
+  private boardTremor = 0;
+  private shiftFlashT = 0;
+  private shiftFlashPolarity: ShiftPolarity = 'neutral';
+  private lastFrameDt = 1 / 60;
+  private lastRenderTimeSec = 0;
+  private blockSpriteCache = new Map<string, HTMLCanvasElement>();
+  private blockSpriteSkinKey = '';
+  private lanternMaskCanvas: HTMLCanvasElement | null = null;
+
+  private pieceSmooth: [PieceVisualSmoothState, PieceVisualSmoothState] = [
+    { pieceRef: null, smoothX: 0, smoothY: 0, rotAngle: 0 },
+    { pieceRef: null, smoothX: 0, smoothY: 0, rotAngle: 0 },
+  ];
+
   private tmpJoins: NeighborJoins = { top: false, right: false, bottom: false, left: false };
   private tmpRipple = { liftPx: 0, glow: 0 };
   private tmpBlockFx = {
@@ -264,6 +326,10 @@ export class IluminadoCanvasRenderer {
     timeSec: 0,
     shimmerWave: 0,
     isWild: false,
+    isCrashGem: false,
+    frostHp: 0,
+    isVirus: false,
+    patternMode: false,
   };
 
   public setPointerOffset(nx: number, ny: number): void {
@@ -323,6 +389,44 @@ export class IluminadoCanvasRenderer {
     this.sweepBloom = Math.min(1.2, Math.max(this.sweepBloom, 0.45));
   }
 
+  public setAccessibility(opts: { reducedMotion: boolean; patternMode: boolean }): void {
+    this.reducedMotion = Boolean(opts.reducedMotion);
+    this.patternMode = Boolean(opts.patternMode);
+    if (this.reducedMotion) {
+      this.boardShake = 0;
+      this.boardZoomKick = 0;
+      this.boardTremor = 0;
+      this.parallaxX = 0;
+      this.parallaxY = 0;
+      this.targetParallaxX = 0;
+      this.targetParallaxY = 0;
+      for (let i = 0; i < MAX_PARTICLES; i++) {
+        this.particles[i].active = false;
+      }
+    }
+  }
+
+  public triggerPieceRotateTween(boardIdx: 0 | 1, dir: 'cw' | 'ccw'): void {
+    if (this.reducedMotion) return;
+    const delta = dir === 'cw' ? -Math.PI * 0.42 : Math.PI * 0.42;
+    const state = this.pieceSmooth[boardIdx];
+    state.rotAngle = Math.max(-Math.PI * 0.55, Math.min(Math.PI * 0.55, state.rotAngle + delta));
+  }
+
+  public triggerBoardTremor(strength: number = 0.65): void {
+    if (this.reducedMotion) return;
+    this.boardTremor = Math.max(this.boardTremor, Math.min(1.5, strength));
+  }
+
+  public triggerShiftActivationFlash(polarity: ShiftPolarity = 'neutral'): void {
+    this.shiftFlashT = 1;
+    this.shiftFlashPolarity = polarity;
+    if (!this.reducedMotion) {
+      this.boardShake = Math.min(11, Math.max(this.boardShake, 2.4));
+      this.boardZoomKick = Math.min(0.036, Math.max(this.boardZoomKick, 0.01));
+    }
+  }
+
   public triggerBoardRotate90(direction: 'cw' | 'ccw' = 'cw'): void {
     this.rotateAnimT = 1;
     this.rotateAnimDir = direction;
@@ -333,6 +437,10 @@ export class IluminadoCanvasRenderer {
   public triggerSweepBloom(squaresCleared: number): void {
     if (squaresCleared <= 0) return;
     this.sweepBloom = Math.min(1.4, this.sweepBloom + Math.min(1, 0.3 + squaresCleared * 0.12));
+    if (!this.reducedMotion) {
+      this.boardShake = Math.min(11, this.boardShake + 1.8 + squaresCleared * 0.95);
+      this.boardZoomKick = Math.min(0.036, this.boardZoomKick + 0.006 + squaresCleared * 0.0028);
+    }
   }
 
   public spawnClearBurst(
@@ -340,47 +448,74 @@ export class IluminadoCanvasRenderer {
     positions: Array<{ x: number; y: number; color: CellColor }>,
     skin: SkinConfig
   ): void {
+    if (positions.length === 0) return;
     const rect =
       boardIdx === 1 && this.lastSecondaryRect
         ? this.lastSecondaryRect
         : this.lastPrimaryRect;
+
+    const perCellParticles =
+      positions.length >= 16 ? 5 : positions.length >= 8 ? 4 : 3;
+
     for (const pos of positions) {
+      // Pooled GhostClearCell for pop -> white flash -> shrink animation over ~0.30s
+      const gc = this.ghostClears[this.ghostClearCursor];
+      this.ghostClearCursor = (this.ghostClearCursor + 1) % MAX_GHOST_CLEARS;
+      gc.active = true;
+      gc.boardIdx = boardIdx;
+      gc.gx = pos.x;
+      gc.gy = pos.y;
+      gc.color = pos.color;
+      gc.life = 0;
+      gc.maxLife = 0.3;
+      gc.delay = Math.min(0.055, (pos.x % 4) * 0.011);
+
       const cx = rect.x + (pos.x + 0.5) * rect.cellSize;
       const cy = rect.y + (pos.y + 0.5) * rect.cellSize;
       const style = getBlockStyle(skin.palette, pos.color);
 
-      // Joyful clear burst: 2 shaped motes + 1 rising 4-point star/diamond glint per tile
-      for (let i = 0; i < 3; i++) {
-        const p = this.particles[this.particleCursor];
-        this.particleCursor = (this.particleCursor + 1) % MAX_PARTICLES;
-        const spread = i === 0 ? -0.58 : i === 1 ? 0.58 : 0;
-        const angle = -Math.PI * 0.5 + spread + (Math.random() - 0.5) * 0.45;
-        const speed = i === 2 ? 28 + Math.random() * 34 : 16 + Math.random() * 28;
-        p.active = true;
-        p.x = cx + (i - 1) * rect.cellSize * 0.14;
-        p.y = cy;
-        p.vx = Math.cos(angle) * speed;
-        p.vy = Math.sin(angle) * speed - (i === 2 ? 18 : 12);
-        p.size = rect.cellSize * (i === 2 ? 0.22 + Math.random() * 0.1 : 0.13 + Math.random() * 0.08);
-        p.alpha = i === 2 ? 0.85 : 0.62;
-        p.life = 0;
-        p.maxLife = (i === 2 ? 0.65 : 0.55) + Math.random() * 0.3;
-        p.color =
-          i === 2
+      if (!this.reducedMotion) {
+        // High-energy radial + arc burst particles (3-5x velocity, scaled by sweep size, downward gravity)
+        for (let i = 0; i < perCellParticles; i++) {
+          const p = this.particles[this.particleCursor];
+          this.particleCursor = (this.particleCursor + 1) % MAX_PARTICLES;
+          const spreadRatio =
+            perCellParticles <= 1 ? 0 : (i / (perCellParticles - 1) - 0.5) * 1.9;
+          const angle = -Math.PI * 0.5 + spreadRatio + (Math.random() - 0.5) * 0.45;
+          const isGlint = i === perCellParticles - 1 || (perCellParticles >= 4 && i === 0);
+          const speed = isGlint
+            ? 125 + Math.random() * 115
+            : 90 + Math.random() * 115;
+          p.active = true;
+          p.x = cx + (Math.random() - 0.5) * rect.cellSize * 0.28;
+          p.y = cy + (Math.random() - 0.5) * rect.cellSize * 0.2;
+          p.vx = Math.cos(angle) * speed;
+          p.vy = Math.sin(angle) * speed - (isGlint ? 55 : 35);
+          p.gravity = isGlint ? 240 : 380;
+          p.size =
+            rect.cellSize *
+            (isGlint ? 0.24 + Math.random() * 0.12 : 0.14 + Math.random() * 0.09);
+          p.alpha = isGlint ? 0.94 : 0.78;
+          p.life = 0;
+          p.maxLife = (isGlint ? 0.62 : 0.52) + Math.random() * 0.26;
+          p.color = isGlint
             ? skin.palette.squareHighlight
-            : i === 0
+            : i % 2 === 0
             ? style.highlight
             : style.fill;
-        p.rotation = Math.random() * Math.PI;
-        p.vRot = (Math.random() - 0.5) * (i === 2 ? 4.5 : 2.2);
-        p.shape =
-          i === 2
+          p.rotation = Math.random() * Math.PI;
+          p.vRot = (Math.random() - 0.5) * (isGlint ? 7.5 : 4.2);
+          p.isGlint = isGlint;
+          p.shape = isGlint
             ? pos.color === 0
               ? 'star'
+              : pos.color === 2
+              ? 'spark'
               : 'diamond'
             : pos.color === 0
             ? 'bubble'
             : skin.particleShape;
+        }
       }
 
       // Soft expanding water ripple halo on clear
@@ -389,9 +524,9 @@ export class IluminadoCanvasRenderer {
       ring.active = true;
       ring.x = cx;
       ring.y = cy;
-      ring.maxRadius = rect.cellSize * 1.15;
+      ring.maxRadius = rect.cellSize * 1.25;
       ring.life = 0;
-      ring.maxLife = 0.5;
+      ring.maxLife = 0.45;
       ring.color = style.highlight;
 
       // Subtle vertical translucent wake veil
@@ -403,7 +538,7 @@ export class IluminadoCanvasRenderer {
       flare.width = rect.cellSize * 0.78;
       flare.height = rect.height * 0.82;
       flare.life = 0;
-      flare.maxLife = 0.55;
+      flare.maxLife = 0.52;
       flare.color = style.highlight;
     }
   }
@@ -431,6 +566,7 @@ export class IluminadoCanvasRenderer {
       p.y = cy;
       p.vx = Math.cos(spread) * speed;
       p.vy = Math.sin(spread) * speed;
+      p.gravity = 260;
       p.size = rect.cellSize * (0.14 + Math.random() * 0.08);
       p.alpha = 0.88;
       p.life = 0;
@@ -438,6 +574,7 @@ export class IluminadoCanvasRenderer {
       p.color = i % 2 === 0 ? skin.palette.squareHighlight : skin.palette.hudAccent;
       p.rotation = Math.random() * Math.PI;
       p.vRot = (Math.random() - 0.5) * 6;
+      p.isGlint = i % 2 === 0;
       p.shape = i % 2 === 0 ? 'spark' : 'square';
     }
 
@@ -465,6 +602,8 @@ export class IluminadoCanvasRenderer {
     const pop = this.popups[this.popupCursor];
     this.popupCursor = (this.popupCursor + 1) % MAX_POPUPS;
     pop.active = true;
+    pop.boardIdx = boardIdx;
+    pop.followBoard = true;
     pop.x = rect.x + rect.width * 0.5;
     pop.y = rect.y + rect.height * 0.34;
     pop.text = text;
@@ -475,9 +614,29 @@ export class IluminadoCanvasRenderer {
   }
 
   public updateEffects(dt: number, gridList: (Cell | null)[][][]): void {
-    const damp = 1 - Math.exp(-dt * 3.8);
-    this.parallaxX += (this.targetParallaxX - this.parallaxX) * damp;
-    this.parallaxY += (this.targetParallaxY - this.parallaxY) * damp;
+    if (this.reducedMotion) {
+      this.parallaxX = 0;
+      this.parallaxY = 0;
+      this.boardShake = 0;
+      this.boardZoomKick = 0;
+      this.boardTremor = 0;
+    } else {
+      const damp = 1 - Math.exp(-dt * 3.8);
+      this.parallaxX += (this.targetParallaxX - this.parallaxX) * damp;
+      this.parallaxY += (this.targetParallaxY - this.parallaxY) * damp;
+      if (this.boardShake > 0) {
+        this.boardShake = Math.max(0, this.boardShake - dt * 28);
+      }
+      if (this.boardZoomKick > 0) {
+        this.boardZoomKick = Math.max(0, this.boardZoomKick - dt * 0.14);
+      }
+      if (this.boardTremor > 0) {
+        this.boardTremor = Math.max(0, this.boardTremor - dt * 2.4);
+      }
+    }
+    if (this.shiftFlashT > 0) {
+      this.shiftFlashT = Math.max(0, this.shiftFlashT - dt * 2.1);
+    }
     this.moveRippleShift *= 1 - Math.min(1, dt * 3.2);
     if (Math.abs(this.moveRippleShift) < 0.05) this.moveRippleShift = 0;
 
@@ -492,6 +651,16 @@ export class IluminadoCanvasRenderer {
       this.rotateAnimT = Math.max(0, this.rotateAnimT - dt / 0.78);
       if (this.rotateAnimT === 0) {
         this.rotateFromCellSize = null;
+      }
+    }
+
+    // Active piece rotation tween (~70ms settle)
+    const rotDamp = Math.exp(-dt / 0.024);
+    for (let i = 0; i < 2; i++) {
+      const ps = this.pieceSmooth[i];
+      if (Math.abs(ps.rotAngle) > 0.002) {
+        ps.rotAngle *= rotDamp;
+        if (Math.abs(ps.rotAngle) <= 0.002) ps.rotAngle = 0;
       }
     }
 
@@ -542,6 +711,19 @@ export class IluminadoCanvasRenderer {
       }
     }
 
+    for (let i = 0; i < MAX_GHOST_CLEARS; i++) {
+      const gc = this.ghostClears[i];
+      if (!gc.active) continue;
+      if (gc.delay > 0) {
+        gc.delay = Math.max(0, gc.delay - dt);
+        continue;
+      }
+      gc.life += dt;
+      if (gc.life >= gc.maxLife) {
+        gc.active = false;
+      }
+    }
+
     for (let i = 0; i < MAX_PARTICLES; i++) {
       const p = this.particles[i];
       if (!p.active) continue;
@@ -552,11 +734,11 @@ export class IluminadoCanvasRenderer {
       }
       p.x += p.vx * dt;
       p.y += p.vy * dt;
-      p.vx *= 1 - Math.min(1, dt * 1.8);
-      p.vy += -18 * dt;
+      p.vx *= 1 - Math.min(1, dt * 1.35);
+      p.vy += p.gravity * dt;
       p.rotation += p.vRot * dt;
       const norm = p.life / p.maxLife;
-      p.alpha = 0.58 * (1 - norm) * (1 - norm);
+      p.alpha = (p.isGlint ? 0.92 : 0.75) * (1 - norm) * (1 - norm);
     }
 
     for (let i = 0; i < MAX_RINGS; i++) {
@@ -807,6 +989,11 @@ export class IluminadoCanvasRenderer {
       encoreIntensity = 0,
     } = params;
 
+    if (this.lastRenderTimeSec > 0 && timeSec > this.lastRenderTimeSec) {
+      this.lastFrameDt = Math.min(0.05, timeSec - this.lastRenderTimeSec);
+    }
+    this.lastRenderTimeSec = timeSec;
+
     const primaryCols = primaryBoard
       ? primaryBoard.grid[0]?.length ?? primaryBoard.cols ?? BOARD_COLS
       : BOARD_COLS;
@@ -814,8 +1001,11 @@ export class IluminadoCanvasRenderer {
       ? primaryBoard.grid.length ?? primaryBoard.rows ?? BOARD_ROWS
       : BOARD_ROWS;
 
-    // Update target camera parallax from player piece movement, pointer gaze, or title drift
-    if (!isTitleScreen && primaryBoard?.activePiece) {
+    // Update target camera parallax from player piece movement, pointer gaze, or title drift (gated by reducedMotion)
+    if (this.reducedMotion) {
+      this.targetParallaxX = 0;
+      this.targetParallaxY = 0;
+    } else if (!isTitleScreen && primaryBoard?.activePiece) {
       const piece = primaryBoard.activePiece;
       const moveNormX = ((piece.x + 1) / primaryCols - 0.5) * 2;
       const moveNormY = Math.max(-0.4, Math.min(1, piece.y / primaryRows - 0.35));
@@ -952,6 +1142,14 @@ export class IluminadoCanvasRenderer {
           ctx.scale(shiftScale, shiftScale);
           ctx.translate(-width / 2, -height / 2);
         }
+        if (!this.reducedMotion && (this.boardShake > 0.05 || this.boardZoomKick > 0.0005)) {
+          const sx = Math.sin(timeSec * 58) * this.boardShake * 0.65;
+          const sy = Math.cos(timeSec * 47) * this.boardShake * 0.5;
+          const zoom = 1 + this.boardZoomKick * 0.7;
+          ctx.translate(width * 0.5 + sx, height * 0.5 + sy);
+          ctx.scale(zoom, zoom);
+          ctx.translate(-width * 0.5, -height * 0.5);
+        }
 
         ctx.save();
         applyRotateTransform(this.lastPrimaryRect);
@@ -988,7 +1186,7 @@ export class IluminadoCanvasRenderer {
       } else {
         const isDesktopWide = width >= 1024 && height > 560;
         const headerReserve = isDesktopWide ? 44 : isPortrait ? 74 : 48;
-        const bottomMargin = isDesktopWide ? 58 : isPortrait ? 148 : 22;
+        const bottomMargin = isDesktopWide ? 76 : isPortrait ? 148 : 22;
         const leftReserve = isDesktopWide ? 148 : isCompactLandscape ? 128 : 14;
         const rightReserve = isDesktopWide ? 24 : isCompactLandscape ? 128 : 14;
         const availW = Math.max(220, width - leftReserve - rightReserve);
@@ -1002,7 +1200,7 @@ export class IluminadoCanvasRenderer {
           ? Math.floor(leftReserve + (availW - boardW) * 0.5)
           : Math.floor((width - boardW) / 2);
         // Slightly elevated ("moved up") bias in portrait so lower courtyard horizon/water breathes cleanly
-        const slackBias = isPortrait ? 0.38 : 0.45;
+        const slackBias = isPortrait ? 0.38 : 0.42;
         const startY = Math.floor(
           headerReserve +
             cellSize * 2.04 +
@@ -1019,11 +1217,26 @@ export class IluminadoCanvasRenderer {
         this.lastSecondaryRect = null;
 
         ctx.save();
+        const pivotCx = startX + boardW * 0.5;
+        const pivotCy = startY + boardH * 0.5;
         if (shiftEase > 0.002) {
-          const pivotCx = startX + boardW * 0.5;
-          const pivotCy = startY + boardH * 0.5;
           ctx.translate(pivotCx + shiftDx, pivotCy + shiftDy);
           ctx.scale(shiftScale, shiftScale);
+          ctx.translate(-pivotCx, -pivotCy);
+        }
+        const telegraphTremor =
+          !this.reducedMotion && primaryBoard.upcomingShift && timelineNorm >= 0.35
+            ? Math.sin(timeSec * 44) * 1.15
+            : 0;
+        const combinedTremor =
+          (!this.reducedMotion ? this.boardTremor * 2.4 : 0) +
+          (!this.reducedMotion ? this.boardShake : 0);
+        if (combinedTremor > 0.05 || telegraphTremor !== 0 || this.boardZoomKick > 0.0005) {
+          const sx = Math.sin(timeSec * 61) * combinedTremor + telegraphTremor;
+          const sy = Math.cos(timeSec * 53) * combinedTremor * 0.72;
+          const zoom = 1 + (this.reducedMotion ? 0 : this.boardZoomKick);
+          ctx.translate(pivotCx + sx, pivotCy + sy);
+          ctx.scale(zoom, zoom);
           ctx.translate(-pivotCx, -pivotCy);
         }
         applyRotateTransform(this.lastPrimaryRect);
@@ -3824,6 +4037,27 @@ export class IluminadoCanvasRenderer {
       beatPhase
     );
 
+    if (board.upcomingShift) {
+      const upPolarity = getShiftPolarity(board.upcomingShift);
+      const upColor =
+        upPolarity === 'boon'
+          ? '#3db87a'
+          : upPolarity === 'bane'
+          ? '#e05b5b'
+          : palette.hudAccent;
+      const telePulse =
+        timelineNorm >= 0.35
+          ? 0.34 + 0.24 * Math.sin(timeSec * 7.5)
+          : 0.18 + 0.08 * Math.sin(timeSec * 4.2);
+      ctx.save();
+      ctx.strokeStyle = upColor;
+      ctx.lineWidth = timelineNorm >= 0.35 ? 3 : 1.8;
+      ctx.globalAlpha = telePulse;
+      this.roundRect(ctx, x - 9, y - 9, width + 18, height + 18, 13);
+      ctx.stroke();
+      ctx.restore();
+    }
+
     if (board.pendingGarbage > 0) {
       const pulse = 0.5 + 0.5 * Math.sin(timeSec * 8);
       ctx.save();
@@ -4092,6 +4326,15 @@ export class IluminadoCanvasRenderer {
     const slantBotNorm = ((timelineNorm - slantNorm) % 1 + 1) % 1;
     const activeSweepBonus = board.sweepState.squaresThisSweep > 0 ? 0.35 : 0;
     const glowW = cellSize * (3.15 + activeSweepBonus * 0.9 + subBass * 0.9);
+    const activeBeamColA = isRtlSweep
+      ? Math.max(0, boardCols - 1 - (Math.floor(timelineNorm * boardCols) % boardCols))
+      : Math.floor(timelineNorm * boardCols) % boardCols;
+    const activeBeamColB = Math.floor(twinNorm * boardCols) % boardCols;
+    const beamColsForProx =
+      isTwinSweep || isSplitHalfSweep
+        ? [activeBeamColA, activeBeamColB]
+        : [activeBeamColA];
+
     const drawSweepWakeBand = (
       beamX: number,
       rtl: boolean,
@@ -4178,7 +4421,72 @@ export class IluminadoCanvasRenderer {
       }
     }
 
-    // Precompute smooth visualX/visualY for active piece along gravityDirection
+    // Rising Tide creeping waterline inside board clip
+    if (board.activeShift === 'rising_tide') {
+      const tideRows = board.risingTideRows ?? 0;
+      const creep = board.sweepState.squaresThisSweep >= 4 ? 0 : timelineNorm * 0.42;
+      const tideH = Math.min(height * 0.48, Math.max(cellSize * 0.22, (tideRows + creep) * cellSize * 0.55));
+      const waterTopY = y + height - tideH;
+      const waterGrad = ctx.createLinearGradient(0, waterTopY, 0, y + height);
+      waterGrad.addColorStop(0, 'rgba(92, 188, 206, 0.26)');
+      waterGrad.addColorStop(1, 'rgba(42, 118, 148, 0.42)');
+      ctx.save();
+      ctx.fillStyle = waterGrad;
+      ctx.beginPath();
+      ctx.moveTo(x, y + height);
+      for (let step = 0; step <= 16; step++) {
+        const wx = x + (step / 16) * width;
+        const wy = waterTopY + Math.sin(timeSec * 3.4 + step * 0.65) * 2.2;
+        ctx.lineTo(wx, wy);
+      }
+      ctx.lineTo(x + width, y + height);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.strokeStyle = '#d9f6fb';
+      ctx.globalAlpha = 0.68;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      for (let step = 0; step <= 16; step++) {
+        const wx = x + (step / 16) * width;
+        const wy = waterTopY + Math.sin(timeSec * 3.4 + step * 0.65) * 2.2;
+        if (step === 0) ctx.moveTo(wx, wy);
+        else ctx.lineTo(wx, wy);
+      }
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Ceiling Press descending flank shutter guide lines
+    if (board.activeShift === 'ceiling_press') {
+      const lockRows = board.ceilingLockRows ?? 0;
+      const nextStepPreview = board.sweepState.squaresThisSweep < 4 && lockRows < 3 ? timelineNorm * 0.35 : 0;
+      const pressY = y + (lockRows + nextStepPreview) * cellSize;
+      const spawnCol = Math.max(0, Math.floor((boardCols - 2) / 2));
+      const leftStopX = x + spawnCol * cellSize;
+      const rightStartX = x + (spawnCol + 2) * cellSize;
+      ctx.save();
+      ctx.strokeStyle = palette.hudAccent;
+      ctx.lineWidth = 1.6;
+      ctx.globalAlpha = 0.55;
+      ctx.setLineDash([5, 4]);
+      if (leftStopX > x) {
+        ctx.beginPath();
+        ctx.moveTo(x, pressY);
+        ctx.lineTo(leftStopX, pressY);
+        ctx.stroke();
+      }
+      if (rightStartX < x + width) {
+        ctx.beginPath();
+        ctx.moveTo(rightStartX, pressY);
+        ctx.lineTo(x + width, pressY);
+        ctx.stroke();
+      }
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+
+    // Precompute exact logical visualX/visualY for ghost piece, plus smoothed visual X for active piece
     const activePiece = board.activePiece && !board.isGameOver ? board.activePiece : null;
     const { gx: gVecX, gy: gVecY } = getGravityVector(gravDir);
     const subStepOffset =
@@ -4187,10 +4495,44 @@ export class IluminadoCanvasRenderer {
       canPlacePiece(board, activePiece, gVecX, gVecY)
         ? Math.min(0.95, Math.max(0, board.gravityAccum))
         : 0;
-    const visualPieceX = activePiece ? activePiece.x + gVecX * subStepOffset : 0;
-    const visualPieceY = activePiece ? activePiece.y + gVecY * subStepOffset : 0;
+    const logicalVisualX = activePiece ? activePiece.x + gVecX * subStepOffset : 0;
+    const logicalVisualY = activePiece ? activePiece.y + gVecY * subStepOffset : 0;
+    let smoothPieceX = logicalVisualX;
+    let smoothPieceY = logicalVisualY;
+    const ps = this.pieceSmooth[boardIdx];
+    if (activePiece) {
+      const prevCells = ps.pieceRef?.cells;
+      const spawnReset =
+        prevCells !== undefined &&
+        prevCells !== activePiece.cells &&
+        Math.abs(ps.rotAngle) < 0.01 &&
+        (logicalVisualY < ps.smoothY - 1 || Math.abs(logicalVisualX - ps.smoothX) > 2.2);
+      const wrapJump =
+        Math.abs(logicalVisualX - ps.smoothX) > 2.2 ||
+        Math.abs(logicalVisualY - ps.smoothY) > 2.2;
+      if (ps.pieceRef === null || spawnReset || wrapJump || this.reducedMotion) {
+        ps.pieceRef = activePiece;
+        ps.smoothX = logicalVisualX;
+        ps.smoothY = logicalVisualY;
+        if (ps.pieceRef === null || spawnReset) ps.rotAngle = 0;
+      } else {
+        ps.pieceRef = activePiece;
+        const damp = 1 - Math.exp(-Math.max(0.001, this.lastFrameDt) / 0.045);
+        ps.smoothX += (logicalVisualX - ps.smoothX) * damp;
+        if (gravDir === 'left' || gravDir === 'right') {
+          ps.smoothY += (logicalVisualY - ps.smoothY) * damp;
+        } else {
+          ps.smoothY = logicalVisualY;
+        }
+      }
+      smoothPieceX = ps.smoothX;
+      smoothPieceY = ps.smoothY;
+    } else {
+      ps.pieceRef = null;
+      ps.rotAngle = 0;
+    }
 
-    // Ghost landing preview & drop guide beam inside board
+    // Ghost landing preview & drop guide beam inside board (always pinned to exact logical position)
     if (activePiece) {
       this.drawGhostPiece(
         ctx,
@@ -4200,8 +4542,8 @@ export class IluminadoCanvasRenderer {
         board,
         activePiece,
         skin,
-        visualPieceX,
-        visualPieceY,
+        logicalVisualX,
+        logicalVisualY,
         beatPhase
       );
     }
@@ -4246,6 +4588,13 @@ export class IluminadoCanvasRenderer {
         const settledForMarks =
           cell.fallOffset <= 0.15 && Math.abs(ax) <= 0.12 && Math.abs(ay) <= 0.12;
         this.writeGridCellJoins(board.grid, r, c, cell, this.tmpJoins);
+        const beamProx = computeBeamProximity(
+          c,
+          beamColsForProx,
+          boardCols,
+          isRtlSweep,
+          4
+        );
         this.tmpBlockFx.row = r;
         this.tmpBlockFx.col = c;
         this.tmpBlockFx.inSquare = cell.inSquare && settledForMarks;
@@ -4258,9 +4607,15 @@ export class IluminadoCanvasRenderer {
         this.tmpBlockFx.timeSec = timeSec;
         this.tmpBlockFx.shimmerWave =
           cell.inSquare && settledForMarks
-            ? 0.5 + 0.5 * Math.sin(timeSec * 3.6 - (r + c) * 0.58)
+            ? Math.min(1, 0.22 + beamProx * 0.78)
+            : beamProx > 0.25 && (cell.chainMarked || cell.pendingClear)
+            ? beamProx * 0.55
             : 0;
         this.tmpBlockFx.isWild = Boolean(cell.isWild);
+        this.tmpBlockFx.isCrashGem = Boolean(cell.isCrashGem);
+        this.tmpBlockFx.frostHp = cell.frostHp ?? 0;
+        this.tmpBlockFx.isVirus = Boolean(cell.isVirus);
+        this.tmpBlockFx.patternMode = this.patternMode;
         this.drawBlockCell(
           ctx,
           drawX,
@@ -4273,6 +4628,69 @@ export class IluminadoCanvasRenderer {
           this.tmpBlockFx
         );
       }
+    }
+
+    // Pooled Ghost Clear Cells (pop to 1.12 -> white flash -> shrink over ~0.30s)
+    for (let i = 0; i < MAX_GHOST_CLEARS; i++) {
+      const gc = this.ghostClears[i];
+      if (!gc.active || gc.boardIdx !== boardIdx || gc.delay > 0) continue;
+      const t = Math.min(1, gc.life / Math.max(0.01, gc.maxLife));
+      const popScale =
+        t < 0.28
+          ? 1 + (t / 0.28) * 0.12
+          : 1.12 * Math.max(0, 1 - (t - 0.28) / 0.72);
+      if (popScale <= 0.02) continue;
+      const gcx = x + (gc.gx + 0.5) * cellSize;
+      const gcy = y + (gc.gy + 0.5) * cellSize;
+      ctx.save();
+      ctx.translate(gcx, gcy);
+      ctx.scale(popScale, popScale);
+      ctx.globalAlpha = Math.max(0, 1 - t * 0.85);
+      this.tmpJoins.top = false;
+      this.tmpJoins.right = false;
+      this.tmpJoins.bottom = false;
+      this.tmpJoins.left = false;
+      this.tmpBlockFx.row = gc.gy;
+      this.tmpBlockFx.col = gc.gx;
+      this.tmpBlockFx.inSquare = false;
+      this.tmpBlockFx.chainMarked = false;
+      this.tmpBlockFx.pendingClear = false;
+      this.tmpBlockFx.sweptCol = false;
+      this.tmpBlockFx.landFlash = 0;
+      this.tmpBlockFx.rippleGlow = 0;
+      this.tmpBlockFx.beatPhase = beatPhase;
+      this.tmpBlockFx.timeSec = timeSec;
+      this.tmpBlockFx.shimmerWave = 0;
+      this.tmpBlockFx.isWild = false;
+      this.tmpBlockFx.isCrashGem = false;
+      this.tmpBlockFx.frostHp = 0;
+      this.tmpBlockFx.isVirus = false;
+      this.tmpBlockFx.patternMode = this.patternMode;
+      this.drawBlockCell(
+        ctx,
+        -cellSize * 0.5,
+        -cellSize * 0.5,
+        cellSize,
+        gc.color,
+        false,
+        skin,
+        this.tmpJoins,
+        this.tmpBlockFx
+      );
+      if (t < 0.45) {
+        ctx.fillStyle = '#faf6ee';
+        ctx.globalAlpha = (1 - t / 0.45) * 0.82;
+        this.roundRect(
+          ctx,
+          -cellSize * 0.5,
+          -cellSize * 0.5,
+          cellSize,
+          cellSize,
+          Math.max(2, cellSize * 0.14)
+        );
+        ctx.fill();
+      }
+      ctx.restore();
     }
 
     // Luminous bridge filaments connecting chainMarked clusters (including isWild links)
@@ -4467,9 +4885,28 @@ export class IluminadoCanvasRenderer {
       ctx.restore();
     }
 
+    if (this.shiftFlashT > 0 && boardIdx === 0) {
+      const flashCol =
+        this.shiftFlashPolarity === 'boon'
+          ? '#3db87a'
+          : this.shiftFlashPolarity === 'bane'
+          ? '#e05b5b'
+          : palette.hudAccent;
+      ctx.save();
+      ctx.strokeStyle = flashCol;
+      ctx.lineWidth = Math.max(4, cellSize * 0.24);
+      ctx.globalAlpha = this.shiftFlashT * 0.72;
+      ctx.strokeRect(x + 2, y + 2, width - 4, height - 4);
+      ctx.fillStyle = flashCol;
+      ctx.globalAlpha = this.shiftFlashT * 0.14;
+      ctx.fillRect(x, y, width, height);
+      ctx.restore();
+    }
+
     ctx.restore(); // end clip
 
-    // Beat top rhythm diamonds, measure labels & bottom equalizer ticks
+    // Beat top rhythm diamonds, measure labels, beat-ruler ticks, rising tide preview, & equalizer ticks
+    const sweepBeats = getSweepBeatsForShift(board.activeShift);
     const activeBeatCol = isRtlSweep
       ? Math.max(0, boardCols - 1 - (Math.floor(timelineNorm * boardCols) % boardCols))
       : Math.floor(timelineNorm * boardCols) % boardCols;
@@ -4483,7 +4920,35 @@ export class IluminadoCanvasRenderer {
       : activeBeatCol;
     const isSkyDark = isHexColorDark(palette.skyMid);
     const barStride = boardCols >= 16 ? 4 : 2;
+    const isRisingTide = board.activeShift === 'rising_tide';
+
     ctx.save();
+    // Sweep-beat ruler along top edge (4, 8, or 16 ticks)
+    const activeRulerTick = Math.floor(timelineNorm * sweepBeats) % sweepBeats;
+    for (let bt = 0; bt < sweepBeats; bt++) {
+      const normX = (bt + 0.5) / sweepBeats;
+      const rx = isRtlSweep ? x + (1 - normX) * width : x + normX * width;
+      const isCurTick = bt === activeRulerTick;
+      ctx.strokeStyle = isCurTick ? palette.hudAccent : palette.timelineBeam;
+      ctx.globalAlpha = isCurTick ? 0.92 : bt % 4 === 0 ? 0.5 : 0.24;
+      ctx.lineWidth = isCurTick ? 2 : 1.1;
+      ctx.beginPath();
+      ctx.moveTo(rx, y - 5);
+      ctx.lineTo(rx, y - (bt % 4 === 0 ? 9 : 7));
+      ctx.stroke();
+    }
+    if (sweepBeats !== 8 && !label) {
+      const rateBadge = sweepBeats === 4 ? '4×' : '16×';
+      ctx.fillStyle = palette.timelineBeam;
+      this.roundRect(ctx, x + 2, y - 28, 28, 15, 4);
+      ctx.fill();
+      ctx.fillStyle = '#faf6ee';
+      ctx.font = '700 9.5px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(rateBadge, x + 16, y - 20.5);
+    }
+
     for (let c = 0; c < boardCols; c++) {
       const dx = x + (c + 0.5) * cellSize;
       const dy = y - 13;
@@ -4504,15 +4969,30 @@ export class IluminadoCanvasRenderer {
         const measureNum = Math.floor(c / Math.max(2, Math.floor(boardCols / 4))) + 1;
         const activeMeasure = Math.floor(activeBeatCol / Math.max(2, Math.floor(boardCols / 4))) + 1;
         const isCurrMeasure = measureNum === activeMeasure;
-        ctx.fillStyle = isCurrMeasure
-          ? palette.hudAccent
-          : isSkyDark
-          ? '#faf7f2'
-          : palette.hudInk;
-        ctx.globalAlpha = isCurrMeasure ? 0.88 : 0.32;
-        ctx.font = '600 9.5px "JetBrains Mono", monospace';
-        ctx.textAlign = 'center';
-        ctx.fillText(`${measureNum}`, dx, y - 22);
+        if (!(sweepBeats !== 8 && c === 0)) {
+          ctx.fillStyle = isCurrMeasure
+            ? palette.hudAccent
+            : isSkyDark
+            ? '#faf7f2'
+            : palette.hudInk;
+          ctx.globalAlpha = isCurrMeasure ? 0.88 : 0.32;
+          ctx.font = '600 9.5px "JetBrains Mono", monospace';
+          ctx.textAlign = 'center';
+          ctx.fillText(`${measureNum}`, dx, y - 22);
+        }
+      }
+
+      // Rising Tide 1-row below-floor preview tiles
+      if (isRisingTide) {
+        const tideCount = board.colorCount ?? 2;
+        const previewColor = ((c + (board.risingTideRows ?? 0)) % tideCount) as CellColor;
+        const previewStyle = getBlockStyle(palette, previewColor);
+        const pw = Math.max(3, cellSize - 3);
+        const ph = Math.max(5, Math.min(8, cellSize * 0.22));
+        ctx.fillStyle = previewStyle.fill;
+        ctx.globalAlpha = 0.65 + 0.2 * Math.sin(timeSec * 4 + c * 0.4);
+        this.roundRect(ctx, x + c * cellSize + 1.5, y + height + 2.5, pw, ph, 1.5);
+        ctx.fill();
       }
 
       // Subtle bottom rhythmic column tick that glows when column has formed marks
@@ -4542,17 +5022,18 @@ export class IluminadoCanvasRenderer {
           : high;
       const tickH =
         2.5 + (colHasMarks ? 3.8 : 0) + waveBar * 3.8 + colSpectrum * 7.2;
+      const tickTopY = isRisingTide ? y + height + 12 : y + height + 9;
       ctx.fillStyle = colHasMarks || isActiveColBot ? palette.hudAccent : palette.timelineBeam;
       ctx.globalAlpha = colHasMarks
         ? 0.72 + colSpectrum * 0.24
         : isActiveColBot
         ? 0.85
         : 0.22 + colSpectrum * 0.44;
-      ctx.fillRect(dx - cellSize * 0.22, y + height + 9, cellSize * 0.44, tickH);
+      ctx.fillRect(dx - cellSize * 0.22, tickTopY, cellSize * 0.44, tickH);
     }
     ctx.restore();
 
-    // Active falling / staging piece (supports all shapes and all 4 flow directions)
+    // Active falling / staging piece (supports all shapes, smoothed lateral X, rotation tween, and all 4 flow directions)
     if (activePiece) {
       const pieceRows = activePiece.cells.length;
       const pieceCols = activePiece.cells[0]?.length ?? 2;
@@ -4560,7 +5041,7 @@ export class IluminadoCanvasRenderer {
         board.lockTimer > 0 ? Math.min(1, board.lockTimer / LOCK_DELAY_SEC) : 0;
 
       // Subtle architectural staging terrace guide outside active entry edge
-      if (gravDir === 'down' && visualPieceY < 0) {
+      if (gravDir === 'down' && smoothPieceY < 0) {
         ctx.save();
         ctx.strokeStyle = palette.boardFrame;
         ctx.globalAlpha = 0.24;
@@ -4575,9 +5056,9 @@ export class IluminadoCanvasRenderer {
         ctx.strokeStyle = palette.timelineBeam;
         ctx.globalAlpha = 0.34;
         ctx.lineWidth = 1.5;
-        const leftRailX = x + visualPieceX * cellSize;
-        const rightRailX = x + (visualPieceX + pieceCols) * cellSize;
-        const topRailY = y + visualPieceY * cellSize;
+        const leftRailX = x + smoothPieceX * cellSize;
+        const rightRailX = x + (smoothPieceX + pieceCols) * cellSize;
+        const topRailY = y + smoothPieceY * cellSize;
         ctx.beginPath();
         ctx.moveTo(leftRailX, topRailY);
         ctx.lineTo(leftRailX, y);
@@ -4585,14 +5066,14 @@ export class IluminadoCanvasRenderer {
         ctx.lineTo(rightRailX, y);
         ctx.stroke();
         ctx.restore();
-      } else if (gravDir === 'up' && visualPieceY + pieceRows > boardRows) {
+      } else if (gravDir === 'up' && smoothPieceY + pieceRows > boardRows) {
         ctx.save();
         ctx.strokeStyle = palette.timelineBeam;
         ctx.globalAlpha = 0.34;
         ctx.lineWidth = 1.5;
-        const leftRailX = x + visualPieceX * cellSize;
-        const rightRailX = x + (visualPieceX + pieceCols) * cellSize;
-        const botRailY = y + (visualPieceY + pieceRows) * cellSize;
+        const leftRailX = x + smoothPieceX * cellSize;
+        const rightRailX = x + (smoothPieceX + pieceCols) * cellSize;
+        const botRailY = y + (smoothPieceY + pieceRows) * cellSize;
         ctx.beginPath();
         ctx.moveTo(leftRailX, y + height);
         ctx.lineTo(leftRailX, botRailY);
@@ -4600,14 +5081,14 @@ export class IluminadoCanvasRenderer {
         ctx.lineTo(rightRailX, botRailY);
         ctx.stroke();
         ctx.restore();
-      } else if (gravDir === 'right' && visualPieceX < 0) {
+      } else if (gravDir === 'right' && smoothPieceX < 0) {
         ctx.save();
         ctx.strokeStyle = palette.timelineBeam;
         ctx.globalAlpha = 0.34;
         ctx.lineWidth = 1.5;
-        const topRailY = y + visualPieceY * cellSize;
-        const botRailY = y + (visualPieceY + pieceRows) * cellSize;
-        const leftRailX = x + visualPieceX * cellSize;
+        const topRailY = y + smoothPieceY * cellSize;
+        const botRailY = y + (smoothPieceY + pieceRows) * cellSize;
+        const leftRailX = x + smoothPieceX * cellSize;
         ctx.beginPath();
         ctx.moveTo(leftRailX, topRailY);
         ctx.lineTo(x, topRailY);
@@ -4615,14 +5096,14 @@ export class IluminadoCanvasRenderer {
         ctx.lineTo(x, botRailY);
         ctx.stroke();
         ctx.restore();
-      } else if (gravDir === 'left' && visualPieceX + pieceCols > boardCols) {
+      } else if (gravDir === 'left' && smoothPieceX + pieceCols > boardCols) {
         ctx.save();
         ctx.strokeStyle = palette.timelineBeam;
         ctx.globalAlpha = 0.34;
         ctx.lineWidth = 1.5;
-        const topRailY = y + visualPieceY * cellSize;
-        const botRailY = y + (visualPieceY + pieceRows) * cellSize;
-        const rightRailX = x + (visualPieceX + pieceCols) * cellSize;
+        const topRailY = y + smoothPieceY * cellSize;
+        const botRailY = y + (smoothPieceY + pieceRows) * cellSize;
+        const rightRailX = x + (smoothPieceX + pieceCols) * cellSize;
         ctx.beginPath();
         ctx.moveTo(x + width, topRailY);
         ctx.lineTo(rightRailX, topRailY);
@@ -4632,19 +5113,53 @@ export class IluminadoCanvasRenderer {
         ctx.restore();
       }
 
+      const pieceCx = x + (smoothPieceX + pieceCols * 0.5) * cellSize;
+      const pieceCy = y + (smoothPieceY + pieceRows * 0.5) * cellSize;
+
+      // Metronome beat-window ring around active piece
+      if (board.activeShift === 'metronome_charge') {
+        const wrappedBeat = ((beatPhase % 1) + 1) % 1;
+        const distToBeat = Math.min(wrappedBeat, 1 - wrappedBeat);
+        const inBeatWindow = distToBeat <= 0.2;
+        const ringR =
+          Math.max(pieceCols, pieceRows) *
+          cellSize *
+          (inBeatWindow ? 0.72 + beatPulse * 0.09 : 0.68);
+        ctx.save();
+        ctx.strokeStyle = inBeatWindow ? '#3db87a' : palette.hudAccent;
+        ctx.lineWidth = inBeatWindow ? 2.6 : 1.25;
+        ctx.globalAlpha = inBeatWindow ? 0.85 : 0.28;
+        if (!inBeatWindow) ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.arc(pieceCx, pieceCy, ringR, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+      }
+
+      const hasRotTween = !this.reducedMotion && Math.abs(ps.rotAngle) > 0.004;
+      ctx.save();
+      if (hasRotTween) {
+        ctx.translate(pieceCx, pieceCy);
+        ctx.rotate(ps.rotAngle);
+      }
       for (let py = 0; py < pieceRows; py++) {
         for (let px = 0; px < pieceCols; px++) {
           const pCell = activePiece.cells[py]?.[px];
           if (!pCell) continue;
-          const cx = x + (visualPieceX + px) * cellSize;
-          const cy = y + (visualPieceY + py) * cellSize;
+          const cx = hasRotTween
+            ? (px - pieceCols * 0.5) * cellSize
+            : x + (smoothPieceX + px) * cellSize;
+          const cy = hasRotTween
+            ? (py - pieceRows * 0.5) * cellSize
+            : y + (smoothPieceY + py) * cellSize;
           if (pCell.isBlocked) {
             this.drawBlockedObsidianTile(ctx, cx, cy, cellSize, lockProgress * 0.25);
             continue;
           }
           this.writePieceCellJoins(activePiece, py, px, this.tmpJoins);
           this.tmpBlockFx.row = py;
-          this.tmpBlockFx.col = Math.round(visualPieceX + px);
+          this.tmpBlockFx.col = Math.round(smoothPieceX + px);
           this.tmpBlockFx.inSquare = false;
           this.tmpBlockFx.chainMarked = false;
           this.tmpBlockFx.pendingClear = false;
@@ -4655,6 +5170,10 @@ export class IluminadoCanvasRenderer {
           this.tmpBlockFx.timeSec = timeSec;
           this.tmpBlockFx.shimmerWave = 0;
           this.tmpBlockFx.isWild = Boolean(pCell.isWild);
+          this.tmpBlockFx.isCrashGem = Boolean(pCell.isCrashGem);
+          this.tmpBlockFx.frostHp = 0;
+          this.tmpBlockFx.isVirus = false;
+          this.tmpBlockFx.patternMode = this.patternMode;
           this.drawBlockCell(
             ctx,
             cx,
@@ -4668,6 +5187,7 @@ export class IluminadoCanvasRenderer {
           );
         }
       }
+      ctx.restore();
 
       // Crisp lock-delay bar along the leading grounded edge facing gravityDirection
       if (lockProgress > 0.04) {
@@ -4676,27 +5196,109 @@ export class IluminadoCanvasRenderer {
         ctx.globalAlpha = 0.82;
         if (gravDir === 'down') {
           const barW = cellSize * pieceCols * (1 - lockProgress);
-          const barX = x + visualPieceX * cellSize + (cellSize * pieceCols - barW) * 0.5;
-          const barY = y + (visualPieceY + pieceRows) * cellSize + 2;
+          const barX = x + smoothPieceX * cellSize + (cellSize * pieceCols - barW) * 0.5;
+          const barY = y + (smoothPieceY + pieceRows) * cellSize + 2;
           ctx.fillRect(barX, barY, barW, 2.5);
         } else if (gravDir === 'up') {
           const barW = cellSize * pieceCols * (1 - lockProgress);
-          const barX = x + visualPieceX * cellSize + (cellSize * pieceCols - barW) * 0.5;
-          const barY = y + visualPieceY * cellSize - 4.5;
+          const barX = x + smoothPieceX * cellSize + (cellSize * pieceCols - barW) * 0.5;
+          const barY = y + smoothPieceY * cellSize - 4.5;
           ctx.fillRect(barX, barY, barW, 2.5);
         } else if (gravDir === 'right') {
           const barH = cellSize * pieceRows * (1 - lockProgress);
-          const barY = y + visualPieceY * cellSize + (cellSize * pieceRows - barH) * 0.5;
-          const barX = x + (visualPieceX + pieceCols) * cellSize + 2;
+          const barY = y + smoothPieceY * cellSize + (cellSize * pieceRows - barH) * 0.5;
+          const barX = x + (smoothPieceX + pieceCols) * cellSize + 2;
           ctx.fillRect(barX, barY, 2.5, barH);
         } else {
           const barH = cellSize * pieceRows * (1 - lockProgress);
-          const barY = y + visualPieceY * cellSize + (cellSize * pieceRows - barH) * 0.5;
-          const barX = x + visualPieceX * cellSize - 4.5;
+          const barY = y + smoothPieceY * cellSize + (cellSize * pieceRows - barH) * 0.5;
+          const barX = x + smoothPieceX * cellSize - 4.5;
           ctx.fillRect(barX, barY, 2.5, barH);
         }
         ctx.restore();
       }
+    }
+
+    // Lantern Spotlight atmospheric mask pass with clear radial apertures around beam & active piece
+    if (board.activeShift === 'lantern_sweep' && typeof document !== 'undefined') {
+      const mw = Math.max(1, Math.ceil(width));
+      const mh = Math.max(1, Math.ceil(height));
+      if (!this.lanternMaskCanvas) {
+        this.lanternMaskCanvas = this.createOffscreen(mw, mh);
+      } else if (this.lanternMaskCanvas.width !== mw || this.lanternMaskCanvas.height !== mh) {
+        this.lanternMaskCanvas.width = mw;
+        this.lanternMaskCanvas.height = mh;
+      }
+      const mctx = this.lanternMaskCanvas.getContext('2d');
+      if (mctx) {
+        mctx.globalCompositeOperation = 'source-over';
+        mctx.clearRect(0, 0, mw, mh);
+        mctx.fillStyle = 'rgba(14, 12, 22, 0.72)';
+        mctx.fillRect(0, 0, mw, mh);
+        mctx.globalCompositeOperation = 'destination-out';
+
+        const punchHole = (hx: number, hy: number, rOuter: number) => {
+          const g = mctx.createRadialGradient(hx, hy, rOuter * 0.22, hx, hy, rOuter);
+          g.addColorStop(0, 'rgba(0, 0, 0, 1)');
+          g.addColorStop(0.62, 'rgba(0, 0, 0, 0.78)');
+          g.addColorStop(1, 'rgba(0, 0, 0, 0)');
+          mctx.fillStyle = g;
+          mctx.beginPath();
+          mctx.arc(hx, hy, rOuter, 0, Math.PI * 2);
+          mctx.fill();
+        };
+
+        const beamLocalX = tlX - x;
+        for (let rowSlice = 0; rowSlice <= 3; rowSlice++) {
+          punchHole(beamLocalX, (rowSlice / 3) * mh, cellSize * 2.45);
+        }
+        if (activePiece) {
+          const pCols = activePiece.cells[0]?.length ?? 2;
+          const pRows = activePiece.cells.length;
+          punchHole(
+            (smoothPieceX + pCols * 0.5) * cellSize,
+            (smoothPieceY + pRows * 0.5) * cellSize,
+            cellSize * 2.85
+          );
+        }
+        mctx.globalCompositeOperation = 'source-over';
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(x, y, width, height);
+        ctx.clip();
+        ctx.drawImage(this.lanternMaskCanvas, x, y, width, height);
+        ctx.restore();
+      }
+    }
+
+    // Ceiling Press & Metronome Charge compact corner indicators
+    if (board.activeShift === 'ceiling_press') {
+      const lockRows = board.ceilingLockRows ?? 0;
+      ctx.save();
+      ctx.fillStyle = 'rgba(24, 20, 34, 0.78)';
+      this.roundRect(ctx, x + 6, y + 6, 76, 17, 4);
+      ctx.fill();
+      ctx.strokeStyle = lockRows >= 2 ? '#e05b5b' : palette.hudAccent;
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.fillStyle = '#faf6ee';
+      ctx.font = '700 9.5px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(`SHUTTER ${lockRows}/3`, x + 44, y + 14.5);
+      ctx.restore();
+    } else if (board.activeShift === 'metronome_charge') {
+      const accum = board.beatChargeAccum ?? 0;
+      ctx.save();
+      ctx.fillStyle = 'rgba(24, 20, 34, 0.72)';
+      this.roundRect(ctx, x + width - 58, y + 6, 52, 16, 4);
+      ctx.fill();
+      for (let pip = 0; pip < 3; pip++) {
+        ctx.fillStyle = pip < accum ? '#3db87a' : 'rgba(250, 246, 238, 0.24)';
+        this.drawDiamond(ctx, x + width - 46 + pip * 14, y + 14, 4.2);
+      }
+      ctx.restore();
     }
 
     // Prominent Vertical / Modified Timeline Sweep Bar(s)
@@ -4759,10 +5361,19 @@ export class IluminadoCanvasRenderer {
           break;
         }
       }
-      if (hasBeamHit) {
+      const aheadMarked = countMarkedAheadOfBeam(
+        board.grid,
+        beamCol,
+        isRtlSweep,
+        4
+      );
+      if (hasBeamHit || aheadMarked > 0) {
         ctx.strokeStyle = palette.squareHighlight;
-        ctx.lineWidth = 7;
-        ctx.globalAlpha = 0.26 + beatPulse * 0.2;
+        ctx.lineWidth = 5 + Math.min(10, aheadMarked * 0.9);
+        ctx.globalAlpha = Math.min(
+          0.68,
+          0.16 + aheadMarked * 0.045 + (hasBeamHit ? 0.2 : 0) + beatPulse * 0.16
+        );
         ctx.beginPath();
         ctx.moveTo(beamX, y);
         ctx.lineTo(beamX, y + height);
@@ -5685,6 +6296,422 @@ export class IluminadoCanvasRenderer {
     ctx.restore();
   }
 
+  private drawPatternEmblem(
+    ctx: CanvasRenderingContext2D,
+    cx: number,
+    cy: number,
+    size: number,
+    color: CellColor,
+    emblemColor: string
+  ): void {
+    ctx.save();
+    ctx.strokeStyle = emblemColor;
+    ctx.fillStyle = emblemColor;
+    ctx.lineWidth = Math.max(1.3, size * 0.06);
+    if (color === 0) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, Math.max(2.5, size * 0.19), 0, Math.PI * 2);
+      ctx.stroke();
+    } else if (color === 1) {
+      const r = Math.max(3, size * 0.22);
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - r);
+      ctx.lineTo(cx + r, cy);
+      ctx.lineTo(cx, cy + r);
+      ctx.lineTo(cx - r, cy);
+      ctx.closePath();
+      ctx.stroke();
+    } else {
+      const r = Math.max(3, size * 0.22);
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - r);
+      ctx.lineTo(cx + r * 0.92, cy + r * 0.78);
+      ctx.lineTo(cx - r * 0.92, cy + r * 0.78);
+      ctx.closePath();
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  private renderStaticBlockBase(
+    ctx: CanvasRenderingContext2D,
+    ox: number,
+    oy: number,
+    size: number,
+    color: CellColor,
+    skin: SkinConfig,
+    joins: NeighborJoins,
+    isWild: boolean,
+    patternMode: boolean,
+    texSeed: number
+  ): void {
+    const style: BlockStyle = getBlockStyle(skin.palette, color);
+    const left = ox;
+    const right = joins.right ? ox + size + 0.5 : ox + size;
+    const top = oy;
+    const bottom = joins.bottom ? oy + size + 0.5 : oy + size;
+    const bw = Math.max(2, right - left);
+    const bh = Math.max(2, bottom - top);
+
+    const baseR = isWild
+      ? Math.max(3, Math.floor(size * 0.2))
+      : color === 0
+      ? Math.max(3, Math.floor(size * 0.24))
+      : color === 2
+      ? Math.max(2, Math.floor(size * 0.14))
+      : Math.max(1, Math.floor(size * 0.05));
+    const rTL = !joins.top && !joins.left ? baseR : 0;
+    const rTR = !joins.top && !joins.right ? baseR : 0;
+    const rBR = !joins.bottom && !joins.right ? baseR : 0;
+    const rBL = !joins.bottom && !joins.left ? baseR : 0;
+
+    this.selectiveRoundRect(ctx, left, top, bw, bh, rTL, rTR, rBR, rBL);
+    if (isWild) {
+      const sA = getBlockStyle(skin.palette, 0);
+      const sB = getBlockStyle(skin.palette, 1);
+      const sC = getBlockStyle(skin.palette, 2);
+      const prismGrad = ctx.createLinearGradient(left, top, right, bottom);
+      prismGrad.addColorStop(0, sA.fill);
+      prismGrad.addColorStop(0.5, sC.highlight);
+      prismGrad.addColorStop(1, sB.fill);
+      ctx.fillStyle = prismGrad;
+    } else {
+      const bodyGrad = ctx.createLinearGradient(left, top, right, bottom);
+      bodyGrad.addColorStop(0, style.fill);
+      bodyGrad.addColorStop(1, style.fillGradientEnd);
+      ctx.fillStyle = bodyGrad;
+    }
+    ctx.fill();
+
+    const fillVar = style.fillVariant;
+    if (fillVar === 'concentric') {
+      const cxT = left + bw * 0.5;
+      const cyT = top + bh * 0.5;
+      const maxRingR = Math.min(bw, bh) * 0.42;
+      ctx.strokeStyle = style.highlight;
+      ctx.globalAlpha = 0.31;
+      ctx.lineWidth = Math.max(2, size * 0.11);
+      ctx.beginPath();
+      ctx.arc(cxT, cyT, maxRingR, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.strokeStyle = style.emblemColor;
+      ctx.globalAlpha = 0.24;
+      ctx.lineWidth = Math.max(1.2, size * 0.055);
+      ctx.beginPath();
+      ctx.arc(cxT, cyT, maxRingR * 0.52, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    } else if (fillVar === 'split_plane') {
+      ctx.fillStyle = style.highlight;
+      ctx.globalAlpha = 0.18;
+      ctx.beginPath();
+      ctx.moveTo(left + 1.5, top + 1.5);
+      ctx.lineTo(right - 1.5, top + 1.5);
+      ctx.lineTo(left + 1.5, bottom - 1.5);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.fillStyle = style.shade;
+      ctx.globalAlpha = 0.14;
+      ctx.beginPath();
+      ctx.moveTo(right - 1.5, bottom - 1.5);
+      ctx.lineTo(right - 1.5, top + 1.5);
+      ctx.lineTo(left + 1.5, bottom - 1.5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    } else if (fillVar === 'wash') {
+      ctx.fillStyle = style.highlight;
+      ctx.globalAlpha = 0.21;
+      ctx.beginPath();
+      ctx.ellipse(left + bw * 0.34, top + bh * 0.34, bw * 0.34, bh * 0.24, -0.45, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = style.shade;
+      ctx.globalAlpha = 0.12;
+      ctx.beginPath();
+      ctx.ellipse(left + bw * 0.7, top + bh * 0.72, bw * 0.26, bh * 0.2, 0.35, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    } else if (fillVar === 'luminous') {
+      const rad = ctx.createRadialGradient(
+        left + bw * 0.45,
+        top + bh * 0.4,
+        1,
+        left + bw * 0.5,
+        top + bh * 0.5,
+        Math.max(bw, bh) * 0.55
+      );
+      rad.addColorStop(0, style.highlight);
+      rad.addColorStop(1, 'rgba(250, 246, 238, 0)');
+      ctx.fillStyle = rad;
+      ctx.globalAlpha = 0.32;
+      ctx.fillRect(left + 1, top + 1, Math.max(1, bw - 2), Math.max(1, bh - 2));
+      ctx.globalAlpha = 1;
+    } else if (fillVar === 'satin') {
+      ctx.fillStyle = style.highlight;
+      ctx.globalAlpha = 0.18;
+      ctx.beginPath();
+      ctx.ellipse(left + bw * 0.36, top + bh * 0.3, bw * 0.26, bh * 0.16, -0.38, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    } else {
+      ctx.fillStyle = style.highlight;
+      ctx.globalAlpha = 0.07;
+      ctx.fillRect(left + 1.5, top + 1.5, Math.max(1, bw - 3), Math.max(1, (bh - 3) * 0.45));
+      ctx.globalAlpha = 1;
+    }
+
+    const texPad = Math.max(2, Math.floor(size * 0.08));
+    this.drawBlockTexture(
+      ctx,
+      left + texPad,
+      top + texPad,
+      Math.max(1, bw - texPad * 2),
+      Math.max(1, bh - texPad * 2),
+      style,
+      texSeed
+    );
+
+    const bevel = Math.max(1.5, Math.floor(size * 0.085));
+    if (!joins.top) {
+      ctx.fillStyle = style.highlight;
+      ctx.globalAlpha = color === 0 ? 0.56 : 0.68;
+      ctx.fillRect(left + (rTL > 0 ? 2 : 0), top, bw - (rTL > 0 ? 2 : 0) - (rTR > 0 ? 2 : 0), bevel);
+    }
+    if (!joins.left) {
+      ctx.fillStyle = style.highlight;
+      ctx.globalAlpha = 0.44;
+      ctx.fillRect(left, top + (rTL > 0 ? 2 : 0), bevel, bh - (rTL > 0 ? 2 : 0) - (rBL > 0 ? 2 : 0));
+    }
+    if (!joins.bottom) {
+      ctx.fillStyle = style.shade;
+      ctx.globalAlpha = color === 0 ? 0.58 : 0.7;
+      ctx.fillRect(left + (rBL > 0 ? 2 : 0), bottom - bevel, bw - (rBL > 0 ? 2 : 0) - (rBR > 0 ? 2 : 0), bevel);
+    }
+    if (!joins.right) {
+      ctx.fillStyle = style.shade;
+      ctx.globalAlpha = 0.44;
+      ctx.fillRect(right - bevel, top + (rTR > 0 ? 2 : 0), bevel, bh - (rTR > 0 ? 2 : 0) - (rBR > 0 ? 2 : 0));
+    }
+    ctx.globalAlpha = 1;
+
+    ctx.strokeStyle =
+      color === 0 ? 'rgba(250, 246, 238, 0.22)' : 'rgba(250, 246, 238, 0.14)';
+    ctx.lineWidth = 1;
+    if (joins.top) {
+      ctx.beginPath();
+      ctx.moveTo(left + 3, top);
+      ctx.lineTo(ox + size - 3, top);
+      ctx.stroke();
+    }
+    if (joins.left) {
+      ctx.beginPath();
+      ctx.moveTo(left, top + 3);
+      ctx.lineTo(left, oy + size - 3);
+      ctx.stroke();
+    }
+
+    const strokeVar = style.strokeVariant;
+    const inset = 0.6;
+    if (strokeVar === 'offset_ink') {
+      ctx.strokeStyle = style.border;
+      ctx.globalAlpha = 0.34;
+      ctx.lineWidth = 1.2;
+      if (!joins.bottom) {
+        ctx.beginPath();
+        ctx.moveTo(left + 1.5, oy + size - inset + 0.9);
+        ctx.lineTo(ox + size - 0.5, oy + size - inset + 0.9);
+        ctx.stroke();
+      }
+      if (!joins.right) {
+        ctx.beginPath();
+        ctx.moveTo(ox + size - inset + 0.9, top + 1.5);
+        ctx.lineTo(ox + size - inset + 0.9, oy + size - 0.5);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    ctx.strokeStyle = style.border;
+    ctx.lineWidth =
+      strokeVar === 'painterly'
+        ? 1.85
+        : color === 0
+        ? 1.1
+        : color === 2
+        ? 1.25
+        : 1.35;
+    if (!joins.top) {
+      ctx.beginPath();
+      ctx.moveTo(left + rTL, top + inset);
+      ctx.lineTo(ox + size - rTR, top + inset);
+      ctx.stroke();
+    }
+    if (!joins.bottom) {
+      ctx.beginPath();
+      ctx.moveTo(left + rBL, oy + size - inset);
+      ctx.lineTo(ox + size - rBR, oy + size - inset);
+      ctx.stroke();
+    }
+    if (!joins.left) {
+      ctx.beginPath();
+      ctx.moveTo(left + inset, top + rTL);
+      ctx.lineTo(left + inset, oy + size - rBL);
+      ctx.stroke();
+    }
+    if (!joins.right) {
+      ctx.beginPath();
+      ctx.moveTo(ox + size - inset, top + rTR);
+      ctx.lineTo(ox + size - inset, oy + size - rBR);
+      ctx.stroke();
+    }
+
+    if (strokeVar === 'painterly') {
+      ctx.strokeStyle = style.border;
+      ctx.globalAlpha = 0.42;
+      ctx.lineWidth = 1.1;
+      if (!joins.top) {
+        ctx.beginPath();
+        ctx.moveTo(left + rTL + 2, top + 1.9);
+        ctx.lineTo(ox + size - rTR - 2, top + 1.4);
+        ctx.stroke();
+      }
+      if (!joins.left) {
+        ctx.beginPath();
+        ctx.moveTo(left + 1.9, top + rTL + 2);
+        ctx.lineTo(left + 1.4, oy + size - rBL - 2);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    } else if (strokeVar === 'double') {
+      const innerPad = Math.max(2.6, Math.floor(size * 0.11));
+      if (bw > innerPad * 2 + 4 && bh > innerPad * 2 + 4) {
+        ctx.strokeStyle = style.emblemColor;
+        ctx.globalAlpha = 0.34;
+        ctx.lineWidth = 1;
+        this.selectiveRoundRect(
+          ctx,
+          left + innerPad,
+          top + innerPad,
+          bw - innerPad * 2,
+          bh - innerPad * 2,
+          rTL > 0 ? Math.max(1, rTL - 2) : 0,
+          rTR > 0 ? Math.max(1, rTR - 2) : 0,
+          rBR > 0 ? Math.max(1, rBR - 2) : 0,
+          rBL > 0 ? Math.max(1, rBL - 2) : 0
+        );
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+    } else if (strokeVar === 'recessed') {
+      ctx.strokeStyle = style.shade;
+      ctx.globalAlpha = 0.38;
+      ctx.lineWidth = 1.1;
+      if (!joins.top) {
+        ctx.beginPath();
+        ctx.moveTo(left + 2.5, top + 2.5);
+        ctx.lineTo(right - 2.5, top + 2.5);
+        ctx.stroke();
+      }
+      if (!joins.left) {
+        ctx.beginPath();
+        ctx.moveTo(left + 2.5, top + 2.5);
+        ctx.lineTo(left + 2.5, bottom - 2.5);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    } else if (strokeVar === 'corner_ticks') {
+      const tick = Math.max(3, Math.floor(size * 0.16));
+      const pad = 2.6;
+      ctx.strokeStyle = style.emblemColor;
+      ctx.globalAlpha = 0.48;
+      ctx.lineWidth = 1.1;
+      if (!joins.top && !joins.left) {
+        ctx.beginPath();
+        ctx.moveTo(left + pad, top + pad + tick);
+        ctx.lineTo(left + pad, top + pad);
+        ctx.lineTo(left + pad + tick, top + pad);
+        ctx.stroke();
+      }
+      if (!joins.bottom && !joins.right) {
+        ctx.beginPath();
+        ctx.moveTo(right - pad - tick, bottom - pad);
+        ctx.lineTo(right - pad, bottom - pad);
+        ctx.lineTo(right - pad, bottom - pad - tick);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    if (patternMode && !isWild) {
+      ctx.globalAlpha = 0.7;
+      this.drawPatternEmblem(
+        ctx,
+        left + bw * 0.5,
+        top + bh * 0.5,
+        size,
+        color,
+        style.emblemColor
+      );
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  private getBlockSprite(
+    skin: SkinConfig,
+    size: number,
+    color: CellColor,
+    joins: NeighborJoins,
+    isWild: boolean,
+    patternMode: boolean,
+    texSeed: number
+  ): HTMLCanvasElement | null {
+    if (typeof document === 'undefined' || size < 6) return null;
+    if (this.blockSpriteSkinKey !== skin.id) {
+      this.blockSpriteCache.clear();
+      this.blockSpriteSkinKey = skin.id;
+    }
+    const sz = Math.round(size);
+    const joinMask =
+      (joins.top ? 1 : 0) |
+      (joins.right ? 2 : 0) |
+      (joins.bottom ? 4 : 0) |
+      (joins.left ? 8 : 0);
+    const texBucket = ((texSeed % 4) + 4) % 4;
+    const key = `${sz}:${color}:${joinMask}:${isWild ? 1 : 0}:${patternMode ? 1 : 0}:${texBucket}`;
+    const existing = this.blockSpriteCache.get(key);
+    if (existing) return existing;
+
+    if (this.blockSpriteCache.size >= MAX_BLOCK_SPRITES) {
+      const oldestKey = this.blockSpriteCache.keys().next().value;
+      if (oldestKey !== undefined) {
+        this.blockSpriteCache.delete(oldestKey);
+      }
+    }
+
+    const canvasW = sz + 3;
+    const canvasH = sz + 3;
+    const sprite = this.createOffscreen(canvasW, canvasH);
+    const sctx = sprite.getContext('2d');
+    if (sctx) {
+      this.renderStaticBlockBase(
+        sctx,
+        1,
+        1,
+        sz,
+        color,
+        skin,
+        joins,
+        isWild,
+        patternMode,
+        texBucket
+      );
+    }
+    this.blockSpriteCache.set(key, sprite);
+    return sprite;
+  }
+
   private drawBlockCell(
     ctx: CanvasRenderingContext2D,
     x: number,
@@ -5707,6 +6734,10 @@ export class IluminadoCanvasRenderer {
       timeSec: number;
       shimmerWave: number;
       isWild?: boolean;
+      isCrashGem?: boolean;
+      frostHp?: number;
+      isVirus?: boolean;
+      patternMode?: boolean;
     }
   ): void {
     const style: BlockStyle = getBlockStyle(skin.palette, color);
@@ -5718,17 +6749,11 @@ export class IluminadoCanvasRenderer {
       squashOffset = Math.sin(p * Math.PI * 1.45) * 1.85;
     }
 
-    // Subtle multi-second ambient breathing per block
-    const breathPhase = fx.timeSec * 1.15 + fx.row * 0.55 + fx.col * 0.35;
-    const breath = 0.5 + 0.5 * Math.sin(breathPhase);
-
-    // Gentle dissolve curve when queued for clearing on the timeline sweep (no jarring strobe)
     const dissolveWave = fx.pendingClear
       ? 0.5 + 0.5 * Math.sin(fx.timeSec * 5.2 - fx.col * 0.6)
       : 0;
     const dissolveScale = fx.pendingClear ? 0.92 - dissolveWave * 0.06 : 1;
 
-    // Seamless auto-tiling across joined same-color neighbors
     const insetShrink = fx.pendingClear ? size * (1 - dissolveScale) * 0.5 : 0;
     const left = x + insetShrink;
     const right = (joins.right && !fx.pendingClear ? x + size + 0.5 : x + size) - insetShrink;
@@ -5737,319 +6762,52 @@ export class IluminadoCanvasRenderer {
     const bw = Math.max(2, right - left);
     const bh = Math.max(2, bottom - top);
 
-    const baseR = fx.isWild
-      ? Math.max(3, Math.floor(size * 0.2))
-      : color === 0
-      ? Math.max(3, Math.floor(size * 0.24))
-      : color === 2
-      ? Math.max(2, Math.floor(size * 0.14))
-      : Math.max(1, Math.floor(size * 0.05));
-    const rTL = !joins.top && !joins.left ? baseR : 0;
-    const rTR = !joins.top && !joins.right ? baseR : 0;
-    const rBR = !joins.bottom && !joins.right ? baseR : 0;
-    const rBL = !joins.bottom && !joins.left ? baseR : 0;
-
     ctx.save();
     const baseAlpha = fx.pendingClear ? 0.72 + dissolveWave * 0.22 : 1;
     ctx.globalAlpha = baseAlpha;
 
-    // Main block body path
-    this.selectiveRoundRect(ctx, left, top, bw, bh, rTL, rTR, rBR, rBL);
-    if (fx.isWild) {
-      const sA = getBlockStyle(skin.palette, 0);
-      const sB = getBlockStyle(skin.palette, 1);
-      const sC = getBlockStyle(skin.palette, 2);
-      const prismGrad = ctx.createLinearGradient(left, top, right, bottom);
-      prismGrad.addColorStop(0, sA.fill);
-      prismGrad.addColorStop(0.5, sC.highlight);
-      prismGrad.addColorStop(1, sB.fill);
-      ctx.fillStyle = prismGrad;
-    } else {
-      const bodyGrad = ctx.createLinearGradient(left, top, right, bottom);
-      bodyGrad.addColorStop(0, style.fill);
-      bodyGrad.addColorStop(1, style.fillGradientEnd);
-      ctx.fillStyle = bodyGrad;
-    }
-    ctx.fill();
+    const patternOn = Boolean(fx.patternMode);
+    const texSeed = fx.row * 7 + fx.col * 13;
+    const cachedSprite = !fx.pendingClear
+      ? this.getBlockSprite(skin, size, color, joins, Boolean(fx.isWild), patternOn, texSeed)
+      : null;
 
-    // Per-skin fill variant layering while keeping Color 0 (rounded ceramic) vs Color 1 (cut slate) crisp
-    const fillVar = style.fillVariant;
-    if (fillVar === 'concentric') {
-      const cxT = left + bw * 0.5;
-      const cyT = top + bh * 0.5;
-      const maxRingR = Math.min(bw, bh) * 0.42;
-      ctx.strokeStyle = style.highlight;
-      ctx.globalAlpha = baseAlpha * (0.28 + breath * 0.06);
-      ctx.lineWidth = Math.max(2, size * 0.11);
-      ctx.beginPath();
-      ctx.arc(cxT, cyT, maxRingR, 0, Math.PI * 2);
-      ctx.stroke();
-
-      ctx.strokeStyle = style.emblemColor;
-      ctx.globalAlpha = baseAlpha * 0.24;
-      ctx.lineWidth = Math.max(1.2, size * 0.055);
-      ctx.beginPath();
-      ctx.arc(cxT, cyT, maxRingR * 0.52, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.globalAlpha = baseAlpha;
-    } else if (fillVar === 'split_plane') {
-      ctx.fillStyle = style.highlight;
-      ctx.globalAlpha = baseAlpha * (0.16 + breath * 0.05);
-      ctx.beginPath();
-      ctx.moveTo(left + 1.5, top + 1.5);
-      ctx.lineTo(right - 1.5, top + 1.5);
-      ctx.lineTo(left + 1.5, bottom - 1.5);
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.fillStyle = style.shade;
-      ctx.globalAlpha = baseAlpha * 0.14;
-      ctx.beginPath();
-      ctx.moveTo(right - 1.5, bottom - 1.5);
-      ctx.lineTo(right - 1.5, top + 1.5);
-      ctx.lineTo(left + 1.5, bottom - 1.5);
-      ctx.closePath();
-      ctx.fill();
-      ctx.globalAlpha = baseAlpha;
-    } else if (fillVar === 'wash') {
-      ctx.fillStyle = style.highlight;
-      ctx.globalAlpha = baseAlpha * (0.18 + breath * 0.07);
-      ctx.beginPath();
-      ctx.ellipse(left + bw * 0.34, top + bh * 0.34, bw * 0.34, bh * 0.24, -0.45, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = style.shade;
-      ctx.globalAlpha = baseAlpha * 0.12;
-      ctx.beginPath();
-      ctx.ellipse(left + bw * 0.7, top + bh * 0.72, bw * 0.26, bh * 0.2, 0.35, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.globalAlpha = baseAlpha;
-    } else if (fillVar === 'luminous') {
-      const rad = ctx.createRadialGradient(
-        left + bw * 0.45,
-        top + bh * 0.4,
-        1,
-        left + bw * 0.5,
-        top + bh * 0.5,
-        Math.max(bw, bh) * 0.55
+    if (cachedSprite) {
+      const ratio = bw / Math.max(1, size);
+      ctx.drawImage(
+        cachedSprite,
+        left - 1,
+        top - 1,
+        cachedSprite.width * (size / Math.max(1, Math.round(size))) * (ratio >= 1 ? 1 : ratio),
+        cachedSprite.height * (size / Math.max(1, Math.round(size)))
       );
-      rad.addColorStop(0, style.highlight);
-      rad.addColorStop(1, 'rgba(250, 246, 238, 0)');
-      ctx.fillStyle = rad;
-      ctx.globalAlpha = baseAlpha * (0.28 + breath * 0.08);
-      ctx.fillRect(left + 1, top + 1, Math.max(1, bw - 2), Math.max(1, bh - 2));
-      ctx.globalAlpha = baseAlpha;
-    } else if (fillVar === 'satin') {
-      ctx.fillStyle = style.highlight;
-      ctx.globalAlpha = baseAlpha * (0.15 + breath * 0.06);
-      ctx.beginPath();
-      ctx.ellipse(left + bw * 0.36, top + bh * 0.3, bw * 0.26, bh * 0.16, -0.38, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.globalAlpha = baseAlpha;
     } else {
-      ctx.fillStyle = style.highlight;
-      ctx.globalAlpha = baseAlpha * 0.07;
-      ctx.fillRect(left + 1.5, top + 1.5, Math.max(1, bw - 3), Math.max(1, (bh - 3) * 0.45));
-      ctx.globalAlpha = baseAlpha;
+      this.renderStaticBlockBase(
+        ctx,
+        left,
+        top,
+        bw,
+        color,
+        skin,
+        joins,
+        Boolean(fx.isWild),
+        patternOn,
+        texSeed
+      );
     }
 
     // Formed 2x2 square living pearl wash & beat-synced glint
     if (fx.inSquare) {
       ctx.fillStyle = skin.palette.squareHighlight;
-      ctx.globalAlpha = baseAlpha * (0.18 + fx.shimmerWave * 0.16);
+      ctx.globalAlpha = baseAlpha * (0.16 + fx.shimmerWave * 0.24);
       ctx.fillRect(left + 1, top + 1, Math.max(1, bw - 2), Math.max(1, bh - 2));
       const beatAccent = Math.pow(1 - fx.beatPhase, 3);
-      if (beatAccent > 0.12) {
+      if (beatAccent > 0.12 || fx.shimmerWave > 0.45) {
         ctx.fillStyle = '#faf6ee';
-        ctx.globalAlpha = baseAlpha * beatAccent * 0.42;
+        ctx.globalAlpha = baseAlpha * Math.min(0.6, beatAccent * 0.36 + fx.shimmerWave * 0.24);
         ctx.beginPath();
         ctx.arc(left + bw * 0.5, top + bh * 0.5, Math.max(1.5, size * 0.08), 0, Math.PI * 2);
         ctx.fill();
-      }
-      ctx.globalAlpha = baseAlpha;
-    }
-
-    // World material micro-texture overlay
-    const texPad = Math.max(2, Math.floor(size * 0.08));
-    this.drawBlockTexture(
-      ctx,
-      left + texPad,
-      top + texPad,
-      Math.max(1, bw - texPad * 2),
-      Math.max(1, bh - texPad * 2),
-      style,
-      fx.row * 7 + fx.col * 13
-    );
-
-    // Directional exposed-edge bevel highlights (top & left) and shade (bottom & right)
-    const bevel = Math.max(1.5, Math.floor(size * 0.085));
-    if (!joins.top) {
-      ctx.fillStyle = style.highlight;
-      ctx.globalAlpha = baseAlpha * (color === 0 ? 0.56 : 0.68);
-      ctx.fillRect(left + (rTL > 0 ? 2 : 0), top, bw - (rTL > 0 ? 2 : 0) - (rTR > 0 ? 2 : 0), bevel);
-    }
-    if (!joins.left) {
-      ctx.fillStyle = style.highlight;
-      ctx.globalAlpha = baseAlpha * 0.44;
-      ctx.fillRect(left, top + (rTL > 0 ? 2 : 0), bevel, bh - (rTL > 0 ? 2 : 0) - (rBL > 0 ? 2 : 0));
-    }
-    if (!joins.bottom) {
-      ctx.fillStyle = style.shade;
-      ctx.globalAlpha = baseAlpha * (color === 0 ? 0.58 : 0.7);
-      ctx.fillRect(left + (rBL > 0 ? 2 : 0), bottom - bevel, bw - (rBL > 0 ? 2 : 0) - (rBR > 0 ? 2 : 0), bevel);
-    }
-    if (!joins.right) {
-      ctx.fillStyle = style.shade;
-      ctx.globalAlpha = baseAlpha * 0.44;
-      ctx.fillRect(right - bevel, top + (rTR > 0 ? 2 : 0), bevel, bh - (rTR > 0 ? 2 : 0) - (rBR > 0 ? 2 : 0));
-    }
-    ctx.globalAlpha = baseAlpha;
-
-    // Soft shared light seam between matching joined neighbors so connection reads tactilely
-    ctx.strokeStyle =
-      color === 0 ? 'rgba(250, 246, 238, 0.22)' : 'rgba(250, 246, 238, 0.14)';
-    ctx.lineWidth = 1;
-    if (joins.top) {
-      ctx.beginPath();
-      ctx.moveTo(left + 3, top);
-      ctx.lineTo(x + size - 3, top);
-      ctx.stroke();
-    }
-    if (joins.left) {
-      ctx.beginPath();
-      ctx.moveTo(left, top + 3);
-      ctx.lineTo(left, y + size - 3);
-      ctx.stroke();
-    }
-
-    // Per-skin stroke variant on exposed edges (cleanly differentiates finishes)
-    const strokeVar = style.strokeVariant;
-    const inset = 0.6;
-    if (strokeVar === 'offset_ink') {
-      ctx.strokeStyle = style.border;
-      ctx.globalAlpha = baseAlpha * 0.34;
-      ctx.lineWidth = 1.2;
-      if (!joins.bottom) {
-        ctx.beginPath();
-        ctx.moveTo(left + 1.5, y + size - inset + 0.9);
-        ctx.lineTo(x + size - 0.5, y + size - inset + 0.9);
-        ctx.stroke();
-      }
-      if (!joins.right) {
-        ctx.beginPath();
-        ctx.moveTo(x + size - inset + 0.9, top + 1.5);
-        ctx.lineTo(x + size - inset + 0.9, y + size - 0.5);
-        ctx.stroke();
-      }
-      ctx.globalAlpha = baseAlpha;
-    }
-
-    ctx.strokeStyle = style.border;
-    ctx.lineWidth =
-      strokeVar === 'painterly'
-        ? 1.85
-        : color === 0
-        ? 1.1
-        : color === 2
-        ? 1.25
-        : 1.35;
-    if (!joins.top) {
-      ctx.beginPath();
-      ctx.moveTo(left + rTL, top + inset);
-      ctx.lineTo(x + size - rTR, top + inset);
-      ctx.stroke();
-    }
-    if (!joins.bottom) {
-      ctx.beginPath();
-      ctx.moveTo(left + rBL, y + size - inset);
-      ctx.lineTo(x + size - rBR, y + size - inset);
-      ctx.stroke();
-    }
-    if (!joins.left) {
-      ctx.beginPath();
-      ctx.moveTo(left + inset, top + rTL);
-      ctx.lineTo(left + inset, y + size - rBL);
-      ctx.stroke();
-    }
-    if (!joins.right) {
-      ctx.beginPath();
-      ctx.moveTo(x + size - inset, top + rTR);
-      ctx.lineTo(x + size - inset, y + size - rBR);
-      ctx.stroke();
-    }
-
-    if (strokeVar === 'painterly') {
-      ctx.strokeStyle = style.border;
-      ctx.globalAlpha = baseAlpha * 0.42;
-      ctx.lineWidth = 1.1;
-      if (!joins.top) {
-        ctx.beginPath();
-        ctx.moveTo(left + rTL + 2, top + 1.9);
-        ctx.lineTo(x + size - rTR - 2, top + 1.4);
-        ctx.stroke();
-      }
-      if (!joins.left) {
-        ctx.beginPath();
-        ctx.moveTo(left + 1.9, top + rTL + 2);
-        ctx.lineTo(left + 1.4, y + size - rBL - 2);
-        ctx.stroke();
-      }
-      ctx.globalAlpha = baseAlpha;
-    } else if (strokeVar === 'double') {
-      const innerPad = Math.max(2.6, Math.floor(size * 0.11));
-      if (bw > innerPad * 2 + 4 && bh > innerPad * 2 + 4) {
-        ctx.strokeStyle = style.emblemColor;
-        ctx.globalAlpha = baseAlpha * 0.34;
-        ctx.lineWidth = 1;
-        this.selectiveRoundRect(
-          ctx,
-          left + innerPad,
-          top + innerPad,
-          bw - innerPad * 2,
-          bh - innerPad * 2,
-          rTL > 0 ? Math.max(1, rTL - 2) : 0,
-          rTR > 0 ? Math.max(1, rTR - 2) : 0,
-          rBR > 0 ? Math.max(1, rBR - 2) : 0,
-          rBL > 0 ? Math.max(1, rBL - 2) : 0
-        );
-        ctx.stroke();
-        ctx.globalAlpha = baseAlpha;
-      }
-    } else if (strokeVar === 'recessed') {
-      ctx.strokeStyle = style.shade;
-      ctx.globalAlpha = baseAlpha * 0.38;
-      ctx.lineWidth = 1.1;
-      if (!joins.top) {
-        ctx.beginPath();
-        ctx.moveTo(left + 2.5, top + 2.5);
-        ctx.lineTo(right - 2.5, top + 2.5);
-        ctx.stroke();
-      }
-      if (!joins.left) {
-        ctx.beginPath();
-        ctx.moveTo(left + 2.5, top + 2.5);
-        ctx.lineTo(left + 2.5, bottom - 2.5);
-        ctx.stroke();
-      }
-      ctx.globalAlpha = baseAlpha;
-    } else if (strokeVar === 'corner_ticks') {
-      const tick = Math.max(3, Math.floor(size * 0.16));
-      const pad = 2.6;
-      ctx.strokeStyle = style.emblemColor;
-      ctx.globalAlpha = baseAlpha * 0.48;
-      ctx.lineWidth = 1.1;
-      if (!joins.top && !joins.left) {
-        ctx.beginPath();
-        ctx.moveTo(left + pad, top + pad + tick);
-        ctx.lineTo(left + pad, top + pad);
-        ctx.lineTo(left + pad + tick, top + pad);
-        ctx.stroke();
-      }
-      if (!joins.bottom && !joins.right) {
-        ctx.beginPath();
-        ctx.moveTo(right - pad - tick, bottom - pad);
-        ctx.lineTo(right - pad, bottom - pad);
-        ctx.lineTo(right - pad, bottom - pad - tick);
-        ctx.stroke();
       }
       ctx.globalAlpha = baseAlpha;
     }
@@ -6066,7 +6824,84 @@ export class IluminadoCanvasRenderer {
       ctx.globalAlpha = baseAlpha;
     }
 
-    // Keep tiles clean: draw center glyph ONLY for Chain enhancement blocks
+    // Crash Gem faceted prism overlay + glint + halo
+    if (fx.isCrashGem) {
+      const cx = left + bw * 0.5;
+      const cy = top + bh * 0.5;
+      const glint = 0.5 + 0.5 * Math.sin(fx.timeSec * 3.8 + fx.col * 0.9 + fx.row * 0.7);
+      ctx.save();
+      ctx.strokeStyle = style.highlight;
+      ctx.globalAlpha = baseAlpha * (0.45 + glint * 0.38);
+      ctx.lineWidth = Math.max(1.5, size * 0.075);
+      this.roundRect(ctx, left + 1.5, top + 1.5, Math.max(2, bw - 3), Math.max(2, bh - 3), Math.max(2, size * 0.16));
+      ctx.stroke();
+
+      const gemR = Math.max(3.5, Math.min(bw, bh) * 0.3);
+      ctx.fillStyle = '#faf6ee';
+      ctx.globalAlpha = baseAlpha * (0.38 + glint * 0.32);
+      this.drawDiamond(ctx, cx, cy, gemR);
+      ctx.strokeStyle = style.highlight;
+      ctx.lineWidth = 1.25;
+      ctx.globalAlpha = baseAlpha * 0.9;
+      ctx.stroke();
+
+      // Inner crown facet & slow glint cross
+      ctx.fillStyle = style.highlight;
+      ctx.globalAlpha = baseAlpha * 0.55;
+      this.drawDiamond(ctx, cx, cy, gemR * 0.45);
+      if (glint > 0.72) {
+        const sparkR = gemR * (0.9 + (glint - 0.72) * 1.4);
+        ctx.strokeStyle = '#faf6ee';
+        ctx.globalAlpha = baseAlpha * (glint - 0.72) * 2.8;
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(cx - sparkR, cy);
+        ctx.lineTo(cx + sparkR, cy);
+        ctx.moveTo(cx, cy - sparkR);
+        ctx.lineTo(cx, cy + sparkR);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
+    // Anchored Color Node (Virus) brackets & pulsing core
+    if (fx.isVirus) {
+      const cx = left + bw * 0.5;
+      const cy = top + bh * 0.5;
+      const pad = 2.2;
+      const arm = Math.max(3, Math.floor(size * 0.2));
+      ctx.save();
+      ctx.strokeStyle = '#1f1a2b';
+      ctx.lineWidth = Math.max(1.6, size * 0.075);
+      ctx.beginPath();
+      ctx.moveTo(left + pad, top + pad + arm);
+      ctx.lineTo(left + pad, top + pad);
+      ctx.lineTo(left + pad + arm, top + pad);
+      ctx.moveTo(right - pad - arm, top + pad);
+      ctx.lineTo(right - pad, top + pad);
+      ctx.lineTo(right - pad, top + pad + arm);
+      ctx.moveTo(left + pad, bottom - pad - arm);
+      ctx.lineTo(left + pad, bottom - pad);
+      ctx.lineTo(left + pad + arm, bottom - pad);
+      ctx.moveTo(right - pad - arm, bottom - pad);
+      ctx.lineTo(right - pad, bottom - pad);
+      ctx.lineTo(right - pad, bottom - pad - arm);
+      ctx.stroke();
+
+      const pulseR = Math.max(2.6, Math.min(bw, bh) * (0.2 + 0.04 * Math.sin(fx.timeSec * 5)));
+      ctx.strokeStyle = '#faf6ee';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.arc(cx, cy, pulseR, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = '#1f1a2b';
+      ctx.beginPath();
+      ctx.arc(cx, cy, pulseR * 0.46, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Chain enhancement cross glyph
     const useDarkChainGlyph =
       getHexLuminance(style.fill) > 0.78 &&
       getHexLuminance(style.emblemColor) < 0.45;
@@ -6098,6 +6933,42 @@ export class IluminadoCanvasRenderer {
       ctx.fillStyle = skin.palette.squareHighlight;
       ctx.globalAlpha = baseAlpha * 0.24;
       ctx.fillRect(left, top, bw, bh);
+    }
+
+    // Frost rime overlay + crack fracture when frostHp === 1
+    const frostHp = fx.frostHp ?? 0;
+    if (frostHp > 0) {
+      ctx.save();
+      ctx.fillStyle = frostHp >= 2 ? 'rgba(232, 246, 255, 0.44)' : 'rgba(232, 246, 255, 0.24)';
+      ctx.fillRect(left + 1, top + 1, Math.max(1, bw - 2), Math.max(1, bh - 2));
+      ctx.strokeStyle = '#ffffff';
+      ctx.globalAlpha = frostHp >= 2 ? 0.78 : 0.52;
+      ctx.lineWidth = 1.4;
+      ctx.strokeRect(left + 1.5, top + 1.5, Math.max(2, bw - 3), Math.max(2, bh - 3));
+      // Corner ice bevel triangles
+      const tri = Math.max(3, Math.floor(size * 0.22));
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
+      ctx.beginPath();
+      ctx.moveTo(left + 1, top + 1);
+      ctx.lineTo(left + 1 + tri, top + 1);
+      ctx.lineTo(left + 1, top + 1 + tri);
+      ctx.closePath();
+      ctx.fill();
+
+      if (frostHp === 1) {
+        ctx.strokeStyle = '#243247';
+        ctx.globalAlpha = 0.85;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(left + bw * 0.2, top + 2);
+        ctx.lineTo(left + bw * 0.5, top + bh * 0.45);
+        ctx.lineTo(left + bw * 0.34, top + bh * 0.72);
+        ctx.lineTo(left + bw * 0.68, bottom - 2);
+        ctx.moveTo(left + bw * 0.5, top + bh * 0.45);
+        ctx.lineTo(left + bw * 0.84, top + bh * 0.36);
+        ctx.stroke();
+      }
+      ctx.restore();
     }
 
     // Subtle soft illumination from landing flash + passing neighbor ripple
@@ -6698,6 +7569,9 @@ export class IluminadoCanvasRenderer {
       const p = this.particles[i];
       if (!p.active) continue;
       ctx.save();
+      if (p.isGlint) {
+        ctx.globalCompositeOperation = 'lighter';
+      }
       ctx.globalAlpha = p.alpha;
       ctx.translate(p.x, p.y);
       ctx.rotate(p.rotation);
@@ -6724,6 +7598,21 @@ export class IluminadoCanvasRenderer {
         }
         ctx.closePath();
         ctx.fill();
+      } else if (p.shape === 'spark') {
+        ctx.fillStyle = p.color;
+        const outer = p.size * 0.85;
+        const thin = p.size * 0.18;
+        ctx.beginPath();
+        ctx.moveTo(0, -outer);
+        ctx.lineTo(thin, -thin);
+        ctx.lineTo(outer, 0);
+        ctx.lineTo(thin, thin);
+        ctx.lineTo(0, outer);
+        ctx.lineTo(-thin, thin);
+        ctx.lineTo(-outer, 0);
+        ctx.lineTo(-thin, -thin);
+        ctx.closePath();
+        ctx.fill();
       } else if (p.shape === 'diamond') {
         ctx.fillStyle = p.color;
         this.drawDiamond(ctx, 0, 0, p.size * 0.55);
@@ -6742,23 +7631,47 @@ export class IluminadoCanvasRenderer {
       const t = pop.life / pop.maxLife;
       const alpha = t < 0.16 ? t / 0.16 : 1 - (t - 0.16) / 0.84;
       const popScale = t < 0.14 ? 0.85 + (t / 0.14) * 0.25 : 1 + Math.max(0, 0.28 - t) * 0.28;
+      const rect =
+        pop.boardIdx === 1 && this.lastSecondaryRect
+          ? this.lastSecondaryRect
+          : this.lastPrimaryRect;
+      const anchorX = pop.followBoard ? rect.x + rect.width * 0.5 : pop.x;
+      const anchorY = pop.followBoard ? rect.y + rect.height * 0.32 - t * 14 : pop.y;
+      const isBrightText = getHexLuminance(pop.color) > 0.54;
+
       ctx.save();
       ctx.globalAlpha = Math.max(0, alpha);
-      ctx.translate(pop.x, pop.y);
+      ctx.translate(anchorX, anchorY);
       ctx.scale(popScale, popScale);
       ctx.textAlign = 'center';
-      ctx.lineJoin = 'round';
-      ctx.lineWidth = 3.5;
-      ctx.strokeStyle = 'rgba(255, 252, 248, 0.88)';
-      ctx.fillStyle = pop.color;
-      ctx.font = '700 22px "Fraunces", Georgia, serif';
-      ctx.strokeText(pop.text, 0, 0);
-      ctx.fillText(pop.text, 0, 0);
+      ctx.textBaseline = 'middle';
+
+      ctx.font = '700 20px "Fraunces", Georgia, serif';
+      const titleW = ctx.measureText(pop.text).width;
+      let subW = 0;
       if (pop.subtext) {
-        ctx.font = '700 11.5px "Plus Jakarta Sans", sans-serif';
-        ctx.lineWidth = 2.4;
-        ctx.strokeText(pop.subtext, 0, 22);
-        ctx.fillText(pop.subtext, 0, 22);
+        ctx.font = '700 11px "Plus Jakarta Sans", sans-serif';
+        subW = ctx.measureText(pop.subtext).width;
+      }
+      const boxW = Math.max(titleW, subW) + 30;
+      const boxH = pop.subtext ? 50 : 34;
+      const boxX = -boxW * 0.5;
+      const boxY = pop.subtext ? -21 : -17;
+
+      ctx.fillStyle = isBrightText ? 'rgba(26, 22, 36, 0.86)' : 'rgba(250, 246, 238, 0.94)';
+      this.selectiveRoundRect(ctx, boxX, boxY, boxW, boxH, 11, 11, 11, 11);
+      ctx.fill();
+      ctx.lineWidth = 1.4;
+      ctx.strokeStyle = pop.color;
+      ctx.stroke();
+
+      ctx.fillStyle = pop.color;
+      ctx.font = '700 20px "Fraunces", Georgia, serif';
+      ctx.fillText(pop.text, 0, pop.subtext ? -5 : 0);
+      if (pop.subtext) {
+        ctx.fillStyle = isBrightText ? 'rgba(250, 246, 238, 0.9)' : 'rgba(32, 28, 44, 0.8)';
+        ctx.font = '700 11px "Plus Jakarta Sans", sans-serif';
+        ctx.fillText(pop.subtext, 0, 15);
       }
       ctx.restore();
     }

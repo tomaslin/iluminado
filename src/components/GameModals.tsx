@@ -14,6 +14,10 @@ interface GameModalsProps {
   onNextStage?: () => void;
   onOpenShiftSettings?: () => void;
   onBackToMenu: () => void;
+  reducedMotion?: boolean;
+  patternMode?: boolean;
+  onToggleReducedMotion?: () => void;
+  onTogglePatternMode?: () => void;
 }
 
 export const GameModals: React.FC<GameModalsProps> = ({
@@ -28,6 +32,10 @@ export const GameModals: React.FC<GameModalsProps> = ({
   onNextStage,
   onOpenShiftSettings,
   onBackToMenu,
+  reducedMotion = false,
+  patternMode = false,
+  onToggleReducedMotion,
+  onTogglePatternMode,
 }) => {
   const { palette } = skin;
 
@@ -116,6 +124,43 @@ export const GameModals: React.FC<GameModalsProps> = ({
                 style={{ accentColor: palette.hudAccent }}
               />
             </div>
+
+            {(onToggleReducedMotion || onTogglePatternMode) && (
+              <div className="pt-2 border-t border-[#201c2c]/10 flex flex-col gap-1.5">
+                {onToggleReducedMotion && (
+                  <button
+                    type="button"
+                    data-testid="toggle-reduced-motion"
+                    aria-pressed={reducedMotion}
+                    onClick={onToggleReducedMotion}
+                    className="w-full flex items-center justify-between text-xs font-semibold px-2.5 py-1.5 rounded-xl transition-colors cursor-pointer"
+                    style={{
+                      backgroundColor: reducedMotion ? palette.hudAccent : 'rgba(32, 28, 44, 0.06)',
+                      color: reducedMotion ? '#faf6ee' : palette.hudInk,
+                    }}
+                  >
+                    <span>Reduced Motion</span>
+                    <span className="font-mono-tabular text-[11px]">{reducedMotion ? 'ON' : 'OFF'}</span>
+                  </button>
+                )}
+                {onTogglePatternMode && (
+                  <button
+                    type="button"
+                    data-testid="toggle-pattern-mode"
+                    aria-pressed={patternMode}
+                    onClick={onTogglePatternMode}
+                    className="w-full flex items-center justify-between text-xs font-semibold px-2.5 py-1.5 rounded-xl transition-colors cursor-pointer"
+                    style={{
+                      backgroundColor: patternMode ? palette.hudAccent : 'rgba(32, 28, 44, 0.06)',
+                      color: patternMode ? '#faf6ee' : palette.hudInk,
+                    }}
+                  >
+                    <span>Pattern Symbols</span>
+                    <span className="font-mono-tabular text-[11px]">{patternMode ? 'ON' : 'OFF'}</span>
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           <div className="flex flex-col gap-2.5">
