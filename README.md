@@ -112,6 +112,8 @@ Whenever you level up (outside Puzzle mode), one active shift triggers for the n
 
 The first cut of this was - hey, take Monument Valley and throw that into Lumines to make it look like that. It worked surprisingly well. I asked it to make the skins a little bit more art inspired and fun.
 
+In the ideal world I would get help from real artists and graphic designers and real musicians. This would be an absolute pipe dream. 
+
 The music here reflects my pretty terrible musical taste. I wanted tracks I could listen to while playing this in my car. They are generated using the free Lyria that is included in Google Gemini. 
 
 Basically I would come up with an idea or have AI suggest one that is different than the rest of the game. Something like:
