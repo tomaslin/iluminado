@@ -116,6 +116,16 @@ const TRACK_TRIM_GAINS: Record<string, number> = {
   'music/world28.mp3': 1.16,
   'music/world29.mp3': 0.96,
   'music/world30.mp3': 0.88,
+  'music/world31.mp3': 0.94,
+  'music/world32.mp3': 1.0,
+  'music/world33.mp3': 0.92,
+  'music/world34.mp3': 0.95,
+  'music/world35.mp3': 0.88,
+  'music/world36.mp3': 0.92,
+  'music/world37.mp3': 0.84,
+  'music/world38.mp3': 0.86,
+  'music/world39.mp3': 0.94,
+  'music/world40.mp3': 0.88,
 };
 
 export function getTrackTrimGain(trackUrl?: string | null): number {
@@ -1023,9 +1033,14 @@ export class IluminadoAudioEngine {
       style === 'kizomba' ||
       style === 'dark_zouk' ||
       style === 'dub_techno' ||
-      style === 'uk_garage'
+      style === 'uk_garage' ||
+      style === 'miami_boogie'
         ? 105
-        : style === 'heavy_metal' || style === 'alt_rock' || style === 'post_rock'
+        : style === 'heavy_metal' ||
+          style === 'alt_rock' ||
+          style === 'post_rock' ||
+          style === 'industrial_synth' ||
+          style === 'constructivist_march'
         ? 145
         : 120;
     const endHz =
@@ -1033,11 +1048,14 @@ export class IluminadoAudioEngine {
       style === 'kizomba' ||
       style === 'reggaeton' ||
       style === 'dub_techno' ||
-      style === 'uk_garage'
+      style === 'uk_garage' ||
+      style === 'industrial_synth'
         ? 36
         : 44;
     const dur =
-      style === 'trap' || style === 'kizomba' || style === 'dub_techno' ? 0.28 : 0.16;
+      style === 'trap' || style === 'kizomba' || style === 'dub_techno' || style === 'industrial_synth'
+        ? 0.28
+        : 0.16;
     this.scheduleTone(
       when,
       this.stemPercGain,
@@ -1047,14 +1065,16 @@ export class IluminadoAudioEngine {
       vol,
       0.003,
       500,
-      style === 'heavy_metal' ? 0.25 : 0,
+      style === 'heavy_metal' || style === 'constructivist_march' ? 0.25 : 0,
       endHz
     );
     if (
       style === 'heavy_metal' ||
       style === 'alt_rock' ||
       style === 'liquid_dnb' ||
-      style === 'post_rock'
+      style === 'post_rock' ||
+      style === 'industrial_synth' ||
+      style === 'constructivist_march'
     ) {
       // Beater click transient
       this.scheduleNoise(when, this.stemPercGain, 0.018, 'bandpass', 3200, 1.8, vol * 0.28);
@@ -1067,25 +1087,35 @@ export class IluminadoAudioEngine {
       style === 'bossa_nova' ||
       style === 'bachata' ||
       style === 'cumbia_dub' ||
-      style === 'afrobeat_jazz'
+      style === 'afrobeat_jazz' ||
+      style === 'andean_cumbia' ||
+      style === 'shamisen_chill'
     ) {
       // Crisp wooden clave / rim knock or bongo slap
       this.scheduleTone(
         when,
         this.stemPercGain,
-        style === 'bossa_nova' ? 880 : 1150,
+        style === 'bossa_nova' || style === 'shamisen_chill' ? 880 : 1150,
         0.055,
         'triangle',
         vol * 0.65,
         0.002,
         3600
       );
-      if (style === 'bachata' || style === 'cumbia_dub') {
+      if (style === 'bachata' || style === 'cumbia_dub' || style === 'andean_cumbia') {
         this.scheduleNoise(when, this.stemPercGain, 0.04, 'highpass', 5200, 1.5, vol * 0.25);
       }
       return;
     }
-    if (style === 'swing' || style === 'country' || style === 'ethio_jazz' || style === 'tango_nuevo') {
+    if (
+      style === 'swing' ||
+      style === 'country' ||
+      style === 'ethio_jazz' ||
+      style === 'tango_nuevo' ||
+      style === 'cat_step_jazz' ||
+      style === 'cubist_chamber' ||
+      style === 'botanical_waltz'
+    ) {
       // Brushed snare sweep / crisp bandoneon slap
       this.scheduleNoise(when, this.stemPercGain, 0.09, 'bandpass', 2800, 0.9, vol * 0.45);
       return;
@@ -1095,7 +1125,13 @@ export class IluminadoAudioEngine {
     this.scheduleNoise(
       when,
       this.stemPercGain,
-      style === 'synthwave' || style === 'city_pop' ? 0.18 : 0.11,
+      style === 'synthwave' ||
+        style === 'city_pop' ||
+        style === 'industrial_synth' ||
+        style === 'miami_boogie' ||
+        style === 'memphis_electro'
+        ? 0.18
+        : 0.11,
       'highpass',
       style === 'trap' || style === 'uk_garage' ? 2400 : 1800,
       1.0,
@@ -1106,20 +1142,20 @@ export class IluminadoAudioEngine {
   private scheduleHat(when: number, vol: number, open: boolean, style: MusicStyleId): void {
     const dur = open ? 0.13 : 0.038;
     const freq =
-      style === 'swing' || style === 'ethio_jazz'
+      style === 'swing' || style === 'ethio_jazz' || style === 'cat_step_jazz' || style === 'cubist_chamber'
         ? 4600
-        : style === 'bachata' || style === 'cumbia_dub'
+        : style === 'bachata' || style === 'cumbia_dub' || style === 'andean_cumbia'
         ? 6200 // güira scrape
-        : style === 'trap' || style === 'uk_garage'
+        : style === 'trap' || style === 'uk_garage' || style === 'industrial_synth'
         ? 7800
         : 6400;
     this.scheduleNoise(
       when,
       this.stemPercGain,
       dur,
-      style === 'swing' ? 'bandpass' : 'highpass',
+      style === 'swing' || style === 'cat_step_jazz' ? 'bandpass' : 'highpass',
       freq,
-      style === 'swing' ? 2.6 : 1.0,
+      style === 'swing' || style === 'cat_step_jazz' ? 2.6 : 1.0,
       vol
     );
   }
@@ -1287,7 +1323,7 @@ export class IluminadoAudioEngine {
       }
       this.scheduleHat(when, 0.06, false, style);
       this.scheduleHat(when + sixteenthDur, 0.04, false, style);
-    } else if (style === 'ambient' || style === 'dark_ambient') {
+    } else if (style === 'ambient' || style === 'dark_ambient' || style === 'cathedral_organ') {
       // Minimal atmospheric pulse & soft tactile ticks
       if (col === 0 || col === 8) {
         this.scheduleKick(when, 0.16, style);
@@ -1304,22 +1340,40 @@ export class IluminadoAudioEngine {
         this.scheduleSnare(when, 0.28, style);
       }
       this.scheduleHat(when, col % 2 === 1 ? 0.075 : 0.04, col === 14, style);
-    } else if (style === 'dub_techno' || style === 'flamenco_house') {
-      // Four-on-the-floor pulse with crisp offbeat hats & claps
-      if (col % 4 === 0) {
+    } else if (
+      style === 'dub_techno' ||
+      style === 'flamenco_house' ||
+      style === 'industrial_synth' ||
+      style === 'miami_boogie' ||
+      style === 'memphis_electro' ||
+      style === 'constructivist_march'
+    ) {
+      // Four-on-the-floor / driving motorik pulse with crisp offbeat hats & claps
+      if (col % 4 === 0 || (style === 'constructivist_march' && col % 4 === 2)) {
         this.scheduleKick(when, 0.32, style);
       }
       if (col === 4 || col === 12) {
         this.scheduleSnare(when, 0.24, style);
       }
-      if (col % 4 === 2) {
-        this.scheduleHat(when, 0.08, true, style);
+      if (col % 4 === 2 || style === 'memphis_electro') {
+        this.scheduleHat(when, col % 2 === 1 ? 0.07 : 0.04, col % 4 === 2, style);
+      }
+    } else if (style === 'cat_step_jazz') {
+      // Bouncy swung pizzicato ride + light rim taps
+      if (col === 0 || col === 6 || col === 8) {
+        this.scheduleKick(when, 0.22, style);
+      }
+      if (col === 4 || col === 12) {
+        this.scheduleSnare(when, 0.2, style);
+      }
+      if (col % 2 === 0 || col % 4 === 3) {
+        this.scheduleHat(when, col % 4 === 2 ? 0.08 : 0.045, col % 4 === 2, style);
       }
     } else {
-      // Country, Jazz Fusion, Bossa, Alt Rock, Synthwave, Chiptune, Trip-Hop, Blues Rock, Afrobeat, Neo Soul, Cumbia, City Pop, Ethio-Jazz, Tango Nuevo, Post-Rock
+      // Country, Jazz Fusion, Bossa, Alt Rock, Synthwave, Chiptune, Trip-Hop, Blues Rock, Afrobeat, Neo Soul, Cumbia, City Pop, Ethio-Jazz, Tango Nuevo, Post-Rock, Shamisen Chill, Cubist Chamber, Andean Cumbia, Botanical Waltz
       if (
         col % 4 === 0 ||
-        ((style === 'alt_rock' || style === 'post_rock' || style === 'afrobeat_jazz') && col === 10)
+        ((style === 'alt_rock' || style === 'post_rock' || style === 'afrobeat_jazz' || style === 'andean_cumbia') && col === 10)
       ) {
         this.scheduleKick(when, 0.28 * music.intensity, style);
       }
@@ -1338,15 +1392,15 @@ export class IluminadoAudioEngine {
         when,
         this.stemBassGain,
         bassFreq,
-        eighthDur * (style === 'heavy_metal' ? 0.85 : 1.45),
+        eighthDur * (style === 'heavy_metal' || style === 'constructivist_march' ? 0.85 : 1.45),
         music.bassWaveform,
         0.19 + music.subBassGain * 0.08,
         0.008,
-        style === 'heavy_metal' || style === 'alt_rock' ? 1400 : 680,
+        style === 'heavy_metal' || style === 'alt_rock' || style === 'industrial_synth' ? 1400 : 680,
         music.distortion * 0.75
       );
       if (music.subBassGain > 0.6) {
-        // Pure sub-octave reinforcement for Trap / Kizomba / Dark Zouk / Reggaeton / DnB
+        // Pure sub-octave reinforcement for Trap / Kizomba / Dark Zouk / Reggaeton / DnB / Industrial
         this.scheduleTone(
           when,
           this.stemBassGain,
@@ -1370,10 +1424,12 @@ export class IluminadoAudioEngine {
         style === 'bachata' ||
         style === 'country' ||
         style === 'bossa_nova' ||
-        style === 'blues_rock';
+        style === 'blues_rock' ||
+        style === 'shamisen_chill' ||
+        style === 'botanical_waltz';
       const leadDur = isGuitarPluck
         ? eighthDur * 1.15
-        : style === 'ambient' || style === 'dark_ambient'
+        : style === 'ambient' || style === 'dark_ambient' || style === 'cathedral_organ'
         ? eighthDur * 2.4
         : eighthDur * 1.4;
 
@@ -1385,7 +1441,7 @@ export class IluminadoAudioEngine {
         music.waveform,
         0.1 * music.intensity,
         isGuitarPluck ? 0.003 : 0.01,
-        style === 'heavy_metal' || style === 'alt_rock' ? 3200 : 2400,
+        style === 'heavy_metal' || style === 'alt_rock' || style === 'industrial_synth' ? 3200 : 2400,
         music.distortion
       );
 
@@ -1456,18 +1512,28 @@ export class IluminadoAudioEngine {
       style === 'cumbia_dub' ||
       style === 'afrobeat_jazz' ||
       style === 'flamenco_house' ||
-      style === 'tango_nuevo'
+      style === 'tango_nuevo' ||
+      style === 'shamisen_chill' ||
+      style === 'andean_cumbia' ||
+      style === 'botanical_waltz'
     ) {
       // Soft woodblock / shaker tick
       this.scheduleTone(now, this.stemPercGain, 980, 0.032, 'triangle', 0.075, 0.002, 2400);
-    } else if (style === 'heavy_metal' || style === 'alt_rock' || style === 'post_rock') {
-      // Palm-muted pick scratch
+    } else if (
+      style === 'heavy_metal' ||
+      style === 'alt_rock' ||
+      style === 'post_rock' ||
+      style === 'industrial_synth' ||
+      style === 'constructivist_march'
+    ) {
+      // Palm-muted pick scratch / metallic click
       this.scheduleNoise(now, this.stemPercGain, 0.028, 'bandpass', 2200, 2.0, 0.09);
     } else if (
       style === 'trap' ||
       style === 'reggaeton' ||
       style === 'liquid_dnb' ||
-      style === 'uk_garage'
+      style === 'uk_garage' ||
+      style === 'memphis_electro'
     ) {
       // Tight high-transient hi-hat tick
       this.scheduleNoise(now, this.stemPercGain, 0.024, 'highpass', 7200, 1.4, 0.08);
@@ -1475,7 +1541,9 @@ export class IluminadoAudioEngine {
       style === 'kizomba' ||
       style === 'dark_zouk' ||
       style === 'neo_soul' ||
-      style === 'dub_techno'
+      style === 'dub_techno' ||
+      style === 'miami_boogie' ||
+      style === 'cat_step_jazz'
     ) {
       // Warm brushed shaker tick
       this.scheduleNoise(now, this.stemPercGain, 0.028, 'bandpass', 4400, 1.5, 0.07);

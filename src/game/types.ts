@@ -197,7 +197,17 @@ export type SkinVisualTheme =
   | 'amber_encaustic'
   | 'celadon_fresco'
   | 'ochre_skyline'
-  | 'aurora_prism';
+  | 'aurora_prism'
+  | 'sumi_bamboo'
+  | 'cubist_atelier'
+  | 'detroit_visor'
+  | 'miami_vice'
+  | 'neo_andean'
+  | 'neko_sketchbook'
+  | 'stained_glass'
+  | 'constructivist'
+  | 'botanical_herbarium'
+  | 'memphis_milano';
 
 export type BlockTextureStyle =
   | 'carved_stone'
@@ -227,7 +237,22 @@ export type BlockTextureStyle =
   | 'stipple_dots'
   | 'linen_weave'
   | 'risograph_dots'
-  | 'fresco_crackle';
+  | 'fresco_crackle'
+  | 'sumi_brush'
+  | 'washi_fiber'
+  | 'cubist_facet'
+  | 'visor_hud'
+  | 'chrome_plate'
+  | 'neon_louvre'
+  | 'chakana_step'
+  | 'aguayo_weave'
+  | 'cat_doodle'
+  | 'paw_print'
+  | 'stained_glass'
+  | 'constructivist_wedge'
+  | 'leaf_vein'
+  | 'petal_press'
+  | 'memphis_squiggle';
 
 export type BlockFillVariant =
   | 'satin'
@@ -288,7 +313,17 @@ export type MusicStyleId =
   | 'dub_techno'
   | 'tango_nuevo'
   | 'uk_garage'
-  | 'post_rock';
+  | 'post_rock'
+  | 'shamisen_chill'
+  | 'cubist_chamber'
+  | 'industrial_synth'
+  | 'miami_boogie'
+  | 'andean_cumbia'
+  | 'cat_step_jazz'
+  | 'cathedral_organ'
+  | 'constructivist_march'
+  | 'botanical_waltz'
+  | 'memphis_electro';
 
 export interface SkinConfig {
   id: string;

@@ -1538,7 +1538,15 @@ export function lockActivePiece(
   // Compact existing rows/columns along active gravity vector first
   settleBoardForDirection(state.grid, dir);
 
+  let totalPieceCells = 0;
+  for (let py = 0; py < pieceRows; py++) {
+    for (let px = 0; px < pieceCols; px++) {
+      if (piece.cells[py]?.[px] !== null) totalPieceCells++;
+    }
+  }
+
   let overflowed = false;
+  let placedCellsCount = 0;
   let crumbleChanged = false;
   if (dir === 'down') {
     for (let px = 0; px < pieceCols; px++) {
@@ -1578,6 +1586,7 @@ export function lockActivePiece(
           0,
           0
         );
+        placedCellsCount++;
         writeRow--;
       }
 
@@ -1633,6 +1642,7 @@ export function lockActivePiece(
           0,
           Math.min(0, writeRow - sourceRow)
         );
+        placedCellsCount++;
         writeRow++;
       }
     }
@@ -1674,6 +1684,7 @@ export function lockActivePiece(
           Math.min(0, sourceCol - writeCol),
           0
         );
+        placedCellsCount++;
         writeCol--;
       }
     }
@@ -1716,10 +1727,13 @@ export function lockActivePiece(
           Math.max(0, sourceCol - writeCol),
           0
         );
+        placedCellsCount++;
         writeCol++;
       }
     }
   }
+
+  const noCellsEntered = totalPieceCells > 0 && placedCellsCount === 0;
 
   let zenTrimmed = false;
   if (overflowed && options?.zenNoLoss) {
@@ -1731,7 +1745,7 @@ export function lockActivePiece(
     settleBoardForDirection(state.grid, dir, true);
   }
 
-  if (!overflowed && state.activeShift === 'cyclotron_flow') {
+  if ((!noCellsEntered || options?.zenNoLoss) && state.activeShift === 'cyclotron_flow') {
     const cwOrder: GravityDirection[] = ['down', 'right', 'up', 'left'];
     const nextDir = cwOrder[(cwOrder.indexOf(dir) + 1) % 4];
     state.gravityDirection = nextDir;
@@ -1894,7 +1908,7 @@ export function lockActivePiece(
     y: queuedPos.y,
   });
 
-  if (overflowed && !options?.zenNoLoss) {
+  if (noCellsEntered && !options?.zenNoLoss) {
     state.activePiece = null;
     state.isGameOver = true;
   } else {

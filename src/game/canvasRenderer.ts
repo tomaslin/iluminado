@@ -1171,8 +1171,7 @@ export class IluminadoCanvasRenderer {
       theme === 'sennaar' ||
       theme === 'hyper_light' ||
       theme === 'verdigris_terrace' ||
-      theme === 'terracotta_mosaic' ||
-      theme === 'ochre_skyline'
+      theme === 'terracotta_mosaic'
     ) {
       for (let i = 0; i < 6; i++) {
         const ry = horizonY + 14 + i * ((height - horizonY) / 6.2);
@@ -1189,7 +1188,19 @@ export class IluminadoCanvasRenderer {
         ctx.ellipse(px, ry, pillW * 0.5, pillH, 0, 0, Math.PI * 2);
         ctx.fill();
       }
-    } else if (theme === 'gorogoa' || theme === 'transistor' || theme === 'sayonara' || theme === 'indigo_risograph') {
+    } else if (theme === 'ochre_skyline') {
+      // Gently bobbing maritime signal buoys & sunlit harbor wakes
+      for (let i = 0; i < 5; i++) {
+        const ry = horizonY + 18 + i * 16;
+        const sway = Math.sin(timeSec * 1.1 + i * 1.3) * 22 - this.parallaxX * 0.68;
+        const px = width * (0.12 + i * 0.19) + sway;
+        ctx.fillStyle = i % 2 === 0 ? palette.blockA.highlight : palette.architectureLight;
+        ctx.globalAlpha = 0.16 + beatPulse * 0.08;
+        ctx.beginPath();
+        ctx.ellipse(px, ry, 42 + beatPulse * 10, 4, 0, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else if (theme === 'gorogoa' || theme === 'transistor' || theme === 'sayonara') {
       const cx = width * 0.5 - this.parallaxX * 0.4;
       const cy = height * 0.45 - this.parallaxY * 0.3;
       const radius = Math.min(width, height) * 0.34;
@@ -1211,6 +1222,108 @@ export class IluminadoCanvasRenderer {
         }
       }
       ctx.restore();
+    } else if (theme === 'indigo_risograph') {
+      // Rotating risograph registration crosshairs & overprint moiré circles
+      [
+        { x: width * 0.13, y: height * 0.34, dir: 1 },
+        { x: width * 0.87, y: height * 0.64, dir: -1 },
+      ].forEach((reg, idx) => {
+        const rx = reg.x - this.parallaxX * 0.58;
+        const ry = reg.y - this.parallaxY * 0.45;
+        ctx.save();
+        ctx.translate(rx, ry);
+        ctx.rotate(timeSec * 0.22 * reg.dir);
+        ctx.strokeStyle = idx === 0 ? palette.blockA.fill : palette.blockB.fill;
+        ctx.globalAlpha = 0.28 + beatPulse * 0.12;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, 0, 26 + subBass * 8, 0, Math.PI * 2);
+        ctx.moveTo(-36, 0);
+        ctx.lineTo(36, 0);
+        ctx.moveTo(0, -36);
+        ctx.lineTo(0, 36);
+        ctx.stroke();
+        ctx.restore();
+      });
+    } else if (theme === 'gris') {
+      // Drifting translucent watercolor washes breathing to sub-bass
+      [0.18, 0.5, 0.82].forEach((rx, idx) => {
+        const bx = width * rx + Math.sin(timeSec * 0.35 + idx * 2) * 26 - this.parallaxX * 0.5;
+        const by = height * (0.34 + (idx % 2) * 0.18) + Math.cos(timeSec * 0.28 + idx) * 18;
+        const br = 76 + beatPulse * 18 + subBass * 22;
+        ctx.fillStyle = idx === 0 ? palette.blockA.highlight : idx === 1 ? palette.blockB.highlight : palette.architectureMid;
+        ctx.globalAlpha = 0.13 + mid * 0.08;
+        ctx.beginPath();
+        ctx.arc(bx, by, br, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    } else if (theme === 'fez') {
+      // Rotating golden anti-cube shards hovering over floating ruins
+      [
+        { x: width * 0.13, y: height * 0.27 },
+        { x: width * 0.87, y: height * 0.23 },
+        { x: width * 0.11, y: height * 0.56 },
+        { x: width * 0.89, y: height * 0.55 },
+      ].forEach((pt, idx) => {
+        const cx = pt.x - this.parallaxX * 0.65;
+        const cy = pt.y + Math.sin(timeSec * 1.4 + idx * 1.5) * 9 - this.parallaxY * 0.52;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(timeSec * 0.55 * (idx % 2 === 0 ? 1 : -1));
+        ctx.fillStyle = idx % 2 === 0 ? palette.blockB.highlight : palette.blockA.highlight;
+        ctx.globalAlpha = 0.34 + beatPulse * 0.16;
+        const s = 14 + beatPulse * 4;
+        ctx.fillRect(-s * 0.5, -s * 0.5, s, s);
+        ctx.strokeStyle = palette.architectureLight;
+        ctx.lineWidth = 1.4;
+        ctx.strokeRect(-s * 0.5, -s * 0.5, s, s);
+        ctx.restore();
+      });
+    } else if (theme === 'papetura') {
+      // Warm flickering paper-lantern backlighting & rising embers
+      [
+        { x: width * 0.11, y: height * 0.45 },
+        { x: width * 0.89, y: height * 0.42 },
+      ].forEach((lt, idx) => {
+        const lx = lt.x - this.parallaxX * 0.6;
+        const ly = lt.y + Math.sin(timeSec * 1.2 + idx * 2.1) * 8 - this.parallaxY * 0.5;
+        const flicker = 0.16 + 0.06 * Math.sin(timeSec * 5.2 + idx * 1.9) + beatPulse * 0.1;
+        const g = ctx.createRadialGradient(lx, ly, 4, lx, ly, 78);
+        g.addColorStop(0, 'rgba(255, 224, 160, 0.55)');
+        g.addColorStop(1, 'rgba(255, 224, 160, 0)');
+        ctx.fillStyle = g;
+        ctx.globalAlpha = flicker * 2.4;
+        ctx.beginPath();
+        ctx.arc(lx, ly, 78, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    } else if (theme === 'hohokum') {
+      // Joyful floating kite beads drifting in gentle arcs
+      for (let i = 0; i < 8; i++) {
+        const driftX = ((timeSec * (28 + i * 5) + i * 160) % (width + 180)) - 90 - this.parallaxX * 0.6;
+        const driftY = height * (0.2 + (i % 4) * 0.15) + Math.sin(timeSec * 1.7 + i * 1.1) * 18;
+        ctx.fillStyle = i % 3 === 0 ? palette.blockA.fill : i % 3 === 1 ? palette.blockB.fill : palette.blockC.fill;
+        ctx.globalAlpha = 0.24 + beatPulse * 0.12;
+        ctx.beginPath();
+        ctx.arc(driftX, driftY, 7 + (i % 3) * 3 + subBass * 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    } else if (theme === 'kentucky_rz') {
+      // Atmospheric sodium streetlamp cone glows & mist specks
+      [width * 0.12, width * 0.88].forEach((lx, idx) => {
+        const px = lx - this.parallaxX * 0.62;
+        const topY = horizonY - 178 - this.parallaxY * 0.52;
+        const flicker = 0.14 + 0.05 * Math.sin(timeSec * 8.4 + idx * 3.1) + beatPulse * 0.08;
+        ctx.fillStyle = palette.architectureLight;
+        ctx.globalAlpha = flicker;
+        ctx.beginPath();
+        ctx.moveTo(px - 6, topY);
+        ctx.lineTo(px + 6, topY);
+        ctx.lineTo(px + 72, horizonY + 12);
+        ctx.lineTo(px - 72, horizonY + 12);
+        ctx.closePath();
+        ctx.fill();
+      });
     } else if (theme === 'abzu') {
       for (let i = 0; i < 3; i++) {
         const base =
@@ -1299,13 +1412,20 @@ export class IluminadoCanvasRenderer {
         ctx.fill();
       }
     } else if (theme === 'cityscape_deco') {
-      const glowPts = [0.09, 0.15, 0.85, 0.91];
-      ctx.fillStyle = palette.blockA.highlight;
-      glowPts.forEach((rx, idx) => {
-        const px = width * rx - this.parallaxX * 0.62;
-        const py = height * (0.42 + (idx % 2) * 0.12) - this.parallaxY * 0.52;
-        ctx.globalAlpha = 0.16 + beatPulse * 0.1 + 0.08 * Math.sin(timeSec * 2 + idx);
-        this.roundRect(ctx, px - 12, py - 5, 24, 10, 4);
+      // Sweeping golden Art Deco premiere searchlights across dusk sky
+      [width * 0.13, width * 0.87].forEach((sx, idx) => {
+        const baseX = sx - this.parallaxX * 0.6;
+        const baseY = horizonY - 40 - this.parallaxY * 0.5;
+        const angle = -Math.PI * 0.5 + Math.sin(timeSec * 0.65 + idx * 1.8) * 0.42;
+        const spread = 0.14;
+        const len = height * 0.72;
+        ctx.fillStyle = palette.architectureLight;
+        ctx.globalAlpha = 0.12 + beatPulse * 0.07;
+        ctx.beginPath();
+        ctx.moveTo(baseX, baseY);
+        ctx.lineTo(baseX + Math.cos(angle - spread) * len, baseY + Math.sin(angle - spread) * len);
+        ctx.lineTo(baseX + Math.cos(angle + spread) * len, baseY + Math.sin(angle + spread) * len);
+        ctx.closePath();
         ctx.fill();
       });
     } else if (theme === 'noland_target' || theme === 'artisan_blocks') {
@@ -1332,17 +1452,314 @@ export class IluminadoCanvasRenderer {
       ctx.fillStyle = spot;
       ctx.globalAlpha = 1;
       ctx.fillRect(0, 0, width, height);
-    } else {
-      // Shape-rich floating geometric pebbles for any remaining themes (gris, fez, papetura, hohokum, kentucky_rz)
+    } else if (theme === 'sumi_bamboo') {
+      // Swaying bamboo leaf silhouettes & floating red cinnabar hanko accents
       for (let i = 0; i < 6; i++) {
-        const angle = timeSec * 0.14 + i * 1.1;
-        const px = width * (0.08 + ((i * 0.17) % 0.84)) + Math.cos(angle) * 14 - this.parallaxX * 0.65;
-        const py = height * (0.22 + ((i * 0.14) % 0.48)) + Math.sin(angle * 1.3) * 12 - this.parallaxY * 0.5;
-        ctx.fillStyle = i % 2 === 0 ? palette.blockA.highlight : palette.blockB.highlight;
-        ctx.globalAlpha = 0.09 + beatPulse * 0.05;
+        const sideLeft = i < 3;
+        const bx = width * (sideLeft ? 0.06 + i * 0.04 : 0.84 + (i - 3) * 0.04) - this.parallaxX * 0.72;
+        const by = height * (0.24 + (i % 3) * 0.16) - this.parallaxY * 0.5;
+        const sway = Math.sin(timeSec * 1.15 + i * 0.9) * 0.18;
+        ctx.save();
+        ctx.translate(bx, by);
+        ctx.rotate(sway + (sideLeft ? 0.35 : -0.35));
+        ctx.fillStyle = palette.architectureShadow;
+        ctx.globalAlpha = 0.24 + mid * 0.1;
+        for (let leaf = 0; leaf < 3; leaf++) {
+          ctx.save();
+          ctx.rotate((leaf - 1) * 0.38);
+          ctx.beginPath();
+          ctx.ellipse(22, 0, 24, 5, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        }
+        ctx.restore();
+      }
+      // Subtle floating calligraphy ink brushstroke circle behind center
+      ctx.strokeStyle = palette.architectureShadow;
+      ctx.globalAlpha = 0.12 + beatPulse * 0.05;
+      ctx.lineWidth = 10;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.arc(width * 0.5 - this.parallaxX * 0.3, height * 0.48, Math.min(width, height) * 0.31, 0.3, Math.PI * 1.85);
+      ctx.stroke();
+    } else if (theme === 'cubist_atelier') {
+      // Rotating overlapping fractured planes & plucked guitar-string guidelines
+      [
+        { x: width * 0.13, y: height * 0.42, dir: 1 },
+        { x: width * 0.87, y: height * 0.44, dir: -1 },
+      ].forEach((st, idx) => {
+        const cx = st.x - this.parallaxX * 0.58;
+        const cy = st.y - this.parallaxY * 0.48;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(timeSec * 0.12 * st.dir);
+        ctx.fillStyle = idx === 0 ? palette.blockA.fill : palette.blockB.fill;
+        ctx.globalAlpha = 0.2 + beatPulse * 0.08;
+        ctx.fillRect(-38, -52, 54, 88);
+        ctx.rotate(0.45);
+        ctx.fillStyle = palette.architectureLight;
+        ctx.globalAlpha = 0.18;
+        ctx.fillRect(-24, -40, 62, 58);
+        ctx.strokeStyle = palette.architectureShadow;
+        ctx.globalAlpha = 0.26;
+        ctx.lineWidth = 1.2;
+        for (let s = -16; s <= 16; s += 8) {
+          ctx.beginPath();
+          ctx.moveTo(s, -68);
+          ctx.lineTo(s, 68);
+          ctx.stroke();
+        }
+        ctx.restore();
+      });
+    } else if (theme === 'detroit_visor') {
+      // Scanning crimson RoboCop visor sweep + crisp cyan targeting telemetry crosshairs
+      const scanY = ((timeSec * 85) % (height * 0.86)) + height * 0.07;
+      const scanGrad = ctx.createLinearGradient(0, scanY - 18, 0, scanY + 18);
+      scanGrad.addColorStop(0, 'rgba(232, 74, 95, 0)');
+      scanGrad.addColorStop(0.5, 'rgba(232, 74, 95, 0.24)');
+      scanGrad.addColorStop(1, 'rgba(232, 74, 95, 0)');
+      ctx.fillStyle = scanGrad;
+      ctx.fillRect(0, scanY - 18, width, 36);
+
+      [width * 0.11, width * 0.89].forEach((tx, idx) => {
+        const px = tx - this.parallaxX * 0.56;
+        const py = height * (idx === 0 ? 0.34 : 0.62) - this.parallaxY * 0.45;
+        ctx.strokeStyle = palette.blockA.fill;
+        ctx.globalAlpha = 0.28 + beatPulse * 0.18;
+        ctx.lineWidth = 1.6;
         ctx.beginPath();
-        ctx.arc(px, py, 12 + (i % 3) * 7 + subBass * 5, 0, Math.PI * 2);
+        ctx.arc(px, py, 28 + subBass * 8, 0, Math.PI * 2);
+        ctx.moveTo(px - 38, py);
+        ctx.lineTo(px - 18, py);
+        ctx.moveTo(px + 18, py);
+        ctx.lineTo(px + 38, py);
+        ctx.stroke();
+      });
+    } else if (theme === 'miami_vice') {
+      // Swaying sunset palm fronds + glowing horizontal Venetian horizon shimmer
+      for (let i = 0; i < 5; i++) {
+        const sy = horizonY + 12 + i * 18;
+        const sw = width * (0.28 - i * 0.03) + beatPulse * 18;
+        ctx.fillStyle = i % 2 === 0 ? palette.blockA.fill : palette.blockB.fill;
+        ctx.globalAlpha = 0.18 + beatPulse * 0.09;
+        this.roundRect(ctx, width * 0.5 - sw * 0.5 - this.parallaxX * 0.4, sy, sw, 4, 2);
         ctx.fill();
+      }
+      // Subtle neon flamingo crescent glow rings
+      [width * 0.12, width * 0.88].forEach((nx, idx) => {
+        const px = nx - this.parallaxX * 0.65;
+        const py = height * 0.34 - this.parallaxY * 0.5;
+        ctx.strokeStyle = idx === 0 ? palette.blockA.fill : palette.blockB.fill;
+        ctx.globalAlpha = 0.25 + beatPulse * 0.14;
+        ctx.lineWidth = 2.4;
+        ctx.beginPath();
+        ctx.arc(px, py, 32 + Math.sin(timeSec * 2 + idx) * 4, 0, Math.PI * 2);
+        ctx.stroke();
+      });
+    } else if (theme === 'neo_andean') {
+      // Pulsing polychrome stepped Chakana stars flanking the Cholet courtyard
+      [
+        { x: width * 0.11, y: height * 0.38, col: palette.blockA.fill },
+        { x: width * 0.89, y: height * 0.38, col: palette.blockB.fill },
+        { x: width * 0.12, y: height * 0.64, col: palette.blockC.fill },
+        { x: width * 0.88, y: height * 0.64, col: palette.blockA.fill },
+      ].forEach((ck, idx) => {
+        const px = ck.x - this.parallaxX * 0.6;
+        const py = ck.y - this.parallaxY * 0.48;
+        const scale = 1 + beatPulse * 0.14 + (idx % 2 === 0 ? subBass : mid) * 0.1;
+        ctx.save();
+        ctx.translate(px, py);
+        ctx.scale(scale, scale);
+        ctx.fillStyle = ck.col;
+        ctx.globalAlpha = 0.22 + beatPulse * 0.1;
+        ctx.fillRect(-10, -28, 20, 56);
+        ctx.fillRect(-28, -10, 56, 20);
+        ctx.fillRect(-19, -19, 38, 38);
+        ctx.fillStyle = palette.architectureLight;
+        ctx.globalAlpha = 0.34;
+        ctx.beginPath();
+        ctx.arc(0, 0, 7, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      });
+    } else if (theme === 'neko_sketchbook') {
+      // Animated sketchbook kitties positioned in open margins so neither HUD cards nor board occlude them!
+      const cats = [
+        { x: width * 0.062, y: height * 0.72, col: palette.blockA.fill, flip: 1, phase: 0.4 },
+        { x: width * 0.946, y: height * 0.44, col: palette.blockB.fill, flip: -1, phase: 2.2 },
+      ];
+      cats.forEach((cat) => {
+        const cx = cat.x - this.parallaxX * 0.62;
+        const cy = cat.y + Math.sin(timeSec * 1.4 + cat.phase) * 4 - this.parallaxY * 0.5;
+        const blink = Math.sin(timeSec * 0.9 + cat.phase * 3.1) > 0.92;
+        const tailSwing = Math.sin(timeSec * 3.2 + cat.phase) * 0.35;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.scale(cat.flip, 1);
+        ctx.globalAlpha = 0.78;
+
+        // Curled animated tail
+        ctx.save();
+        ctx.translate(-22, 22);
+        ctx.rotate(tailSwing);
+        ctx.strokeStyle = palette.architectureShadow;
+        ctx.lineWidth = 6;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.bezierCurveTo(-24, -8, -26, -34, -8, -32);
+        ctx.stroke();
+        ctx.restore();
+
+        // Rounded cat torso + ears
+        ctx.fillStyle = cat.col;
+        ctx.beginPath();
+        ctx.ellipse(0, 14, 24, 26, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(0, -14, 20, 0, Math.PI * 2);
+        ctx.fill();
+        // Ears
+        const earTwitch = Math.sin(timeSec * 4.5 + cat.phase) > 0.85 ? 0.12 : 0;
+        ctx.beginPath();
+        ctx.moveTo(-16, -24);
+        ctx.lineTo(-22, -44 + earTwitch * 18);
+        ctx.lineTo(-4, -31);
+        ctx.closePath();
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(16, -24);
+        ctx.lineTo(22, -44);
+        ctx.lineTo(4, -31);
+        ctx.closePath();
+        ctx.fill();
+
+        // Crisp fountain-pen outline & expressive face
+        ctx.strokeStyle = palette.architectureShadow;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, -14, 20, 0, Math.PI * 2);
+        ctx.stroke();
+        if (blink) {
+          ctx.beginPath();
+          ctx.moveTo(-10, -16);
+          ctx.lineTo(-4, -16);
+          ctx.moveTo(4, -16);
+          ctx.lineTo(10, -16);
+          ctx.stroke();
+        } else {
+          ctx.fillStyle = palette.architectureShadow;
+          ctx.beginPath();
+          ctx.arc(-7, -16, 2.5, 0, Math.PI * 2);
+          ctx.arc(7, -16, 2.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        // Whiskers
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(-11, -10);
+        ctx.lineTo(-25, -12);
+        ctx.moveTo(-11, -8);
+        ctx.lineTo(-24, -6);
+        ctx.moveTo(11, -10);
+        ctx.lineTo(25, -12);
+        ctx.moveTo(11, -8);
+        ctx.lineTo(24, -6);
+        ctx.stroke();
+        ctx.restore();
+      });
+
+      // Bouncing yarn ball along skyline terrace
+      const yarnX = width * 0.18 + Math.sin(timeSec * 0.9) * 28 - this.parallaxX * 0.65;
+      const yarnY = horizonY - 12 - Math.abs(Math.sin(timeSec * 2.8)) * (14 + beatPulse * 8);
+      ctx.fillStyle = palette.blockA.fill;
+      ctx.globalAlpha = 0.55;
+      ctx.beginPath();
+      ctx.arc(yarnX, yarnY, 11, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = palette.architectureLight;
+      ctx.lineWidth = 1.3;
+      ctx.beginPath();
+      ctx.arc(yarnX, yarnY, 7, 0.3, 2.6);
+      ctx.stroke();
+    } else if (theme === 'stained_glass') {
+      // Rotating Gothic rose mandala + warm stained-glass sunbeams
+      const rx = width * 0.5 - this.parallaxX * 0.35;
+      const ry = height * 0.44 - this.parallaxY * 0.25;
+      const rad = Math.min(width, height) * 0.36;
+      ctx.save();
+      ctx.translate(rx, ry);
+      ctx.rotate(timeSec * 0.035);
+      for (let i = 0; i < 12; i++) {
+        const a0 = (i / 12) * Math.PI * 2;
+        const a1 = ((i + 0.78) / 12) * Math.PI * 2;
+        ctx.fillStyle = i % 3 === 0 ? palette.blockA.fill : i % 3 === 1 ? palette.blockB.fill : palette.blockC.fill;
+        ctx.globalAlpha = 0.14 + beatPulse * 0.06;
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.arc(0, 0, rad, a0, a1);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.restore();
+    } else if (theme === 'constructivist') {
+      // Spinning bold crimson constructivist cog & sweeping red wedge beams
+      const cx = width * 0.12 - this.parallaxX * 0.6;
+      const cy = height * 0.5 - this.parallaxY * 0.5;
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(timeSec * 0.22);
+      ctx.fillStyle = palette.blockA.fill;
+      ctx.globalAlpha = 0.24 + beatPulse * 0.08;
+      for (let k = 0; k < 4; k++) {
+        ctx.rotate(Math.PI * 0.5);
+        ctx.fillRect(-10, -68, 20, 26);
+      }
+      ctx.strokeStyle = palette.architectureShadow;
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      ctx.arc(0, 0, 44, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    } else if (theme === 'botanical_herbarium') {
+      // Gently swaying pressed fern fronds flanking the conservatory glass
+      [width * 0.09, width * 0.91].forEach((fx, idx) => {
+        const sway = Math.sin(timeSec * 1.1 + idx * 1.7) * 0.08;
+        ctx.save();
+        ctx.translate(fx - this.parallaxX * 0.65, height * 0.72 - this.parallaxY * 0.5);
+        ctx.rotate(sway + (idx === 0 ? 0.16 : -0.16));
+        ctx.fillStyle = idx === 0 ? palette.blockA.fill : palette.blockB.fill;
+        ctx.globalAlpha = 0.22 + mid * 0.08;
+        for (let f = 0; f < 5; f++) {
+          ctx.beginPath();
+          ctx.ellipse(idx === 0 ? 18 : -18, -32 - f * 28, 26 - f * 2, 7, idx === 0 ? -0.35 : 0.35, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.restore();
+      });
+    } else if (theme === 'memphis_milano') {
+      // Kinetic Memphis squiggles, bouncing geometric spheres & festive triangle confetti
+      for (let i = 0; i < 7; i++) {
+        const cx = width * (0.08 + ((i * 0.15) % 0.84)) + Math.sin(timeSec * 1.2 + i) * 16 - this.parallaxX * 0.6;
+        const cy = height * (0.24 + ((i * 0.17) % 0.48)) + Math.cos(timeSec * 1.4 + i) * 14 - this.parallaxY * 0.5;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(timeSec * 0.6 + i);
+        ctx.fillStyle = i % 3 === 0 ? palette.blockA.fill : i % 3 === 1 ? palette.blockB.fill : palette.blockC.fill;
+        ctx.globalAlpha = 0.26 + beatPulse * 0.12;
+        if (i % 2 === 0) {
+          ctx.beginPath();
+          ctx.arc(0, 0, 12 + subBass * 5, 0, Math.PI * 2);
+          ctx.fill();
+        } else {
+          ctx.beginPath();
+          ctx.moveTo(0, -14);
+          ctx.lineTo(13, 10);
+          ctx.lineTo(-13, 10);
+          ctx.closePath();
+          ctx.fill();
+        }
+        ctx.restore();
       }
     }
 
@@ -1468,7 +1885,12 @@ export class IluminadoCanvasRenderer {
       theme === 'spiritfarer' ||
       theme === 'verdigris_terrace' ||
       theme === 'terracotta_mosaic' ||
-      theme === 'ochre_skyline'
+      theme === 'ochre_skyline' ||
+      theme === 'detroit_visor' ||
+      theme === 'miami_vice' ||
+      theme === 'neo_andean' ||
+      theme === 'botanical_herbarium' ||
+      theme === 'memphis_milano'
     ) {
       ctx.fillStyle = palette.waterSurface;
       ctx.fillRect(0, horizonY, width, height - horizonY);
@@ -1497,22 +1919,35 @@ export class IluminadoCanvasRenderer {
     const horizonY = height * 0.76;
 
     ctx.save();
-    // Distant terraced pastel skyline / ridge common across worlds (atmospheric fade)
-    ctx.fillStyle = palette.architectureMid;
-    ctx.globalAlpha = 0.26;
-    ctx.beginPath();
-    ctx.moveTo(-PARALLAX_OVERSCAN_X, height);
-    ctx.lineTo(-PARALLAX_OVERSCAN_X, horizonY - 28);
-    ctx.lineTo(width * 0.18, horizonY - 58);
-    ctx.lineTo(width * 0.28, horizonY - 58);
-    ctx.lineTo(width * 0.34, horizonY - 22);
-    ctx.lineTo(width * 0.64, horizonY - 26);
-    ctx.lineTo(width * 0.71, horizonY - 72);
-    ctx.lineTo(width * 0.82, horizonY - 72);
-    ctx.lineTo(width + PARALLAX_OVERSCAN_X, horizonY - 30);
-    ctx.lineTo(width + PARALLAX_OVERSCAN_X, height);
-    ctx.closePath();
-    ctx.fill();
+    if (theme === 'sumi_bamboo') {
+      // Soft misty sumi-e mountain ink wash silhouettes
+      ctx.fillStyle = palette.architectureMid;
+      ctx.globalAlpha = 0.26;
+      ctx.beginPath();
+      ctx.moveTo(-PARALLAX_OVERSCAN_X, height);
+      ctx.quadraticCurveTo(width * 0.18, horizonY - 125, width * 0.42, horizonY - 22);
+      ctx.quadraticCurveTo(width * 0.72, horizonY - 155, width + PARALLAX_OVERSCAN_X, horizonY - 30);
+      ctx.lineTo(width + PARALLAX_OVERSCAN_X, height);
+      ctx.closePath();
+      ctx.fill();
+    } else {
+      // Distant terraced pastel skyline / ridge common across worlds (atmospheric fade)
+      ctx.fillStyle = palette.architectureMid;
+      ctx.globalAlpha = 0.26;
+      ctx.beginPath();
+      ctx.moveTo(-PARALLAX_OVERSCAN_X, height);
+      ctx.lineTo(-PARALLAX_OVERSCAN_X, horizonY - 28);
+      ctx.lineTo(width * 0.18, horizonY - 58);
+      ctx.lineTo(width * 0.28, horizonY - 58);
+      ctx.lineTo(width * 0.34, horizonY - 22);
+      ctx.lineTo(width * 0.64, horizonY - 26);
+      ctx.lineTo(width * 0.71, horizonY - 72);
+      ctx.lineTo(width * 0.82, horizonY - 72);
+      ctx.lineTo(width + PARALLAX_OVERSCAN_X, horizonY - 30);
+      ctx.lineTo(width + PARALLAX_OVERSCAN_X, height);
+      ctx.closePath();
+      ctx.fill();
+    }
 
     // Distant isometric background spires / colonnades for architectural depth
     if (
@@ -1524,7 +1959,9 @@ export class IluminadoCanvasRenderer {
       theme === 'sable' ||
       theme === 'verdigris_terrace' ||
       theme === 'terracotta_mosaic' ||
-      theme === 'aurora_prism'
+      theme === 'aurora_prism' ||
+      theme === 'neo_andean' ||
+      theme === 'stained_glass'
     ) {
       ctx.globalAlpha = 0.34;
       this.drawIsoTower(ctx, width * 0.26, horizonY - 8, 62, 118, skin, true, false);
@@ -2272,19 +2709,27 @@ export class IluminadoCanvasRenderer {
         break;
       }
       case 'ochre_skyline': {
-        // Amber harbor towers & maritime masts
-        const drawDockTower = (tx: number, w: number, h: number) => {
-          ctx.fillStyle = palette.architectureMid;
+        // Sunlit amber maritime docks, gantry cranes & lateen sails (distinct from cityscape_deco)
+        [
+          { x: width * 0.08, h: 195 },
+          { x: width * 0.89, h: 215 },
+        ].forEach((crane, idx) => {
+          const topY = horizonY - crane.h;
+          ctx.fillStyle = palette.architectureShadow;
           ctx.globalAlpha = 0.48;
-          ctx.fillRect(tx, horizonY - h, w, h + 18);
+          ctx.fillRect(crane.x, topY, 16, crane.h + 18);
+          ctx.fillRect(crane.x - (idx === 0 ? 12 : 76), topY, 96, 12);
           ctx.fillStyle = palette.blockA.fill;
-          ctx.globalAlpha = 0.45;
-          ctx.fillRect(tx + 8, horizonY - h + 14, w - 16, 16);
-        };
-        drawDockTower(width * 0.06, 68, 195);
-        drawDockTower(width * 0.14, 52, 135);
-        drawDockTower(width * 0.81, 56, 150);
-        drawDockTower(width * 0.88, 70, 215);
+          ctx.globalAlpha = 0.56;
+          // Triangular lateen sail in harbor
+          const sailX = idx === 0 ? crane.x + 68 : crane.x - 86;
+          ctx.beginPath();
+          ctx.moveTo(sailX, horizonY - 4);
+          ctx.lineTo(sailX + (idx === 0 ? 52 : -52), horizonY - 4);
+          ctx.lineTo(sailX + (idx === 0 ? 14 : -14), horizonY - 105);
+          ctx.closePath();
+          ctx.fill();
+        });
         ctx.globalAlpha = 1;
         break;
       }
@@ -2306,6 +2751,251 @@ export class IluminadoCanvasRenderer {
         ctx.globalAlpha = 1;
         break;
       }
+      case 'sumi_bamboo': {
+        // Sumi ink brushstroke mountains, lakeside torii & vertical bamboo canes
+        ctx.fillStyle = palette.architectureShadow;
+        ctx.globalAlpha = 0.34;
+        [0.05, 0.11, 0.88, 0.94].forEach((rx, idx) => {
+          const bx = width * rx;
+          const segH = 44;
+          for (let seg = 0; seg < 6; seg++) {
+            const sy = horizonY + 24 - (seg + 1) * segH;
+            this.roundRect(ctx, bx + Math.sin(seg + idx) * 2, sy, 9, segH - 4, 3);
+            ctx.fill();
+          }
+        });
+        // Minimalist torii silhouette on left bank & vermilion red ink seal on right
+        ctx.fillStyle = palette.blockB.fill;
+        ctx.globalAlpha = 0.65;
+        ctx.fillRect(width * 0.14, horizonY - 96, 8, 96);
+        ctx.fillRect(width * 0.19, horizonY - 96, 8, 96);
+        this.roundRect(ctx, width * 0.125, horizonY - 106, width * 0.095, 11, 4);
+        ctx.fill();
+        this.roundRect(ctx, width * 0.84, height * 0.26, 26, 46, 4);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        break;
+      }
+      case 'cubist_atelier': {
+        // Fractured overlapping paper-collage planes, arches & Picasso/Braque instrument curves
+        const planes = [
+          { x: width * 0.04, y: height * 0.22, w: 120, h: 250, col: palette.blockA.fill, a: 0.38 },
+          { x: width * 0.11, y: height * 0.34, w: 92, h: 190, col: palette.blockB.fill, a: 0.44 },
+          { x: width * 0.82, y: height * 0.2, w: 128, h: 260, col: palette.blockB.fill, a: 0.4 },
+          { x: width * 0.77, y: height * 0.38, w: 96, h: 200, col: palette.blockC.fill, a: 0.38 },
+        ];
+        planes.forEach((p) => {
+          ctx.fillStyle = p.col;
+          ctx.globalAlpha = p.a;
+          ctx.beginPath();
+          ctx.moveTo(p.x, p.y);
+          ctx.lineTo(p.x + p.w, p.y + 22);
+          ctx.lineTo(p.x + p.w - 18, p.y + p.h);
+          ctx.lineTo(p.x + 12, p.y + p.h - 24);
+          ctx.closePath();
+          ctx.fill();
+        });
+        ctx.globalAlpha = 1;
+        break;
+      }
+      case 'detroit_visor': {
+        // Brushed steel Detroit corporate monoliths + horizontal visor neon slit
+        [
+          { x: width * 0.03, w: 74, h: 270 },
+          { x: width * 0.11, w: 56, h: 200 },
+          { x: width * 0.82, w: 62, h: 215 },
+          { x: width * 0.89, w: 78, h: 290 },
+        ].forEach((b, idx) => {
+          const topY = horizonY - b.h;
+          ctx.fillStyle = palette.architectureShadow;
+          ctx.globalAlpha = 0.74;
+          ctx.fillRect(b.x, topY, b.w, b.h + 25);
+          ctx.fillStyle = idx % 2 === 0 ? palette.blockB.fill : palette.blockA.fill;
+          ctx.globalAlpha = 0.72;
+          ctx.fillRect(b.x + 8, topY + 18, b.w - 16, 4);
+          ctx.fillRect(b.x + 8, topY + 32, b.w - 28, 3);
+        });
+        ctx.globalAlpha = 1;
+        break;
+      }
+      case 'miami_vice': {
+        // Ocean Drive Pastel Art Deco boutique hotels & tall twilight silhouettes of palms
+        [
+          { x: width * 0.04, w: 92, h: 205, col: palette.architectureLight },
+          { x: width * 0.85, w: 102, h: 225, col: palette.architectureLight },
+        ].forEach((hotel, idx) => {
+          const topY = horizonY - hotel.h;
+          ctx.fillStyle = hotel.col;
+          ctx.globalAlpha = 0.34;
+          this.roundRect(ctx, hotel.x, topY, hotel.w, hotel.h + 15, 16);
+          ctx.fill();
+          ctx.fillStyle = idx === 0 ? palette.blockA.fill : palette.blockB.fill;
+          ctx.globalAlpha = 0.65;
+          ctx.fillRect(hotel.x + 10, topY + 16, hotel.w - 20, 5);
+          ctx.fillRect(hotel.x + 14, topY + 30, hotel.w - 28, 4);
+        });
+        // Tall curved palm silhouettes
+        [width * 0.16, width * 0.82].forEach((px, idx) => {
+          ctx.strokeStyle = palette.architectureShadow;
+          ctx.globalAlpha = 0.62;
+          ctx.lineWidth = 7;
+          ctx.beginPath();
+          ctx.moveTo(px, horizonY + 12);
+          ctx.quadraticCurveTo(px + (idx === 0 ? -18 : 18), horizonY - 120, px + (idx === 0 ? 12 : -12), horizonY - 230);
+          ctx.stroke();
+          const crownX = px + (idx === 0 ? 12 : -12);
+          const crownY = horizonY - 230;
+          ctx.fillStyle = palette.architectureShadow;
+          for (let f = 0; f < 5; f++) {
+            const ang = -Math.PI + (f / 4) * Math.PI;
+            ctx.beginPath();
+            ctx.ellipse(crownX + Math.cos(ang) * 28, crownY + Math.sin(ang) * 14 + 6, 30, 7, ang * 0.4, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        });
+        ctx.globalAlpha = 1;
+        break;
+      }
+      case 'neo_andean': {
+        // Freddy Mamani inspired vibrant Neo-Andean Cholet stepped facades & arched glass bays
+        [
+          { x: width * 0.04, w: 120, baseH: 225, primary: palette.blockA.fill, sec: palette.blockB.fill },
+          { x: width * 0.84, w: 126, baseH: 240, primary: palette.blockB.fill, sec: palette.blockC.fill },
+        ].forEach((cholet) => {
+          const topY = horizonY - cholet.baseH;
+          ctx.fillStyle = palette.architectureMid;
+          ctx.globalAlpha = 0.68;
+          ctx.fillRect(cholet.x, topY + 28, cholet.w, cholet.baseH);
+          // Stepped polychrome Andean crown tiers
+          ctx.fillStyle = cholet.primary;
+          ctx.fillRect(cholet.x + 12, topY + 12, cholet.w - 24, 20);
+          ctx.fillStyle = cholet.sec;
+          ctx.fillRect(cholet.x + 28, topY - 6, cholet.w - 56, 20);
+          // Tall arched mirror window bay
+          ctx.fillStyle = palette.architectureLight;
+          ctx.globalAlpha = 0.56;
+          ctx.beginPath();
+          ctx.arc(cholet.x + cholet.w * 0.5, topY + 86, 26, Math.PI, 0);
+          ctx.lineTo(cholet.x + cholet.w * 0.5 + 26, horizonY - 18);
+          ctx.lineTo(cholet.x + cholet.w * 0.5 - 26, horizonY - 18);
+          ctx.closePath();
+          ctx.fill();
+        });
+        ctx.globalAlpha = 1;
+        break;
+      }
+      case 'neko_sketchbook': {
+        // Sketchbook page margins, ink paw-print stamps & cozy sleeping cat silhouettes along shelf
+        ctx.fillStyle = palette.architectureMid;
+        ctx.globalAlpha = 0.25;
+        ctx.fillRect(width * 0.04, horizonY - 12, width * 0.22, 16);
+        ctx.fillRect(width * 0.74, horizonY - 12, width * 0.22, 16);
+        // Cute ink paw-print trail along side notebook margin
+        ctx.fillStyle = palette.architectureShadow;
+        ctx.globalAlpha = 0.22;
+        [0.24, 0.38, 0.52, 0.66].forEach((ry, idx) => {
+          const px = idx % 2 === 0 ? width * 0.07 : width * 0.93;
+          const py = height * ry;
+          ctx.beginPath();
+          ctx.arc(px, py, 7, 0, Math.PI * 2);
+          ctx.arc(px - 6, py - 9, 2.8, 0, Math.PI * 2);
+          ctx.arc(px, py - 11, 2.8, 0, Math.PI * 2);
+          ctx.arc(px + 6, py - 9, 2.8, 0, Math.PI * 2);
+          ctx.fill();
+        });
+        ctx.globalAlpha = 1;
+        break;
+      }
+      case 'stained_glass': {
+        // Gothic lancet arches filled with jewel-toned translucent stained glass panes
+        [width * 0.1, width * 0.9].forEach((lx) => {
+          ctx.fillStyle = palette.architectureShadow;
+          ctx.globalAlpha = 0.7;
+          ctx.beginPath();
+          ctx.arc(lx, height * 0.34, 52, Math.PI, 0);
+          ctx.lineTo(lx + 52, horizonY + 12);
+          ctx.lineTo(lx - 52, horizonY + 12);
+          ctx.closePath();
+          ctx.fill();
+
+          const panes = [palette.blockA.fill, palette.blockB.fill, palette.blockC.fill];
+          panes.forEach((col, pIdx) => {
+            ctx.fillStyle = col;
+            ctx.globalAlpha = 0.42;
+            this.roundRect(ctx, lx - 38, height * (0.35 + pIdx * 0.13), 76, height * 0.1, 8);
+            ctx.fill();
+          });
+        });
+        ctx.globalAlpha = 1;
+        break;
+      }
+      case 'constructivist': {
+        // Avant-garde El Lissitzky / Rodchenko diagonal crimson wedges & bold geometric pylons
+        ctx.fillStyle = palette.blockA.fill;
+        ctx.globalAlpha = 0.48;
+        ctx.beginPath();
+        ctx.moveTo(startX, horizonY);
+        ctx.lineTo(width * 0.24, height * 0.22);
+        ctx.lineTo(width * 0.3, height * 0.26);
+        ctx.lineTo(width * 0.08, horizonY + 30);
+        ctx.closePath();
+        ctx.fill();
+
+        ctx.fillStyle = palette.architectureShadow;
+        ctx.globalAlpha = 0.65;
+        ctx.fillRect(width * 0.82, height * 0.16, 42, horizonY - height * 0.16);
+        ctx.fillStyle = palette.blockC.fill;
+        ctx.globalAlpha = 0.56;
+        ctx.beginPath();
+        ctx.arc(width * 0.84, height * 0.3, 46, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        break;
+      }
+      case 'botanical_herbarium': {
+        // Victorian glass conservatory wrought-iron arched bays + botanical leaf arches
+        [width * 0.11, width * 0.89].forEach((cx) => {
+          ctx.strokeStyle = palette.architectureShadow;
+          ctx.globalAlpha = 0.36;
+          ctx.lineWidth = 4;
+          ctx.beginPath();
+          ctx.arc(cx, height * 0.38, 62, Math.PI, 0);
+          ctx.lineTo(cx + 62, horizonY);
+          ctx.moveTo(cx - 62, height * 0.38);
+          ctx.lineTo(cx - 62, horizonY);
+          ctx.stroke();
+
+          ctx.fillStyle = palette.blockA.fill;
+          ctx.globalAlpha = 0.24;
+          ctx.beginPath();
+          ctx.ellipse(cx, height * 0.56, 36, 72, 0, 0, Math.PI * 2);
+          ctx.fill();
+        });
+        ctx.globalAlpha = 1;
+        break;
+      }
+      case 'memphis_milano': {
+        // Ettore Sottsass Memphis Totem bookshelves, cobalt arches & yellow triangles
+        ctx.fillStyle = palette.blockB.fill;
+        ctx.globalAlpha = 0.45;
+        this.roundRect(ctx, width * 0.05, horizonY - 190, 96, 190, 14);
+        ctx.fill();
+        ctx.fillStyle = palette.blockC.fill;
+        ctx.globalAlpha = 0.55;
+        this.roundRect(ctx, width * 0.03, horizonY - 210, 136, 22, 11);
+        ctx.fill();
+
+        ctx.fillStyle = palette.blockA.fill;
+        ctx.globalAlpha = 0.46;
+        ctx.beginPath();
+        ctx.arc(width * 0.89, horizonY - 120, 62, Math.PI, 0);
+        ctx.lineTo(width * 0.89 + 62, horizonY);
+        ctx.lineTo(width * 0.89 - 62, horizonY);
+        ctx.closePath();
+        ctx.fill();
+        ctx.globalAlpha = 1;
+        break;
+      }
     }
   }
 
@@ -2315,32 +3005,111 @@ export class IluminadoCanvasRenderer {
     height: number,
     skin: SkinConfig
   ): void {
-    const { palette } = skin;
+    const { palette, theme } = skin;
     const horizonY = height * 0.76;
 
     ctx.save();
-    // Subtle foreground corner isometric plinths that move fastest (1.05x) for tangible 3D framing
-    ctx.globalAlpha = 0.42;
-    this.drawIsoTower(
-      ctx,
-      width * 0.025,
-      height + PARALLAX_OVERSCAN_Y,
-      88,
-      height * 0.22,
-      skin,
-      false,
-      false
-    );
-    this.drawIsoTower(
-      ctx,
-      width * 0.975,
-      height + PARALLAX_OVERSCAN_Y,
-      94,
-      height * 0.25,
-      skin,
-      false,
-      false
-    );
+    if (theme === 'sumi_bamboo') {
+      // Foreground swaying ink bamboo shoots
+      ctx.fillStyle = palette.architectureShadow;
+      ctx.globalAlpha = 0.38;
+      [width * 0.025, width * 0.975].forEach((bx) => {
+        ctx.fillRect(bx - 6, height * 0.64, 12, height * 0.42);
+      });
+    } else if (theme === 'neko_sketchbook') {
+      // Foreground sketchbook rounded ink corner tabs
+      ctx.fillStyle = palette.blockA.fill;
+      ctx.globalAlpha = 0.34;
+      ctx.beginPath();
+      ctx.arc(width * 0.03, height * 0.96, 54, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = palette.blockB.fill;
+      ctx.beginPath();
+      ctx.arc(width * 0.97, height * 0.95, 60, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (theme === 'botanical_herbarium') {
+      // Lush foreground botanical corner fronds
+      ctx.fillStyle = palette.architectureShadow;
+      ctx.globalAlpha = 0.35;
+      [0.03, 0.97].forEach((rx, idx) => {
+        for (let k = 0; k < 3; k++) {
+          ctx.beginPath();
+          ctx.ellipse(width * rx + (idx === 0 ? k * 14 : -k * 14), height * 0.92 - k * 24, 34, 11, idx === 0 ? -0.4 : 0.4, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      });
+    } else if (theme === 'miami_vice') {
+      // Foreground Ocean Drive Art Deco railing posts with pastel neon speed-stripes & glowing top cap
+      [width * 0.015, width * 0.985 - 72].forEach((rx, idx) => {
+        const ry = idx === 0 ? height * 0.78 : height * 0.76;
+        const rh = idx === 0 ? height * 0.25 : height * 0.27;
+        ctx.fillStyle = palette.architectureShadow;
+        ctx.globalAlpha = 0.58;
+        this.roundRect(ctx, rx, ry, 72, rh, 16);
+        ctx.fill();
+        // Signature Ocean Drive neon speed-stripes
+        ctx.fillStyle = palette.blockA.fill;
+        ctx.globalAlpha = 0.55;
+        this.roundRect(ctx, rx + 8, ry + 14, 56, 5, 2.5);
+        ctx.fill();
+        ctx.fillStyle = palette.blockB.fill;
+        ctx.globalAlpha = 0.52;
+        this.roundRect(ctx, rx + 8, ry + 26, 56, 4, 2);
+        ctx.fill();
+        ctx.fillStyle = palette.architectureLight;
+        ctx.globalAlpha = 0.38;
+        this.roundRect(ctx, rx + 12, ry + 6, 48, 3, 1.5);
+        ctx.fill();
+      });
+    } else if (theme === 'constructivist' || theme === 'cubist_atelier' || theme === 'memphis_milano') {
+      // Geometric corner plinth wedges matching modern art themes
+      ctx.fillStyle = theme === 'constructivist' ? palette.blockA.fill : palette.architectureShadow;
+      ctx.globalAlpha = 0.38;
+      ctx.beginPath();
+      ctx.moveTo(-PARALLAX_OVERSCAN_X, height + PARALLAX_OVERSCAN_Y);
+      ctx.lineTo(-PARALLAX_OVERSCAN_X, height * 0.78);
+      ctx.lineTo(width * 0.09, height + PARALLAX_OVERSCAN_Y);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = theme === 'memphis_milano' ? palette.blockC.fill : palette.architectureMid;
+      ctx.beginPath();
+      ctx.moveTo(width + PARALLAX_OVERSCAN_X, height + PARALLAX_OVERSCAN_Y);
+      ctx.lineTo(width + PARALLAX_OVERSCAN_X, height * 0.76);
+      ctx.lineTo(width * 0.9, height + PARALLAX_OVERSCAN_Y);
+      ctx.closePath();
+      ctx.fill();
+    } else if (theme === 'gris' || theme === 'old_mans_journey' || theme === 'abzu' || theme === 'ori') {
+      // Soft rolling foreground wash mounds for painterly / organic worlds
+      ctx.fillStyle = palette.architectureShadow;
+      ctx.globalAlpha = 0.32;
+      ctx.beginPath();
+      ctx.ellipse(width * 0.03, height * 0.96, 110, 74, -0.25, 0, Math.PI * 2);
+      ctx.ellipse(width * 0.97, height * 0.95, 118, 82, 0.25, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      // Subtle foreground corner isometric plinths that move fastest (1.05x) for tangible 3D framing
+      ctx.globalAlpha = 0.42;
+      this.drawIsoTower(
+        ctx,
+        width * 0.025,
+        height + PARALLAX_OVERSCAN_Y,
+        88,
+        height * 0.22,
+        skin,
+        false,
+        false
+      );
+      this.drawIsoTower(
+        ctx,
+        width * 0.975,
+        height + PARALLAX_OVERSCAN_Y,
+        94,
+        height * 0.25,
+        skin,
+        false,
+        false
+      );
+    }
 
     // Soft filled shoreline mist band + elliptical reflection pebbles
     ctx.fillStyle = palette.architectureLight;
@@ -2558,11 +3327,17 @@ export class IluminadoCanvasRenderer {
     this.roundRect(ctx, x - 6, y - 6, width + 12, height + 12, 10);
     ctx.fill();
 
-    ctx.strokeStyle =
-      board.pendingGarbage > 0 ? palette.hudAccent : palette.boardFrame;
-    ctx.lineWidth = board.pendingGarbage > 0 ? 2.6 : 2;
-    this.roundRect(ctx, x - 6, y - 6, width + 12, height + 12, 10);
-    ctx.stroke();
+    this.drawBoardFrame(
+      ctx,
+      x,
+      y,
+      width,
+      height,
+      skin,
+      board.pendingGarbage > 0,
+      timeSec,
+      beatPhase
+    );
 
     if (board.pendingGarbage > 0) {
       const pulse = 0.5 + 0.5 * Math.sin(timeSec * 8);
@@ -3622,6 +4397,346 @@ export class IluminadoCanvasRenderer {
       }
     }
 
+    this.drawBoardFrameAccents(ctx, x, y, width, height, skin, timeSec, beatPhase);
+
+    ctx.restore();
+  }
+
+  private drawBoardFrame(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    skin: SkinConfig,
+    hasPendingGarbage: boolean,
+    timeSec: number,
+    beatPhase: number
+  ): void {
+    const { palette, theme } = skin;
+    const fx = x - 6;
+    const fy = y - 6;
+    const fw = width + 12;
+    const fh = height + 12;
+    const beatPulse = Math.pow(1 - beatPhase, 2.4);
+
+    ctx.save();
+    ctx.strokeStyle = hasPendingGarbage ? palette.hudAccent : palette.boardFrame;
+
+    if (theme === 'miami_vice') {
+      // Double Art Deco glowing flamingo + turquoise neon tubes
+      ctx.lineWidth = hasPendingGarbage ? 3.2 : 2.6;
+      ctx.shadowColor = palette.blockA.fill;
+      ctx.shadowBlur = 10 + beatPulse * 6;
+      this.roundRect(ctx, fx - 2, fy - 2, fw + 4, fh + 4, 12);
+      ctx.stroke();
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = palette.blockB.fill;
+      ctx.lineWidth = 1.4;
+      this.roundRect(ctx, fx + 2, fy + 2, fw - 4, fh - 4, 8);
+      ctx.stroke();
+    } else if (theme === 'detroit_visor') {
+      // Chamfered 45° brushed gunmetal HUD housing + subtle inner telemetry line
+      const ch = 12;
+      ctx.lineWidth = hasPendingGarbage ? 3 : 2.4;
+      ctx.beginPath();
+      ctx.moveTo(fx + ch, fy);
+      ctx.lineTo(fx + fw - ch, fy);
+      ctx.lineTo(fx + fw, fy + ch);
+      ctx.lineTo(fx + fw, fy + fh - ch);
+      ctx.lineTo(fx + fw - ch, fy + fh);
+      ctx.lineTo(fx + ch, fy + fh);
+      ctx.lineTo(fx, fy + fh - ch);
+      ctx.lineTo(fx, fy + ch);
+      ctx.closePath();
+      ctx.stroke();
+
+      ctx.strokeStyle = palette.blockA.fill;
+      ctx.globalAlpha = 0.45 + beatPulse * 0.25;
+      ctx.lineWidth = 1.1;
+      ctx.strokeRect(fx + 3, fy + 3, fw - 6, fh - 6);
+    } else if (theme === 'sumi_bamboo') {
+      // Layered painterly charcoal ink-brush double stroke
+      ctx.lineWidth = hasPendingGarbage ? 3.2 : 2.6;
+      this.roundRect(ctx, fx, fy, fw, fh, 6);
+      ctx.stroke();
+      ctx.globalAlpha = 0.4;
+      ctx.lineWidth = 1.4;
+      this.roundRect(ctx, fx - 2.5, fy + 1.5, fw + 5, fh - 3, 7);
+      ctx.stroke();
+    } else if (theme === 'stained_glass') {
+      // Thick dark pewter lead came border + warm amber hairline inner bevel
+      ctx.lineWidth = 4.2;
+      this.roundRect(ctx, fx, fy, fw, fh, 10);
+      ctx.stroke();
+      ctx.strokeStyle = palette.blockC.fill;
+      ctx.globalAlpha = 0.65;
+      ctx.lineWidth = 1.2;
+      this.roundRect(ctx, fx + 2.5, fy + 2.5, fw - 5, fh - 5, 7);
+      ctx.stroke();
+    } else if (theme === 'neo_andean') {
+      // Double polychrome border frame (cobalt outer + magenta/teal inset rule)
+      ctx.lineWidth = hasPendingGarbage ? 3.2 : 2.6;
+      this.roundRect(ctx, fx, fy, fw, fh, 6);
+      ctx.stroke();
+      ctx.strokeStyle = palette.blockA.fill;
+      ctx.globalAlpha = 0.65;
+      ctx.lineWidth = 1.6;
+      this.roundRect(ctx, fx + 2.6, fy + 2.6, fw - 5.2, fh - 5.2, 4);
+      ctx.stroke();
+    } else if (theme === 'constructivist' || theme === 'cubist_atelier') {
+      // Sharp crisp geometric poster border + asymmetric hairline
+      ctx.lineWidth = hasPendingGarbage ? 3.2 : 2.5;
+      ctx.strokeRect(fx, fy, fw, fh);
+      ctx.strokeStyle = palette.hudAccent;
+      ctx.globalAlpha = 0.72;
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(fx + 3, fy + 3, fw - 6, fh - 6);
+    } else {
+      ctx.lineWidth = hasPendingGarbage ? 2.6 : 2.1;
+      this.roundRect(ctx, fx, fy, fw, fh, 10);
+      ctx.stroke();
+      // Subtle inner museum mat hairline on gallery/art themes
+      if (
+        theme === 'gorogoa' ||
+        theme === 'gris' ||
+        theme === 'botanical_herbarium' ||
+        theme === 'noland_target' ||
+        theme === 'artisan_blocks' ||
+        theme === 'transistor' ||
+        theme === 'cityscape_deco' ||
+        theme === 'celadon_fresco' ||
+        theme === 'neko_sketchbook'
+      ) {
+        ctx.globalAlpha = 0.34;
+        ctx.lineWidth = 1;
+        this.roundRect(ctx, fx + 3, fy + 3, fw - 6, fh - 6, 7);
+        ctx.stroke();
+      }
+    }
+    void timeSec;
+    ctx.restore();
+  }
+
+  private drawBoardFrameAccents(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    skin: SkinConfig,
+    timeSec: number,
+    beatPhase: number
+  ): void {
+    const { palette, theme } = skin;
+    const fx = x - 6;
+    const fy = y - 6;
+    const fw = width + 12;
+    const fh = height + 12;
+    const beatPulse = Math.pow(1 - beatPhase, 2.4);
+
+    ctx.save();
+    if (theme === 'neko_sketchbook') {
+      // Playful sketched cat ears anchored directly along the top rail + curled swishing tail + paw stamp!
+      const drawEar = (cx: number, cy: number, side: -1 | 1) => {
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.fillStyle = palette.blockA.fill;
+        ctx.strokeStyle = palette.boardFrame;
+        ctx.lineWidth = 2;
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        ctx.moveTo(0, 1);
+        ctx.lineTo(side * 4, -18);
+        ctx.lineTo(side * -18, 1);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        // Pink inner ear triangle
+        ctx.fillStyle = '#f5a9a9';
+        ctx.beginPath();
+        ctx.moveTo(side * -2, 0);
+        ctx.lineTo(side * 2, -11);
+        ctx.lineTo(side * -11, 0);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      };
+      drawEar(fx + 28, fy + 1, -1);
+      drawEar(fx + fw - 28, fy + 1, 1);
+
+      // Whisker ticks on side rails
+      ctx.strokeStyle = palette.boardFrame;
+      ctx.lineWidth = 1.4;
+      ctx.globalAlpha = 0.6;
+      [-4, 0, 4].forEach((dy) => {
+        ctx.beginPath();
+        ctx.moveTo(fx - 9, fy + fh * 0.5 + dy);
+        ctx.lineTo(fx - 1, fy + fh * 0.5 + dy * 0.6);
+        ctx.moveTo(fx + fw + 9, fy + fh * 0.5 + dy);
+        ctx.lineTo(fx + fw + 1, fy + fh * 0.5 + dy * 0.6);
+        ctx.stroke();
+      });
+      ctx.globalAlpha = 1;
+
+      // Curled animated wagging cat tail at bottom-right corner
+      const wag = Math.sin(timeSec * 3.4) * 0.25;
+      ctx.save();
+      ctx.translate(fx + fw - 1, fy + fh - 10);
+      ctx.rotate(wag);
+      ctx.strokeStyle = palette.boardFrame;
+      ctx.lineWidth = 4.5;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.bezierCurveTo(18, -2, 22, -22, 9, -24);
+      ctx.stroke();
+      ctx.restore();
+
+      // Tiny paw stamp at bottom-left
+      ctx.fillStyle = palette.hudAccent;
+      ctx.globalAlpha = 0.85;
+      const px = fx - 5;
+      const py = fy + fh - 6;
+      ctx.beginPath();
+      ctx.arc(px, py, 3.6, 0, Math.PI * 2);
+      ctx.arc(px - 4, py - 5, 1.5, 0, Math.PI * 2);
+      ctx.arc(px, py - 6.5, 1.5, 0, Math.PI * 2);
+      ctx.arc(px + 4, py - 5, 1.5, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (theme === 'sumi_bamboo') {
+      // Cinnabar red hanko seal chop stamped at bottom-right & top-left ink bamboo joint notches
+      ctx.fillStyle = palette.hudAccent;
+      this.roundRect(ctx, fx + fw - 14, fy + fh - 14, 18, 18, 2.5);
+      ctx.fill();
+      ctx.strokeStyle = '#faf5ec';
+      ctx.lineWidth = 1.2;
+      ctx.strokeRect(fx + fw - 11, fy + fh - 11, 12, 12);
+      ctx.beginPath();
+      ctx.moveTo(fx + fw - 5, fy + fh - 10);
+      ctx.lineTo(fx + fw - 5, fy + fh);
+      ctx.moveTo(fx + fw - 10, fy + fh - 5);
+      ctx.lineTo(fx + fw, fy + fh - 5);
+      ctx.stroke();
+    } else if (theme === 'detroit_visor') {
+      // Glowing crimson visor HUD corner brackets
+      ctx.strokeStyle = palette.timelineBeam;
+      ctx.lineWidth = 2.4;
+      const arm = 16;
+      [
+        [fx - 4, fy - 4, 1, 1],
+        [fx + fw + 4, fy - 4, -1, 1],
+        [fx - 4, fy + fh + 4, 1, -1],
+        [fx + fw + 4, fy + fh + 4, -1, -1],
+      ].forEach(([cx, cy, dx, dy]) => {
+        ctx.beginPath();
+        ctx.moveTo(cx, cy + dy * arm);
+        ctx.lineTo(cx, cy);
+        ctx.lineTo(cx + dx * arm, cy);
+        ctx.stroke();
+      });
+    } else if (theme === 'neo_andean') {
+      // True stepped Tiwanaku Chakana corner crosses in fuchsia, teal, gold
+      const cornerCols = [palette.blockA.fill, palette.blockB.fill, palette.blockC.fill, palette.blockA.fill];
+      [
+        [fx + 1, fy + 1],
+        [fx + fw - 1, fy + 1],
+        [fx + 1, fy + fh - 1],
+        [fx + fw - 1, fy + fh - 1],
+      ].forEach(([cx, cy], idx) => {
+        ctx.fillStyle = cornerCols[idx];
+        ctx.fillRect(cx - 4, cy - 9, 8, 18);
+        ctx.fillRect(cx - 9, cy - 4, 18, 8);
+        ctx.fillRect(cx - 6, cy - 6, 12, 12);
+        ctx.fillStyle = palette.architectureLight;
+        ctx.fillRect(cx - 2.5, cy - 2.5, 5, 5);
+      });
+    } else if (theme === 'stained_glass') {
+      // Glowing cathedral jewel cabochons set into four lead corners
+      [
+        [fx + 1, fy + 1, palette.blockA.fill],
+        [fx + fw - 1, fy + 1, palette.blockB.fill],
+        [fx + 1, fy + fh - 1, palette.blockC.fill],
+        [fx + fw - 1, fy + fh - 1, palette.blockA.fill],
+      ].forEach(([cx, cy, col]) => {
+        ctx.fillStyle = col as string;
+        this.drawDiamond(ctx, cx as number, cy as number, 6 + beatPulse * 1.2);
+        ctx.strokeStyle = palette.boardFrame;
+        ctx.lineWidth = 1.4;
+        ctx.stroke();
+      });
+    } else if (theme === 'constructivist') {
+      // Bold asymmetric crimson L-tabs at top-left & bottom-right corners
+      ctx.fillStyle = palette.blockA.fill;
+      ctx.fillRect(fx - 4, fy - 4, 24, 5);
+      ctx.fillRect(fx - 4, fy - 4, 5, 24);
+      ctx.fillRect(fx + fw - 20, fy + fh - 1, 24, 5);
+      ctx.fillRect(fx + fw - 1, fy + fh - 20, 5, 24);
+    } else if (theme === 'botanical_herbarium') {
+      // Brass botanical specimen mounting corner triangles
+      ctx.fillStyle = palette.blockC.fill;
+      ctx.globalAlpha = 0.85;
+      const tri = 14;
+      ctx.beginPath();
+      ctx.moveTo(fx - 2, fy - 2);
+      ctx.lineTo(fx + tri, fy - 2);
+      ctx.lineTo(fx - 2, fy + tri);
+      ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(fx + fw + 2, fy + fh + 2);
+      ctx.lineTo(fx + fw - tri, fy + fh + 2);
+      ctx.lineTo(fx + fw + 2, fy + fh - tri);
+      ctx.closePath();
+      ctx.fill();
+    } else if (theme === 'memphis_milano') {
+      // Playful Memphis corner circles & coral squiggle bar accents
+      ctx.fillStyle = palette.blockC.fill;
+      ctx.beginPath();
+      ctx.arc(fx, fy, 6, 0, Math.PI * 2);
+      ctx.arc(fx + fw, fy + fh, 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = palette.blockA.fill;
+      ctx.beginPath();
+      ctx.arc(fx + fw, fy, 5.5, 0, Math.PI * 2);
+      ctx.arc(fx, fy + fh, 5.5, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (theme === 'cubist_atelier') {
+      // Offset faceted collage tabs on corners
+      ctx.fillStyle = palette.blockB.fill;
+      ctx.globalAlpha = 0.8;
+      ctx.fillRect(fx - 3, fy + 6, 6, 16);
+      ctx.fillStyle = palette.blockA.fill;
+      ctx.fillRect(fx + fw - 3, fy + fh - 22, 6, 16);
+    } else if (
+      theme === 'monument_valley' ||
+      theme === 'sennaar' ||
+      theme === 'verdigris_terrace' ||
+      theme === 'terracotta_mosaic' ||
+      theme === 'transistor' ||
+      theme === 'cityscape_deco' ||
+      theme === 'fez' ||
+      theme === 'machinarium'
+    ) {
+      // Architectural corner pins / rivets / deco studs matching classic worlds
+      ctx.fillStyle = theme === 'machinarium' ? palette.blockA.highlight : palette.boardFrame;
+      ctx.globalAlpha = 0.72;
+      const r = theme === 'fez' ? 3.5 : 3;
+      [
+        [fx + 1, fy + 1],
+        [fx + fw - 1, fy + 1],
+        [fx + 1, fy + fh - 1],
+        [fx + fw - 1, fy + fh - 1],
+      ].forEach(([cx, cy]) => {
+        if (theme === 'fez') {
+          ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
+        } else {
+          ctx.beginPath();
+          ctx.arc(cx, cy, r, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      });
+    }
     ctx.restore();
   }
 
@@ -4076,15 +5191,15 @@ export class IluminadoCanvasRenderer {
     this.roundRect(ctx, bx, by, bw, bh, radius);
     ctx.fill();
 
-    // Carved obsidian rim bevel
-    ctx.strokeStyle = '#554b6e';
-    ctx.lineWidth = Math.max(1.1, size * 0.045);
+    // Carved obsidian rim bevel (high visibility on both pastel & dark boards)
+    ctx.strokeStyle = '#7d719c';
+    ctx.lineWidth = Math.max(1.2, size * 0.05);
     this.roundRect(ctx, bx + 0.5, by + 0.5, bw - 1, bh - 1, radius);
     ctx.stroke();
 
     // Inner hairline recessed frame
     const inset = Math.max(2.5, size * 0.13);
-    ctx.strokeStyle = 'rgba(250, 246, 238, 0.14)';
+    ctx.strokeStyle = 'rgba(250, 246, 238, 0.26)';
     ctx.lineWidth = 1;
     this.roundRect(
       ctx,
@@ -4897,6 +6012,169 @@ export class IluminadoCanvasRenderer {
         ctx.lineTo(x + w * 0.82, y + h * 0.38);
         ctx.moveTo(x + w * 0.48, y + h * 0.44);
         ctx.lineTo(x + w * 0.38, y + h * 0.82);
+        ctx.stroke();
+        break;
+      case 'sumi_brush':
+        ctx.strokeStyle = style.highlight;
+        ctx.globalAlpha = 0.28;
+        ctx.lineWidth = 2.8;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(x + w * 0.14, y + h * 0.26);
+        ctx.quadraticCurveTo(x + w * 0.5, y + h * 0.14, x + w * 0.86, y + h * 0.34);
+        ctx.moveTo(x + w * 0.22, y + h * 0.72);
+        ctx.quadraticCurveTo(x + w * 0.54, y + h * 0.62, x + w * 0.84, y + h * 0.78);
+        ctx.stroke();
+        break;
+      case 'washi_fiber':
+        ctx.strokeStyle = style.emblemColor;
+        ctx.globalAlpha = 0.22;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x + w * 0.15, y + h * 0.35);
+        ctx.lineTo(x + w * 0.42, y + h * 0.24);
+        ctx.moveTo(x + w * 0.55, y + h * 0.66);
+        ctx.lineTo(x + w * 0.86, y + h * 0.48);
+        ctx.moveTo(x + w * 0.24, y + h * 0.78);
+        ctx.lineTo(x + w * 0.48, y + h * 0.84);
+        ctx.stroke();
+        break;
+      case 'cubist_facet':
+        ctx.fillStyle = style.highlight;
+        ctx.globalAlpha = 0.18;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + w * 0.78, y + h * 0.24);
+        ctx.lineTo(x + w * 0.28, y + h * 0.88);
+        ctx.closePath();
+        ctx.fill();
+        break;
+      case 'visor_hud':
+        ctx.strokeStyle = style.emblemColor;
+        ctx.globalAlpha = 0.26;
+        ctx.lineWidth = 1.1;
+        ctx.beginPath();
+        ctx.moveTo(x + w * 0.15, y + h * 0.22);
+        ctx.lineTo(x + w * 0.85, y + h * 0.22);
+        ctx.moveTo(x + w * 0.15, y + h * 0.78);
+        ctx.lineTo(x + w * 0.6, y + h * 0.78);
+        ctx.stroke();
+        break;
+      case 'chrome_plate':
+        ctx.fillStyle = style.highlight;
+        ctx.globalAlpha = 0.24;
+        ctx.beginPath();
+        ctx.moveTo(x + w * 0.1, y);
+        ctx.lineTo(x + w * 0.45, y);
+        ctx.lineTo(x + w * 0.18, y + h);
+        ctx.lineTo(x, y + h);
+        ctx.closePath();
+        ctx.fill();
+        break;
+      case 'neon_louvre':
+        ctx.fillStyle = style.highlight;
+        ctx.globalAlpha = 0.24;
+        for (let ly = 0.22; ly <= 0.76; ly += 0.26) {
+          ctx.fillRect(x + 1, y + h * ly, w - 2, Math.max(1.4, h * 0.08));
+        }
+        break;
+      case 'chakana_step':
+        ctx.fillStyle = style.emblemColor;
+        ctx.globalAlpha = 0.24;
+        ctx.fillRect(x + w * 0.36, y + h * 0.18, w * 0.28, h * 0.64);
+        ctx.fillRect(x + w * 0.18, y + h * 0.36, w * 0.64, h * 0.28);
+        break;
+      case 'aguayo_weave':
+        ctx.strokeStyle = style.highlight;
+        ctx.globalAlpha = 0.26;
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(x, y + h * 0.5);
+        ctx.lineTo(x + w * 0.5, y + h * 0.16);
+        ctx.lineTo(x + w, y + h * 0.5);
+        ctx.lineTo(x + w * 0.5, y + h * 0.84);
+        ctx.closePath();
+        ctx.stroke();
+        break;
+      case 'cat_doodle':
+        // Tiny minimalist kitty head silhouette inside block
+        ctx.strokeStyle = style.emblemColor;
+        ctx.globalAlpha = 0.28;
+        ctx.lineWidth = 1.25;
+        ctx.beginPath();
+        ctx.moveTo(x + w * 0.26, y + h * 0.48);
+        ctx.lineTo(x + w * 0.3, y + h * 0.24);
+        ctx.lineTo(x + w * 0.42, y + h * 0.38);
+        ctx.lineTo(x + w * 0.58, y + h * 0.38);
+        ctx.lineTo(x + w * 0.7, y + h * 0.24);
+        ctx.lineTo(x + w * 0.74, y + h * 0.48);
+        ctx.arc(x + w * 0.5, y + h * 0.56, w * 0.24, 0, Math.PI, false);
+        ctx.stroke();
+        break;
+      case 'paw_print':
+        ctx.fillStyle = style.emblemColor;
+        ctx.globalAlpha = 0.24;
+        ctx.beginPath();
+        ctx.arc(x + w * 0.5, y + h * 0.62, Math.max(1.8, w * 0.14), 0, Math.PI * 2);
+        ctx.arc(x + w * 0.3, y + h * 0.38, Math.max(1.1, w * 0.075), 0, Math.PI * 2);
+        ctx.arc(x + w * 0.5, y + h * 0.3, Math.max(1.1, w * 0.075), 0, Math.PI * 2);
+        ctx.arc(x + w * 0.7, y + h * 0.38, Math.max(1.1, w * 0.075), 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      case 'stained_glass':
+        ctx.strokeStyle = style.border;
+        ctx.globalAlpha = 0.34;
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(x + w * 0.5, y);
+        ctx.lineTo(x + w * 0.5, y + h);
+        ctx.moveTo(x, y + h * 0.5);
+        ctx.lineTo(x + w, y + h * 0.5);
+        ctx.stroke();
+        break;
+      case 'constructivist_wedge':
+        ctx.fillStyle = style.emblemColor;
+        ctx.globalAlpha = 0.2;
+        ctx.beginPath();
+        ctx.moveTo(x + w * 0.14, y + h * 0.84);
+        ctx.lineTo(x + w * 0.86, y + h * 0.22);
+        ctx.lineTo(x + w * 0.86, y + h * 0.84);
+        ctx.closePath();
+        ctx.fill();
+        break;
+      case 'leaf_vein':
+        ctx.strokeStyle = style.emblemColor;
+        ctx.globalAlpha = 0.25;
+        ctx.lineWidth = 1.1;
+        ctx.beginPath();
+        ctx.moveTo(x + w * 0.22, y + h * 0.78);
+        ctx.lineTo(x + w * 0.78, y + h * 0.22);
+        ctx.moveTo(x + w * 0.42, y + h * 0.58);
+        ctx.lineTo(x + w * 0.36, y + h * 0.32);
+        ctx.moveTo(x + w * 0.56, y + h * 0.44);
+        ctx.lineTo(x + w * 0.76, y + h * 0.52);
+        ctx.stroke();
+        break;
+      case 'petal_press':
+        ctx.fillStyle = style.highlight;
+        ctx.globalAlpha = 0.22;
+        ctx.beginPath();
+        ctx.ellipse(x + w * 0.5, y + h * 0.32, w * 0.14, h * 0.22, 0, 0, Math.PI * 2);
+        ctx.ellipse(x + w * 0.34, y + h * 0.62, w * 0.14, h * 0.18, -0.6, 0, Math.PI * 2);
+        ctx.ellipse(x + w * 0.66, y + h * 0.62, w * 0.14, h * 0.18, 0.6, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      case 'memphis_squiggle':
+        ctx.strokeStyle = style.emblemColor;
+        ctx.globalAlpha = 0.28;
+        ctx.lineWidth = 1.4;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(x + w * 0.18, y + h * 0.64);
+        ctx.lineTo(x + w * 0.36, y + h * 0.34);
+        ctx.lineTo(x + w * 0.54, y + h * 0.64);
+        ctx.lineTo(x + w * 0.72, y + h * 0.34);
+        ctx.lineTo(x + w * 0.86, y + h * 0.56);
         ctx.stroke();
         break;
     }

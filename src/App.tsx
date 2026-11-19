@@ -177,9 +177,20 @@ export default function App() {
   const [isShiftSettingsOpen, setIsShiftSettingsOpen] = useState<boolean>(false);
   const isShiftSettingsOpenRef = useRef<boolean>(false);
   isShiftSettingsOpenRef.current = isShiftSettingsOpen;
-  const [previewSkinIdx, setPreviewSkinIdx] = useState<number>(() =>
-    pickRandomSkinIndex()
-  );
+  const [previewSkinIdx, setPreviewSkinIdx] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const qSkin = new URLSearchParams(window.location.search).get('skin');
+      if (qSkin) {
+        const byId = SKINS.findIndex((s) => s.id === qSkin);
+        if (byId >= 0) return byId;
+        const num = Number(qSkin);
+        if (Number.isInteger(num) && num >= 1 && num <= SKINS.length) {
+          return num - 1;
+        }
+      }
+    }
+    return pickRandomSkinIndex();
+  });
   const lastStartedSkinRef = useRef<number | null>(null);
   const [dailyDateKey, setDailyDateKey] = useState<string>(() => getDailyDateKey());
   const [viewportInfo, setViewportInfo] = useState<{
@@ -743,13 +754,16 @@ export default function App() {
     }
   }, [startNewGame]);
 
-  // Support ?autostart=1 or ?autostart=daily on load
+  // Support ?autostart=1, ?autostart=daily, or ?autostart=vs_cpu on load
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const auto = params.get('autostart');
     if (auto === 'daily') {
       setSelectedMode('daily');
       startNewGame('daily', false);
+    } else if (auto === 'vs_cpu') {
+      setSelectedMode('vs_cpu');
+      startNewGame('vs_cpu', false);
     } else if (auto === '1') {
       startNewGame('challenge', false);
     } else {

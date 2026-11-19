@@ -349,8 +349,8 @@ test('computeStemLevels dynamically scales percussion, bass, lead, and vocal ste
   assert.ok(peakStems.vocal > 0.85);
 });
 
-test('all 30 worlds define valid music configs covering all requested genres', () => {
-  assert.equal(SKINS.length, 30);
+test('all 40 worlds define valid music configs covering all requested genres', () => {
+  assert.equal(SKINS.length, 40);
   const styleSet = new Set(SKINS.map((s) => s.music.styleId));
   const requiredStyles = [
     'dark_zouk',
@@ -376,6 +376,16 @@ test('all 30 worlds define valid music configs covering all requested genres', (
     'tango_nuevo',
     'uk_garage',
     'post_rock',
+    'shamisen_chill',
+    'cubist_chamber',
+    'industrial_synth',
+    'miami_boogie',
+    'andean_cumbia',
+    'cat_step_jazz',
+    'cathedral_organ',
+    'constructivist_march',
+    'botanical_waltz',
+    'memphis_electro',
   ] as const;
 
   for (const style of requiredStyles) {
@@ -466,7 +476,7 @@ test('getPieceLandingColumns predicts per-column split landing heights and hardD
   assert.ok((state.grid[9][4]?.fallOffset ?? 0) >= 5);
 });
 
-test('All 30 soundtrack worlds (1-30) configure root-relative MP3 paths in music/ with no public/music folder and .nojekyll present', () => {
+test('All 40 soundtrack worlds (1-40) configure root-relative MP3 paths in music/ with no public/music folder and .nojekyll present', () => {
   assert.equal(fs.existsSync(path.resolve(process.cwd(), 'public/music')), false);
   assert.equal(fs.existsSync(path.resolve(process.cwd(), '.nojekyll')), true);
   assert.equal(
@@ -474,7 +484,7 @@ test('All 30 soundtrack worlds (1-30) configure root-relative MP3 paths in music
     false,
     'Typo music/wolrd30.mp3 should remain renamed to music/world30.mp3'
   );
-  for (let i = 0; i < 30; i++) {
+  for (let i = 0; i < 40; i++) {
     const expectedUrl = `music/world${i + 1}.mp3`;
     assert.equal(SKINS[i].music.audioTrackUrl, expectedUrl);
     const filePath = path.resolve(process.cwd(), expectedUrl);
@@ -669,9 +679,9 @@ test('Daily completion enforces once-per-24h completion, tracks consecutive stre
   assert.equal(afterGap.dailyStreak, 1);
 });
 
-test('INITIAL_UNLOCKED_SKIN_IDS unlocks all 30 worlds including all 29 studio MP3 worlds', () => {
-  assert.equal(INITIAL_UNLOCKED_SKIN_IDS.length, 30);
-  for (let i = 0; i < 30; i++) {
+test('INITIAL_UNLOCKED_SKIN_IDS unlocks all 40 worlds including all 40 studio MP3 worlds', () => {
+  assert.equal(INITIAL_UNLOCKED_SKIN_IDS.length, 40);
+  for (let i = 0; i < 40; i++) {
     assert.equal(
       INITIAL_UNLOCKED_SKIN_IDS.includes(SKINS[i].id),
       true,
@@ -680,8 +690,8 @@ test('INITIAL_UNLOCKED_SKIN_IDS unlocks all 30 worlds including all 29 studio MP
   }
 });
 
-test('getTrackTrimGain normalizes loudness across all 30 MP3 tracks and getSpectrumSnapshot is safe in Node', () => {
-  for (let i = 0; i < 30; i++) {
+test('getTrackTrimGain normalizes loudness across all 40 MP3 tracks and getSpectrumSnapshot is safe in Node', () => {
+  for (let i = 0; i < 40; i++) {
     const url = SKINS[i].music.audioTrackUrl;
     const gain = getTrackTrimGain(url);
     assert.ok(gain >= 0.5 && gain <= 3.0, `Unexpected trim gain ${gain} for ${url}`);
@@ -939,7 +949,17 @@ test('rotateBoard90 swaps landscape <-> portrait dimensions, drops all bricks to
   }
 });
 
-test('All 30 skins avoid pure black/white, preserve readable sky luminance, and configure valid stroke/fill variants', () => {
+test('All 40 skins avoid pure black/white, preserve readable sky luminance, and configure valid stroke/fill variants & crisp block contrast', () => {
+  const rgbDist = (h1: string, h2: string): number => {
+    const p = (h: string) => {
+      const c = h.replace('#', '');
+      return [parseInt(c.slice(0, 2), 16), parseInt(c.slice(2, 4), 16), parseInt(c.slice(4, 6), 16)];
+    };
+    const [r1, g1, b1] = p(h1);
+    const [r2, g2, b2] = p(h2);
+    return Math.hypot(r1 - r2, g1 - g2, b1 - b2);
+  };
+
   for (const sk of SKINS) {
     const pal = sk.palette;
     const hexColors = [
@@ -986,6 +1006,20 @@ test('All 30 skins avoid pure black/white, preserve readable sky luminance, and 
     assert.ok(pal.blockA.strokeVariant);
     assert.ok(pal.blockB.fillVariant);
     assert.ok(pal.blockB.strokeVariant);
+
+    // Ensure strong visual separation between blockA, blockB, blockC, and boardSurface
+    assert.ok(
+      rgbDist(pal.blockA.fill, pal.blockB.fill) >= 85,
+      `Skin ${sk.id} blockA/blockB too close (${pal.blockA.fill} vs ${pal.blockB.fill})`
+    );
+    assert.ok(
+      rgbDist(pal.blockA.fill, pal.blockC.fill) >= 75,
+      `Skin ${sk.id} blockA/blockC too close (${pal.blockA.fill} vs ${pal.blockC.fill})`
+    );
+    assert.ok(
+      rgbDist(pal.blockB.fill, pal.blockC.fill) >= 75,
+      `Skin ${sk.id} blockB/blockC too close (${pal.blockB.fill} vs ${pal.blockC.fill})`
+    );
   }
 
   // Monochrome World 11 (limbo-mist) maintains crisp luminance contrast between board, blockA, and blockB
@@ -998,22 +1032,22 @@ test('All 30 skins avoid pure black/white, preserve readable sky luminance, and 
   assert.ok(boardLum - bLum >= 0.35, `Expected limbo-mist blockB (${bLum.toFixed(2)}) clearly darker than board (${boardLum.toFixed(2)})`);
 });
 
-test('pickRandomSkinIndex and shuffled skin deck avoid back-to-back repeats and cover all 30 worlds', () => {
-  for (let i = 0; i < 30; i++) {
+test('pickRandomSkinIndex and shuffled skin deck avoid back-to-back repeats and cover all 40 worlds', () => {
+  for (let i = 0; i < 40; i++) {
     const picked = pickRandomSkinIndex(undefined, i);
     assert.notEqual(picked, i);
     assert.ok(picked >= 0 && picked < SKINS.length);
   }
 
   const deck = createShuffledSkinDeck(SKINS.length, 0);
-  assert.equal(deck.length, 30);
+  assert.equal(deck.length, 40);
   assert.notEqual(deck[0], 0);
-  assert.equal(new Set(deck).size, 30);
+  assert.equal(new Set(deck).size, 40);
 
-  // Advancing through basic visits all 30 stages then marks completed
+  // Advancing through basic visits all 40 stages then marks completed
   let curDeck = deck;
   let pos = 0;
-  for (let step = 1; step < 30; step++) {
+  for (let step = 1; step < 40; step++) {
     const adv = advanceShuffledSkinDeck(curDeck, pos, false);
     assert.equal(adv.completed, false);
     curDeck = adv.nextDeck;
@@ -1392,8 +1426,8 @@ test('All 43 shift types execute cleanly without crashing or causing premature g
   }
 });
 
-test('All 30 skins define harmonious non-pure-black/white blockC styles for 3-color mode', () => {
-  assert.equal(SKINS.length, 30);
+test('All 40 skins define harmonious non-pure-black/white blockC styles for 3-color mode', () => {
+  assert.equal(SKINS.length, 40);
   for (const skin of SKINS) {
     const blockC = getBlockStyle(skin.palette, 2);
     assert.ok(blockC, `${skin.id} must define blockC`);
@@ -2109,9 +2143,114 @@ test('diagonal_slant_sweep clears upper rows ahead of lower rows and bridges ove
   assert.equal(monoEv?.squaresCleared, 3, 'all 3 vertically overlapping squares must clear cleanly');
 });
 
+test('partial overflow (1x2 or 1x1 of a 2x2 entering the board) discards upper cells and continues without Game Over', () => {
+  // Case 1: 1x2 bottom row enters row 0 while top 1x2 is above the top line
+  const state1x2 = createInitialBoardState(0);
+  for (let r = 1; r < BOARD_ROWS; r++) {
+    state1x2.grid[r][7] = makeCell((r % 2) as CellColor);
+    state1x2.grid[r][8] = makeCell(((r + 1) % 2) as CellColor);
+  }
+  state1x2.activePiece = createPieceFromPattern([0, 1, 1, 0]);
+  state1x2.activePiece.x = 7;
+  state1x2.activePiece.y = -2;
 
+  const res1x2 = lockActivePiece(state1x2, 0);
+  assert.equal(res1x2.landed, true);
+  assert.equal(state1x2.isGameOver, false, '1x2 entering row 0 must not cause Game Over');
+  assert.ok(state1x2.activePiece !== null, 'next piece should spawn after partial 1x2 entry');
+  assert.equal(state1x2.grid[0][7]?.color, 1, 'bottom-left cell of 2x2 placed at row 0');
+  assert.equal(state1x2.grid[0][8]?.color, 0, 'bottom-right cell of 2x2 placed at row 0');
 
+  // Case 2: Only 1x1 enters row 0 (col 7 has row 0 open, col 8 is completely full to row 0)
+  const state1x1 = createInitialBoardState(0);
+  for (let r = 1; r < BOARD_ROWS; r++) {
+    state1x1.grid[r][7] = makeCell((r % 2) as CellColor);
+  }
+  for (let r = 0; r < BOARD_ROWS; r++) {
+    state1x1.grid[r][8] = makeCell(((r + 1) % 2) as CellColor);
+  }
+  state1x1.activePiece = createPieceFromPattern([0, 1, 1, 0]);
+  state1x1.activePiece.x = 7;
+  state1x1.activePiece.y = -2;
 
+  const res1x1 = lockActivePiece(state1x1, 0);
+  assert.equal(res1x1.landed, true);
+  assert.equal(state1x1.isGameOver, false, '1x1 entering row 0 must not cause Game Over');
+  assert.ok(state1x1.activePiece !== null, 'next piece should spawn after partial 1x1 entry');
+  assert.equal(state1x1.grid[0][7]?.color, 1, 'bottom-left cell enters row 0 while rest is discarded');
 
+  // Case 3: Next piece at cols 7..8 now has 0 open cells in either column -> triggers Game Over
+  const resZero = lockActivePiece(state1x1, 0);
+  assert.equal(resZero.landed, true);
+  assert.equal(state1x1.isGameOver, true, '0 cells entering board must trigger Game Over');
+  assert.equal(state1x1.activePiece, null);
+});
 
+test('zero-cell entry triggers Game Over and partial entry survives under up/left/right gravity too', () => {
+  // Upward gravity: row 9 is entry edge; fill rows 0..8 in cols 7..8 so only 1x2 fits at row 9
+  const upState = createInitialBoardState(0);
+  upState.gravityDirection = 'up';
+  for (let r = 0; r < BOARD_ROWS - 1; r++) {
+    upState.grid[r][7] = makeCell((r % 2) as CellColor);
+    upState.grid[r][8] = makeCell(((r + 1) % 2) as CellColor);
+  }
+  upState.activePiece = createPieceFromPattern([0, 1, 1, 0]);
+  upState.activePiece.x = 7;
+  upState.activePiece.y = BOARD_ROWS;
 
+  lockActivePiece(upState, 0);
+  assert.equal(upState.isGameOver, false);
+  assert.equal(upState.grid[BOARD_ROWS - 1][7]?.color, 0);
+  assert.equal(upState.grid[BOARD_ROWS - 1][8]?.color, 1);
+
+  // Now row 9 is also occupied -> 0 cells can enter -> Game Over
+  lockActivePiece(upState, 0);
+  assert.equal(upState.isGameOver, true);
+
+  // Rightward gravity: col 0 is entry edge; fill cols 1..15 in rows 4..5 so 1x2 fits at col 0
+  const rightState = createInitialBoardState(0);
+  rightState.gravityDirection = 'right';
+  for (let c = 1; c < BOARD_COLS; c++) {
+    rightState.grid[4][c] = makeCell((c % 2) as CellColor);
+    rightState.grid[5][c] = makeCell(((c + 1) % 2) as CellColor);
+  }
+  rightState.activePiece = createPieceFromPattern([0, 1, 1, 0]);
+  rightState.activePiece.x = -2;
+  rightState.activePiece.y = 4;
+
+  lockActivePiece(rightState, 0);
+  assert.equal(rightState.isGameOver, false);
+  assert.equal(rightState.grid[4][0]?.color, 1);
+  assert.equal(rightState.grid[5][0]?.color, 0);
+
+  lockActivePiece(rightState, 0);
+  assert.equal(rightState.isGameOver, true);
+});
+test('partial 1x1 overflow entry forms a 2x2 square at row 0 and continues until 0 cells enter', () => {
+  const state1x1 = createInitialBoardState(0);
+  for (let r = 1; r < BOARD_ROWS; r++) {
+    state1x1.grid[r][6] = makeCell((r % 2 === 1 ? 0 : 1) as CellColor);
+    state1x1.grid[r][7] = makeCell(r === 1 ? 0 : ((r % 2) as CellColor));
+    state1x1.grid[r][8] = makeCell(((r + 1) % 2) as CellColor);
+  }
+  state1x1.grid[0][8] = makeCell(1);
+  state1x1.grid[0][6] = makeCell(0);
+  state1x1.grid[1][6] = makeCell(0);
+  state1x1.activePiece = createPieceFromPattern([1, 1, 0, 1]);
+  state1x1.activePiece.x = 7;
+  state1x1.activePiece.y = -2;
+
+  const res1x1 = hardDropPiece(state1x1, 0);
+  assert.equal(res1x1.landed, true);
+  assert.equal(state1x1.isGameOver, false, '1x1 partial entry must not trigger Game Over');
+  assert.ok(state1x1.activePiece !== null, 'next piece must spawn after 1x1 partial entry');
+  assert.equal(state1x1.grid[0][7]?.color, 0, 'the 1x1 cell that entered row 0 must remain on the board');
+  assert.equal(state1x1.grid[0][8]?.color, 1, 'full column 8 remains intact');
+  assert.equal(res1x1.squaresFormed, 1, '1x1 entering row 0 still detects formed 2x2 square');
+
+  // Now both spawn columns 7 and 8 are completely full -> 0 cells enter -> Game Over
+  const resZero = hardDropPiece(state1x1, 0);
+  assert.equal(resZero.landed, true);
+  assert.equal(state1x1.isGameOver, true, '0 cells entering the board must trigger Game Over');
+  assert.equal(state1x1.activePiece, null);
+});

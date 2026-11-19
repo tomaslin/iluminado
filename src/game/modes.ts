@@ -371,6 +371,7 @@ export function computeCpuBestMove(state: BoardState): CpuTargetPlan {
           row.map((c) => (c ? { ...c } : null))
         );
         let overflowed = false;
+        let placedCount = 0;
 
         for (let px = 0; px < pieceCols; px++) {
           const gx = col + px;
@@ -402,6 +403,7 @@ export function computeCpuBestMove(state: BoardState): CpuTargetPlan {
                 continue;
               }
               simGrid[writeRow][gx] = toSimCell(pCell);
+              placedCount++;
               writeRow--;
             }
           } else {
@@ -430,6 +432,7 @@ export function computeCpuBestMove(state: BoardState): CpuTargetPlan {
                 continue;
               }
               simGrid[writeRow][gx] = toSimCell(pCell);
+              placedCount++;
               writeRow++;
             }
           }
@@ -452,7 +455,7 @@ export function computeCpuBestMove(state: BoardState): CpuTargetPlan {
         }
 
         const heuristic =
-          (overflowed ? -10000 : 0) +
+          (placedCount === 0 ? -10000 : overflowed ? -80 : 0) +
           squares.length * 140 +
           chainCount * 35 +
           sameAdj * 4 -
@@ -475,6 +478,7 @@ export function computeCpuBestMove(state: BoardState): CpuTargetPlan {
           gr.map((c) => (c ? { ...c } : null))
         );
         let overflowed = false;
+        let placedCount = 0;
 
         for (let py = 0; py < pieceRows; py++) {
           const gy = row + py;
@@ -506,6 +510,7 @@ export function computeCpuBestMove(state: BoardState): CpuTargetPlan {
                 continue;
               }
               simGrid[gy][writeCol] = toSimCell(pCell);
+              placedCount++;
               writeCol--;
             }
           } else {
@@ -534,6 +539,7 @@ export function computeCpuBestMove(state: BoardState): CpuTargetPlan {
                 continue;
               }
               simGrid[gy][writeCol] = toSimCell(pCell);
+              placedCount++;
               writeCol++;
             }
           }
@@ -556,7 +562,7 @@ export function computeCpuBestMove(state: BoardState): CpuTargetPlan {
         }
 
         const heuristic =
-          (overflowed ? -10000 : 0) +
+          (placedCount === 0 ? -10000 : overflowed ? -80 : 0) +
           squares.length * 140 +
           chainCount * 35 +
           sameAdj * 4 -
