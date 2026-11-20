@@ -2426,6 +2426,49 @@ test('IluminadoAudioEngine enforces 3-buffer memory cap, throttles rapid move ti
   assert.equal(engine.getMusicVolume(), 0);
   engine.setSfxVolume(0.42);
   assert.equal(engine.getSfxVolume(), 0.42);
+
+  // Clean disposal
+  engine.dispose();
+  assert.equal(engine.getDecodedBufferCount(), 0);
+});
+
+test('IluminadoAudioEngine protects active and desired tracks during LRU cache eviction and purges raw bytes', () => {
+  const engine = new IluminadoAudioEngine();
+  const fakeDecoded = (engine as unknown as { audioBuffers: Map<string, unknown> }).audioBuffers;
+  const fakeRaw = (engine as unknown as { rawTrackCache: Map<string, unknown> }).rawTrackCache;
+  const priv = engine as unknown as { activeBufferUrl: string | null; desiredTrackUrl: string | null };
+
+  // Set active and desired tracks
+  priv.activeBufferUrl = 'music/world2.mp3';
+  priv.desiredTrackUrl = 'music/world3.mp3';
+
+  fakeDecoded.set('music/world1.mp3', {});
+  fakeDecoded.set('music/world2.mp3', {});
+  fakeDecoded.set('music/world3.mp3', {});
+  fakeDecoded.set('music/world4.mp3', {});
+
+  // Raw byte cache has stale decoded tracks plus an undecoded one
+  fakeRaw.set('music/world1.mp3', new ArrayBuffer(16));
+  fakeRaw.set('music/world2.mp3', new ArrayBuffer(16));
+  fakeRaw.set('music/world5.mp3', new ArrayBuffer(16));
+
+  // Trimming with keepUrl='music/world4.mp3'
+  engine.trimBufferCaches('music/world4.mp3');
+
+  // Strict 3-buffer cap preserved
+  assert.equal(engine.getDecodedBufferCount(), 3);
+  // Protected active, desired, and keepUrl must be retained
+  assert.ok(fakeDecoded.has('music/world2.mp3'), 'Active buffer must be retained');
+  assert.ok(fakeDecoded.has('music/world3.mp3'), 'Desired track must be retained');
+  assert.ok(fakeDecoded.has('music/world4.mp3'), 'keepUrl track must be retained');
+  // Unprotected oldest world1 must be evicted
+  assert.ok(!fakeDecoded.has('music/world1.mp3'), 'Stale track world1 must be evicted');
+
+  // Raw byte cache for already-decoded tracks must be purged to free memory
+  assert.ok(!fakeRaw.has('music/world2.mp3'), 'Raw bytes for decoded track must be purged');
+  assert.ok(fakeRaw.has('music/world5.mp3'), 'Undecoded raw bytes must be kept');
+
+  engine.dispose();
 });
 
 test('storage persists and sanitizes musicVolume and sfxVolume with sensible defaults', () => {

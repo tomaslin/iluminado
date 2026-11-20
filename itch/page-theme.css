@@ -1,0 +1,185 @@
+/*
+  Iluminado — itch.io Page Styling & Theme Palette
+  
+  HOW TO APPLY TO YOUR ITCH.IO PROFILE:
+  1. Open your game's page on itch.io while logged in.
+  2. Click "Edit theme" in the top banner toolbar.
+  3. Apply the Palette values below in the sidebar inputs.
+  4. If your itch.io account has Custom CSS enabled, paste the CSS rules
+     in the "Custom CSS" panel at the bottom of the Theme Editor.
+*/
+
+/* ==========================================================================
+   1. ITCH.IO THEME EDITOR BUILT-IN INPUTS (Copy & Paste these Hex Codes)
+   ==========================================================================
+   
+   Page background:     #07090e   (Deep cosmic void)
+   Text color:          #cbd5e1   (Muted silver slate)
+   Link color:          #38bdf8   (Luminescent cyan)
+   Highlight color:     #f59e0b   (Amber glow)
+   Banner background:   #0f1422   (Architectural frame)
+   Content background:  #0d121f   (Semi-translucent container)
+   Font family:         Lato, Open Sans, or Sans-serif
+   Font size:           Large (16px) or Normal
+   ========================================================================== */
+
+/* ==========================================================================
+   2. CUSTOM CSS RULES (For accounts with CSS editing privileges)
+   ========================================================================== */
+
+/* Root Variables */
+:root {
+  --ilu-bg: #07090e;
+  --ilu-card-bg: rgba(15, 20, 34, 0.92);
+  --ilu-border: rgba(56, 189, 248, 0.25);
+  --ilu-border-glow: rgba(56, 189, 248, 0.6);
+  --ilu-accent-cyan: #38bdf8;
+  --ilu-accent-amber: #f59e0b;
+  --ilu-text-bright: #f8fafc;
+  --ilu-text-muted: #94a3b8;
+  --ilu-radius: 8px;
+}
+
+/* Page Background & Grid Overlay */
+body {
+  background-color: var(--ilu-bg) !important;
+  background-image: 
+    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(14, 165, 233, 0.15), transparent),
+    radial-gradient(circle at 100% 100%, rgba(245, 158, 11, 0.08), transparent),
+    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px) !important;
+  background-size: 100% 100%, 100% 100%, 32px 32px, 32px 32px !important;
+  color: var(--ilu-text-muted) !important;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Main Content Wrapper */
+.wrapper, #wrapper {
+  background: var(--ilu-card-bg) !important;
+  border: 1px solid var(--ilu-border) !important;
+  border-radius: var(--ilu-radius) !important;
+  box-shadow: 0 16px 48px -8px rgba(0, 0, 0, 0.8), 0 0 24px -4px rgba(56, 189, 248, 0.15) !important;
+  backdrop-filter: blur(12px);
+  padding: 24px 32px !important;
+}
+
+/* Game Title & Headers */
+.game_title, h1, h2, h3 {
+  color: var(--ilu-text-bright) !important;
+  letter-spacing: -0.02em;
+  font-weight: 700 !important;
+}
+
+h2 {
+  border-bottom: 1px solid var(--ilu-border);
+  padding-bottom: 8px;
+  margin-top: 32px;
+  color: var(--ilu-accent-cyan) !important;
+  text-transform: uppercase;
+  font-size: 1.25rem !important;
+  letter-spacing: 0.05em;
+}
+
+h3 {
+  color: var(--ilu-accent-amber) !important;
+  font-size: 1.05rem !important;
+  margin-top: 20px;
+}
+
+/* Links & Interactive Elements */
+a {
+  color: var(--ilu-accent-cyan) !important;
+  text-decoration: none !important;
+  transition: color 0.15s ease, text-shadow 0.15s ease;
+}
+
+a:hover {
+  color: #7dd3fc !important;
+  text-shadow: 0 0 8px rgba(56, 189, 248, 0.5);
+}
+
+/* HTML5 Game Embed Frame */
+.html_embed_widget, .game_frame, iframe {
+  border: 1px solid var(--ilu-border) !important;
+  border-radius: var(--ilu-radius) !important;
+  box-shadow: 0 0 32px -4px rgba(56, 189, 248, 0.25) !important;
+  background-color: #000000 !important;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
+.html_embed_widget:hover, .game_frame:hover {
+  border-color: var(--ilu-border-glow) !important;
+  box-shadow: 0 0 40px -2px rgba(56, 189, 248, 0.4) !important;
+}
+
+/* Video & Media Gallery Container */
+.video_embed, .media_gallery {
+  border-radius: var(--ilu-radius) !important;
+  overflow: hidden;
+  border: 1px solid var(--ilu-border);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  margin-bottom: 24px;
+}
+
+/* Tables (Controls, Feature Matrices) */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 16px 0 24px 0;
+  background: rgba(10, 15, 26, 0.6);
+  border: 1px solid var(--ilu-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+th {
+  background: rgba(56, 189, 248, 0.12) !important;
+  color: var(--ilu-accent-cyan) !important;
+  padding: 10px 14px !important;
+  font-weight: 600;
+  text-align: left;
+  border-bottom: 1px solid var(--ilu-border) !important;
+}
+
+td {
+  padding: 10px 14px !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
+  color: var(--ilu-text-bright);
+}
+
+tr:nth-child(even) td {
+  background: rgba(255, 255, 255, 0.015);
+}
+
+/* Keyboard / Controller Badges */
+kbd {
+  display: inline-block;
+  padding: 2px 7px;
+  font-size: 0.82rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  background-color: rgba(30, 41, 59, 0.9);
+  color: var(--ilu-accent-cyan);
+  border: 1px solid rgba(56, 189, 248, 0.4);
+  border-radius: 4px;
+  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.6);
+}
+
+/* Custom Scrollbar for Smooth Aesthetic */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--ilu-bg);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(56, 189, 248, 0.3);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(56, 189, 248, 0.6);
+}

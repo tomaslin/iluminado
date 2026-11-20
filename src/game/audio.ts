@@ -241,17 +241,12 @@ export class IluminadoAudioEngine {
   private noiseBuffer: AudioBuffer | null = null;
   private distortionCache = new Map<number, WaveShaperNode['curve']>();
 
-  private musicAudio: HTMLAudioElement | null = null;
+  private fallbackAudio: HTMLAudioElement | null = null;
+  private fallbackUrl: string | null = null;
   private activeMusicUrl: string | null = null;
   private desiredTrackUrl: string | null = null;
   private desiredSkin: SkinConfig | null = null;
   private desiredMode: 'title' | 'playing' | 'paused' | 'gameover' = 'title';
-  private audioFadeTimers = new WeakMap<HTMLAudioElement, number>();
-  private mediaSources = new WeakMap<HTMLAudioElement, MediaElementAudioSourceNode>();
-  private elementGains = new WeakMap<HTMLAudioElement, GainNode>();
-  private elementVolumes = new WeakMap<HTMLAudioElement, number>();
-  private attachedSourceEls = new WeakSet<HTMLAudioElement>();
-  private fadingOutEls = new Set<HTMLAudioElement>();
 
   // Decoded AudioBuffer cache (capped at 3) + gapless sample-accurate AudioBufferSourceNode playback
   private rawTrackCache = new Map<string, ArrayBuffer>();
@@ -303,11 +298,11 @@ export class IluminadoAudioEngine {
       this.ctx = new AudioCtx();
 
       this.compressor = this.ctx.createDynamicsCompressor();
-      this.compressor.threshold.value = -15;
-      this.compressor.knee.value = 12;
-      this.compressor.ratio.value = 4;
-      this.compressor.attack.value = 0.004;
-      this.compressor.release.value = 0.18;
+      this.compressor.threshold.value = -10;
+      this.compressor.knee.value = 16;
+      this.compressor.ratio.value = 3;
+      this.compressor.attack.value = 0.008;
+      this.compressor.release.value = 0.22;
 
       this.masterGain = this.ctx.createGain();
       this.masterGain.gain.value = this.muted ? 0 : 0.76;
@@ -423,10 +418,6 @@ export class IluminadoAudioEngine {
         data[i] = Math.random() * 2 - 1;
       }
 
-      if (this.musicAudio) {
-        const preservedVol = this.musicAudio.paused ? 0.02 : 1;
-        this.attachAudioElementToGraph(this.musicAudio, preservedVol);
-      }
     }
     if (this.ctx.state === 'suspended') {
       this.ctx.resume().catch(() => {});
@@ -451,18 +442,17 @@ export class IluminadoAudioEngine {
         0.03
       );
     }
-    if (this.musicAudio) {
-      this.musicAudio.muted = muted;
+    if (this.fallbackAudio) {
+      this.fallbackAudio.muted = muted;
     }
   }
 
   public setMusicVolume(volume: number): void {
     this.musicVolume = clamp(volume, 0, 1);
     this.applyDynamicMusicShaping();
-    if (this.musicAudio && (!this.ctx || !this.attachedSourceEls.has(this.musicAudio))) {
-      const nativeTrim = Math.min(1.15, getTrackTrimGain(this.activeMusicUrl));
+    if (this.fallbackAudio) {
       const base = this.desiredMode === 'paused' ? 0.18 : this.desiredMode === 'title' ? 0.38 : 0.56;
-      this.musicAudio.volume = clamp(base * nativeTrim * this.musicVolume, 0, 1);
+      this.fallbackAudio.volume = clamp(base * this.musicVolume, 0, 1);
     }
   }
 
@@ -509,11 +499,11 @@ export class IluminadoAudioEngine {
     if (bufferPlaying) return true;
     return Boolean(
       this.desiredTrackUrl &&
-        this.musicAudio &&
-        this.activeMusicUrl === this.desiredTrackUrl &&
+        this.fallbackAudio &&
+        this.fallbackUrl === this.desiredTrackUrl &&
         (this.desiredMode === 'playing' || this.desiredMode === 'title') &&
-        !this.musicAudio.paused &&
-        !this.musicAudio.ended
+        !this.fallbackAudio.paused &&
+        !this.fallbackAudio.ended
     );
   }
 
@@ -536,9 +526,9 @@ export class IluminadoAudioEngine {
       }
     }
     this.currentTempoScale = clamped;
-    if (this.musicAudio) {
+    if (this.fallbackAudio) {
       try {
-        this.musicAudio.playbackRate = clamped;
+        this.fallbackAudio.playbackRate = clamped;
       } catch {
         // Ignore unsupported playbackRate
       }
@@ -604,35 +594,58 @@ export class IluminadoAudioEngine {
 
   /**
    * Cache helper exposed so tests and runtime both enforce the strict 3-buffer memory cap.
+   * Protects the active track, desired track, and keepUrl from being evicted.
    */
   public trimBufferCaches(keepUrl?: string): void {
+    const protectedUrls = new Set<string>();
+    if (this.activeBufferUrl) protectedUrls.add(this.activeBufferUrl);
+    if (this.desiredTrackUrl) protectedUrls.add(this.desiredTrackUrl);
+    if (keepUrl) protectedUrls.add(keepUrl);
+
+    // Evict decoded buffers beyond MAX_DECODED_BUFFER_CACHE
     while (this.audioBuffers.size > MAX_DECODED_BUFFER_CACHE) {
-      const oldestKey = this.audioBuffers.keys().next().value;
-      if (!oldestKey) break;
-      if (oldestKey === keepUrl || oldestKey === this.desiredTrackUrl) {
-        const val = this.audioBuffers.get(oldestKey);
-        this.audioBuffers.delete(oldestKey);
-        if (val) this.audioBuffers.set(oldestKey, val);
-        const nextOldest = this.audioBuffers.keys().next().value;
-        if (!nextOldest || nextOldest === oldestKey) break;
-        this.audioBuffers.delete(nextOldest);
-      } else {
-        this.audioBuffers.delete(oldestKey);
+      let evictedKey: string | null = null;
+      for (const key of this.audioBuffers.keys()) {
+        if (!protectedUrls.has(key)) {
+          evictedKey = key;
+          break;
+        }
       }
+      if (!evictedKey) {
+        // If all are protected, evict oldest that is not active or desired
+        for (const key of this.audioBuffers.keys()) {
+          if (key !== this.activeBufferUrl && key !== this.desiredTrackUrl) {
+            evictedKey = key;
+            break;
+          }
+        }
+        if (!evictedKey) {
+          evictedKey = this.audioBuffers.keys().next().value ?? null;
+        }
+      }
+      if (!evictedKey) break;
+      this.audioBuffers.delete(evictedKey);
     }
+
+    // Any track already decoded into audioBuffers can be safely purged from raw byte cache
+    for (const key of this.audioBuffers.keys()) {
+      this.rawTrackCache.delete(key);
+    }
+
+    // Evict raw compressed tracks beyond MAX_RAW_TRACK_CACHE
     while (this.rawTrackCache.size > MAX_RAW_TRACK_CACHE) {
-      const oldestKey = this.rawTrackCache.keys().next().value;
-      if (!oldestKey) break;
-      if (oldestKey === keepUrl || oldestKey === this.desiredTrackUrl) {
-        const val = this.rawTrackCache.get(oldestKey);
-        this.rawTrackCache.delete(oldestKey);
-        if (val) this.rawTrackCache.set(oldestKey, val);
-        const nextOldest = this.rawTrackCache.keys().next().value;
-        if (!nextOldest || nextOldest === oldestKey) break;
-        this.rawTrackCache.delete(nextOldest);
-      } else {
-        this.rawTrackCache.delete(oldestKey);
+      let evictedKey: string | null = null;
+      for (const key of this.rawTrackCache.keys()) {
+        if (!protectedUrls.has(key)) {
+          evictedKey = key;
+          break;
+        }
       }
+      if (!evictedKey) {
+        evictedKey = this.rawTrackCache.keys().next().value ?? null;
+      }
+      if (!evictedKey) break;
+      this.rawTrackCache.delete(evictedKey);
     }
   }
 
@@ -698,6 +711,8 @@ export class IluminadoAudioEngine {
       .then((decoded) => {
         if (decoded) {
           this.touchBufferLru(url, decoded);
+          // Free raw byte buffer from memory now that PCM AudioBuffer is ready
+          this.rawTrackCache.delete(url);
           this.trimBufferCaches(url);
           return decoded;
         }
@@ -737,109 +752,6 @@ export class IluminadoAudioEngine {
     });
   }
 
-  private attachAudioElementToGraph(
-    el: HTMLAudioElement,
-    initialGain = 0.02
-  ): void {
-    if (!this.ctx || !this.musicTrimGain || this.attachedSourceEls.has(el)) {
-      return;
-    }
-    try {
-      const src = this.ctx.createMediaElementSource(el);
-      const elGain = this.ctx.createGain();
-      const clampedInit = clamp(initialGain, 0, 1);
-      elGain.gain.setValueAtTime(clampedInit, this.ctx.currentTime);
-      el.volume = 1;
-      src.connect(elGain);
-      elGain.connect(this.musicTrimGain);
-      this.mediaSources.set(el, src);
-      this.elementGains.set(el, elGain);
-      this.elementVolumes.set(el, clampedInit);
-      this.attachedSourceEls.add(el);
-    } catch {
-      // Fallback to native HTMLAudioElement volume if Web Audio attachment fails
-    }
-  }
-
-  private getElementVolume(el: HTMLAudioElement): number {
-    if (this.attachedSourceEls.has(el)) {
-      return this.elementVolumes.get(el) ?? 1;
-    }
-    return el.volume;
-  }
-
-  private setElementVolume(el: HTMLAudioElement, val: number): void {
-    const v = clamp(val, 0, 1);
-    this.elementVolumes.set(el, v);
-    const elGain = this.elementGains.get(el);
-    if (elGain && this.ctx) {
-      elGain.gain.setTargetAtTime(v, this.ctx.currentTime, 0.015);
-    } else {
-      el.volume = v;
-    }
-  }
-
-  private clearFadeTimer(el: HTMLAudioElement): void {
-    const existing = this.audioFadeTimers.get(el);
-    if (existing !== undefined && typeof window !== 'undefined') {
-      window.clearInterval(existing);
-      this.audioFadeTimers.delete(el);
-    }
-  }
-
-  private fadeAudioVolume(
-    el: HTMLAudioElement,
-    targetVol: number,
-    durationMs: number,
-    onDone?: () => void
-  ): void {
-    if (typeof window === 'undefined') return;
-    this.clearFadeTimer(el);
-    const clampedTarget = clamp(targetVol, 0, 1);
-    const startVol = this.getElementVolume(el);
-    if (Math.abs(startVol - clampedTarget) < 0.015 || durationMs <= 0) {
-      this.setElementVolume(el, clampedTarget);
-      onDone?.();
-      return;
-    }
-    const stepMs = durationMs >= 1000 ? 40 : 22;
-    const steps = Math.max(1, Math.round(durationMs / stepMs));
-    let step = 0;
-    const fadingOut = clampedTarget < startVol;
-    const id = window.setInterval(() => {
-      step++;
-      const linearT = Math.min(1, step / steps);
-      const easedT = fadingOut
-        ? 1 - Math.cos(linearT * Math.PI * 0.5)
-        : Math.sin(linearT * Math.PI * 0.5);
-      this.setElementVolume(el, startVol + (clampedTarget - startVol) * easedT);
-      if (linearT >= 1) {
-        window.clearInterval(id);
-        this.audioFadeTimers.delete(el);
-        onDone?.();
-      }
-    }, stepMs);
-    this.audioFadeTimers.set(el, id);
-  }
-
-  private createEqualPowerCurve(
-    direction: 'in' | 'out',
-    startLevel = 1,
-    points = 32
-  ): Float32Array<ArrayBuffer> {
-    const buf = new ArrayBuffer(points * 4);
-    const curve = new Float32Array(buf);
-    for (let i = 0; i < points; i++) {
-      const t = i / (points - 1);
-      if (direction === 'in') {
-        curve[i] = Math.max(0.0005, Math.sin(t * Math.PI * 0.5) * startLevel);
-      } else {
-        curve[i] = Math.max(0.0001, Math.cos(t * Math.PI * 0.5) * startLevel);
-      }
-    }
-    return curve;
-  }
-
   private cancelAudioParamSafe(
     param: AudioParam | null | undefined,
     atTime: number
@@ -860,19 +772,17 @@ export class IluminadoAudioEngine {
     }
   }
 
-  private cleanupAudioElement(el: HTMLAudioElement): void {
-    this.clearFadeTimer(el);
-    this.fadingOutEls.delete(el);
-    el.pause();
-    el.currentTime = 0;
-    el.src = '';
-    const src = this.mediaSources.get(el);
-    const elGain = this.elementGains.get(el);
+  private stopFallbackAudio(fadeMs: number): void {
+    const el = this.fallbackAudio;
+    this.fallbackAudio = null;
+    this.fallbackUrl = null;
+    if (!el) return;
     try {
-      src?.disconnect();
-      elGain?.disconnect();
+      el.pause();
+      el.removeAttribute('src');
+      el.load();
     } catch {
-      // Ignore already disconnected nodes
+      // Ignore
     }
   }
 
@@ -896,62 +806,60 @@ export class IluminadoAudioEngine {
       return;
     }
 
+    // Limit concurrent fading buffer nodes to prevent memory accumulation
+    if (this.fadingBufferNodes.size >= 2) {
+      for (const entry of Array.from(this.fadingBufferNodes)) {
+        try {
+          entry.node.stop();
+          entry.node.disconnect();
+          entry.gain.disconnect();
+        } catch {}
+        this.fadingBufferNodes.delete(entry);
+      }
+    }
+
     const entry = { node, gain };
     this.fadingBufferNodes.add(entry);
     const now = this.ctx.currentTime;
     const fadeSec = Math.max(0.04, fadeMs / 1000);
     this.cancelAudioParamSafe(gain.gain, now);
-    const startGain = clamp(gain.gain.value, 0.0005, 1);
+    const startGain = clamp(gain.gain.value, 0.0001, 1);
     try {
       gain.gain.setValueAtTime(startGain, now);
-      gain.gain.setValueCurveAtTime(
-        this.createEqualPowerCurve('out', startGain),
-        now + 0.001,
-        fadeSec
-      );
+      gain.gain.linearRampToValueAtTime(0.0001, now + fadeSec);
       node.stop(now + fadeSec + 0.04);
     } catch {
       try {
-        this.cancelAudioParamSafe(gain.gain, now);
-        gain.gain.setValueAtTime(startGain, now);
-        gain.gain.linearRampToValueAtTime(0.0001, now + fadeSec);
-        node.stop(now + fadeSec + 0.04);
+        node.stop();
       } catch {
         // Ignore already stopped
       }
     }
-    node.onended = () => {
+
+    let cleaned = false;
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
       this.fadingBufferNodes.delete(entry);
+      try {
+        node.stop();
+      } catch {}
       try {
         node.disconnect();
         gain.disconnect();
-      } catch {
-        // Ignore
-      }
+      } catch {}
     };
+
+    node.onended = cleanup;
+    if (typeof window !== 'undefined') {
+      window.setTimeout(cleanup, Math.ceil((fadeSec + 0.15) * 1000));
+    }
   }
 
   private stopActiveMusic(fadeMs: number): void {
     this.stopActiveBufferSource(fadeMs);
-    const oldEl = this.musicAudio;
-    this.musicAudio = null;
+    this.stopFallbackAudio(fadeMs);
     this.activeMusicUrl = null;
-    if (!oldEl) return;
-
-    if (fadeMs <= 0) {
-      this.cleanupAudioElement(oldEl);
-      return;
-    }
-
-    if (this.fadingOutEls.size >= 2) {
-      const firstStale = Array.from(this.fadingOutEls)[0];
-      if (firstStale) this.cleanupAudioElement(firstStale);
-    }
-
-    this.fadingOutEls.add(oldEl);
-    this.fadeAudioVolume(oldEl, 0, fadeMs, () => {
-      this.cleanupAudioElement(oldEl);
-    });
   }
 
   public updateShiftRiser(riser01: number): void {
@@ -962,11 +870,12 @@ export class IluminadoAudioEngine {
   }
 
   private applyDynamicMusicShaping(): void {
-    if (!this.ctx) return;
+    if (!this.ctx || this.ctx.state !== 'running') return;
     const now = this.ctx.currentTime;
     const activeUrl = this.activeBufferUrl ?? this.activeMusicUrl;
     const trim = getTrackTrimGain(activeUrl);
-    this.musicTrimGain?.gain.setTargetAtTime(trim, now, 0.06);
+    const normalizedTrim = Math.min(2.5, trim);
+    this.musicTrimGain?.gain.setTargetAtTime(normalizedTrim, now, 0.06);
 
     let targetCutoff = 7600;
     let targetQ = 0.72;
@@ -999,7 +908,7 @@ export class IluminadoAudioEngine {
       targetBusGain = clamp(
         0.58 + this.lastStems.lead * 0.12 + this.lastStems.vocal * 0.1,
         0.55,
-        0.78
+        0.75
       );
 
       // Multiband 3-way reactive mix: bass, mids, highs respond independently to live board stems
@@ -1008,12 +917,12 @@ export class IluminadoAudioEngine {
           (this.lastStems.bass - 0.36) * 0.58 +
           Math.min(0.2, this.lastComboLevel * 0.05),
         0.72,
-        1.22
+        1.18
       );
       midBand = clamp(
         0.64 + this.lastStems.lead * 0.44 + this.lastStems.vocal * 0.22,
         0.64,
-        1.22
+        1.18
       );
       highBand = clamp(
         0.56 +
@@ -1021,14 +930,14 @@ export class IluminadoAudioEngine {
           this.lastStems.vocal * 0.38 +
           Math.min(0.18, this.lastComboLevel * 0.045),
         0.56,
-        1.24
+        1.20
       );
 
       // DJ-style Shift riser sweeps lowpass down + boosts Q over the final bar before Shift
       if (this.shiftRiserProgress > 0.01 && now >= this.transitionBloomUntilCtxTime) {
         const r = this.shiftRiserProgress;
         targetCutoff = targetCutoff * (1 - r) + 640 * r;
-        targetQ = 0.72 + r * 3.6;
+        targetQ = 0.72 + r * 2.5;
       }
     }
 
@@ -1039,7 +948,9 @@ export class IluminadoAudioEngine {
     this.musicLowBandGain?.gain.setTargetAtTime(lowBand, now, 0.14);
     this.musicMidBandGain?.gain.setTargetAtTime(midBand, now, 0.14);
     this.musicHighBandGain?.gain.setTargetAtTime(highBand, now, 0.14);
-    this.musicBusGain?.gain.setTargetAtTime(targetBusGain * this.musicVolume, now, 0.08);
+    // Headroom compensation prevents high trim tracks from clipping or over-compressing
+    const trimComp = normalizedTrim > 1.4 ? 1.4 / normalizedTrim : 1.0;
+    this.musicBusGain?.gain.setTargetAtTime(targetBusGain * trimComp * this.musicVolume, now, 0.08);
   }
 
   private startDecodedBufferTrack(
@@ -1062,7 +973,6 @@ export class IluminadoAudioEngine {
     src.loopEnd = timing.loopEndSec;
     src.playbackRate.setValueAtTime(this.currentTempoScale, now);
 
-    // Start directly on firstBeatSec (skipping any silent intro) unless handing off mid-stream
     const loopLen = Math.max(0.5, timing.loopEndSec - timing.firstBeatSec);
     let safeOffset = timing.firstBeatSec;
     if (explicitOffsetSec !== undefined && explicitOffsetSec > timing.firstBeatSec) {
@@ -1071,21 +981,15 @@ export class IluminadoAudioEngine {
     }
 
     const gain = this.ctx.createGain();
-    const fadeSec = Math.max(0.03, fadeMs / 1000);
+    const fadeSec = Math.max(0.04, fadeMs / 1000);
     this.cancelAudioParamSafe(gain.gain, now);
     try {
-      gain.gain.setValueAtTime(0.0005, now);
-      gain.gain.setValueCurveAtTime(
-        this.createEqualPowerCurve('in', 1),
-        now + 0.001,
-        fadeSec
-      );
-      this.activeBufferFadeEndCtxTime = now + 0.001 + fadeSec + 0.02;
-    } catch {
-      this.cancelAudioParamSafe(gain.gain, now);
-      gain.gain.setValueAtTime(0.0005, now);
+      gain.gain.setValueAtTime(0.0001, now);
       gain.gain.linearRampToValueAtTime(1, now + fadeSec);
       this.activeBufferFadeEndCtxTime = now + fadeSec + 0.02;
+    } catch {
+      gain.gain.setValueAtTime(1, now);
+      this.activeBufferFadeEndCtxTime = now + 0.02;
     }
 
     src.connect(gain);
@@ -1104,12 +1008,10 @@ export class IluminadoAudioEngine {
   }
 
   private ensureDesiredMusicPlaying(): void {
-    if (typeof window === 'undefined' || typeof Audio === 'undefined') return;
+    if (typeof window === 'undefined') return;
 
     if (this.desiredMode === 'gameover' || !this.desiredTrackUrl) {
-      if (this.musicAudio || this.activeBufferNode) {
-        this.stopActiveMusic(this.desiredMode === 'gameover' ? 380 : 260);
-      }
+      this.stopActiveMusic(this.desiredMode === 'gameover' ? 380 : 260);
       return;
     }
 
@@ -1118,59 +1020,50 @@ export class IluminadoAudioEngine {
     }
 
     const targetUrl = this.desiredTrackUrl;
-    const isWebAudioRouted = Boolean(this.ctx && this.musicTrimGain);
-    const nativeTrim = Math.min(1.15, getTrackTrimGain(targetUrl));
-    const targetElVol = isWebAudioRouted
-      ? 1
-      : this.desiredMode === 'paused'
-      ? 0.18 * this.musicVolume
-      : this.desiredMode === 'title'
-      ? clamp(0.38 * nativeTrim * this.musicVolume, 0, 0.85)
-      : clamp(0.56 * nativeTrim * this.musicVolume, 0, 1);
 
-    this.applyDynamicMusicShaping();
+    // 1. Primary high-performance Web Audio engine (sample-accurate, zero-flange)
+    if (this.ctx && this.musicTrimGain) {
+      this.stopFallbackAudio(100);
 
-    // 1. Prefer gapless pre-decoded AudioBufferSourceNode whenever ready
-    const decoded = isWebAudioRouted ? this.audioBuffers.get(targetUrl) : undefined;
-    if (decoded && this.ctx && this.musicTrimGain) {
-      if (this.activeBufferNode && this.activeBufferUrl === targetUrl) {
-        if (
-          this.activeBufferGain &&
-          this.ctx.currentTime >= this.activeBufferFadeEndCtxTime
-        ) {
-          this.cancelAudioParamSafe(
-            this.activeBufferGain.gain,
-            this.ctx.currentTime
-          );
-          this.activeBufferGain.gain.setTargetAtTime(
-            1,
-            this.ctx.currentTime,
-            0.08
-          );
+      const decoded = this.audioBuffers.get(targetUrl);
+      if (decoded) {
+        if (this.activeBufferNode && this.activeBufferUrl === targetUrl) {
+          if (
+            this.activeBufferGain &&
+            this.ctx.currentTime >= this.activeBufferFadeEndCtxTime
+          ) {
+            this.cancelAudioParamSafe(
+              this.activeBufferGain.gain,
+              this.ctx.currentTime
+            );
+            this.activeBufferGain.gain.setTargetAtTime(
+              1,
+              this.ctx.currentTime,
+              0.08
+            );
+          }
+          this.applyDynamicMusicShaping();
+          return;
         }
+
+        const isSameTrack = this.activeBufferUrl === targetUrl;
+        const swapFadeMs = this.desiredMode === 'playing' ? 280 : 260;
+
+        if (!isSameTrack && this.musicFilter && this.activeBufferNode) {
+          const now = this.ctx.currentTime;
+          this.cancelAudioParamSafe(this.musicFilter.frequency, now);
+          this.musicFilter.frequency.setTargetAtTime(900, now, 0.03);
+          this.musicFilter.frequency.setTargetAtTime(14500, now + 0.12, 0.22);
+          this.transitionBloomUntilCtxTime = now + 0.5;
+        }
+
+        this.stopActiveBufferSource(swapFadeMs);
+        this.startDecodedBufferTrack(targetUrl, decoded, swapFadeMs);
         return;
       }
 
-      // Filter-swap transition (~280ms) replaces the old 4.8s two-tempo overlap
-      const isSameTrackHandoff = Boolean(this.musicAudio && this.activeMusicUrl === targetUrl);
-      const handoffOffset = isSameTrackHandoff ? (this.musicAudio?.currentTime || undefined) : undefined;
-      const swapFadeMs = isSameTrackHandoff ? 180 : this.desiredMode === 'playing' ? 280 : 260;
-
-      if (!isSameTrackHandoff && this.musicFilter && (this.activeBufferNode || this.musicAudio)) {
-        const now = this.ctx.currentTime;
-        this.cancelAudioParamSafe(this.musicFilter.frequency, now);
-        this.musicFilter.frequency.setValueAtTime(900, now);
-        this.musicFilter.frequency.setTargetAtTime(14500, now + 0.12, 0.22);
-        this.transitionBloomUntilCtxTime = now + 0.5;
-      }
-
-      this.stopActiveMusic(swapFadeMs);
-      this.startDecodedBufferTrack(targetUrl, decoded, swapFadeMs, handoffOffset);
-      return;
-    }
-
-    // Trigger background fetch + decode so playback upgrades cleanly to sample-accurate AudioBuffer
-    if (isWebAudioRouted) {
+      // Track buffer not yet decoded: fetch and decode directly into audioBuffers.
+      // Do not start a temporary HTMLAudioElement that would create phase cancellation / stutter.
       void this.ensureBufferDecoded(targetUrl).then((buf) => {
         if (
           buf &&
@@ -1181,73 +1074,38 @@ export class IluminadoAudioEngine {
           this.ensureDesiredMusicPlaying();
         }
       });
+      return;
     }
 
-    // 2. Immediate HTMLAudioElement fallback while buffer downloads/decodes
-    if (this.musicAudio && this.activeMusicUrl === targetUrl) {
-      this.musicAudio.muted = this.muted;
-      this.musicAudio.playbackRate = this.currentTempoScale;
-      if (isWebAudioRouted) {
-        this.attachAudioElementToGraph(
-          this.musicAudio,
-          this.getElementVolume(this.musicAudio)
-        );
-      }
-      if (Math.abs(this.getElementVolume(this.musicAudio) - targetElVol) >= 0.015) {
-        this.fadeAudioVolume(this.musicAudio, targetElVol, 160);
-      }
-      if (this.musicAudio.paused) {
-        this.musicAudio.play().catch(() => {});
+    // 2. Standalone HTMLAudioElement fallback (only when Web Audio API is unsupported)
+    if (typeof Audio === 'undefined') return;
+
+    if (this.fallbackAudio && this.fallbackUrl === targetUrl) {
+      this.fallbackAudio.muted = this.muted;
+      this.fallbackAudio.playbackRate = this.currentTempoScale;
+      const targetVol =
+        this.desiredMode === 'paused'
+          ? 0.18 * this.musicVolume
+          : this.desiredMode === 'title'
+          ? clamp(0.38 * this.musicVolume, 0, 0.85)
+          : clamp(0.56 * this.musicVolume, 0, 1);
+      this.fallbackAudio.volume = targetVol;
+      if (this.fallbackAudio.paused) {
+        this.fallbackAudio.play().catch(() => {});
       }
       return;
     }
 
-    const swapFadeMs = this.desiredMode === 'playing' ? 280 : 260;
-    if (this.musicAudio || this.activeBufferNode) {
-      this.stopActiveMusic(swapFadeMs);
-    }
-
+    this.stopFallbackAudio(200);
     const el = new Audio(targetUrl);
     el.loop = true;
     el.preload = 'auto';
     el.muted = this.muted;
     el.playbackRate = this.currentTempoScale;
-    this.setElementVolume(el, 0.005);
-
-    const startOffset = this.desiredSkin?.music.firstBeatSec ?? 0;
-    if (startOffset > 0.05) {
-      el.addEventListener(
-        'loadedmetadata',
-        () => {
-          try {
-            if (el.duration > startOffset + 1) {
-              el.currentTime = startOffset;
-            }
-          } catch {
-            // Ignore seek failure before ready
-          }
-        },
-        { once: true }
-      );
-    }
-
-    if (isWebAudioRouted) {
-      this.attachAudioElementToGraph(el, 0.005);
-    }
-
-    this.musicAudio = el;
-    this.activeMusicUrl = targetUrl;
-    this.applyDynamicMusicShaping();
-
-    el.play()
-      .then(() => {
-        if (this.musicAudio === el) {
-          this.fadeAudioVolume(el, targetElVol, swapFadeMs);
-        }
-      })
-      .catch(() => {
-        // Browser autoplay prevented before gesture; will resume on unlock()
-      });
+    el.volume = clamp(0.56 * this.musicVolume, 0, 1);
+    this.fallbackAudio = el;
+    this.fallbackUrl = targetUrl;
+    el.play().catch(() => {});
   }
 
   public syncWorldMusic(
@@ -1446,29 +1304,33 @@ export class IluminadoAudioEngine {
   ): void {
     if (!this.canSchedule() || !this.ctx || !dest) return;
 
+    const startTime = Math.max(this.ctx.currentTime + 0.002, when);
+    const stopTime = startTime + duration + 0.03;
+
     const osc = this.ctx.createOscillator();
     const filter = this.ctx.createBiquadFilter();
     const gain = this.ctx.createGain();
 
     osc.type = type;
-    osc.frequency.setValueAtTime(Math.max(24, freq), when);
+    osc.frequency.setValueAtTime(Math.max(24, freq), startTime);
     if (pitchEndFreq !== undefined) {
       osc.frequency.exponentialRampToValueAtTime(
         Math.max(24, pitchEndFreq),
-        when + duration
+        startTime + duration
       );
     }
 
     filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(filterFreq, when);
-    filter.Q.setValueAtTime(distortion > 0.35 ? 2.4 : 0.9, when);
+    filter.frequency.setValueAtTime(filterFreq, startTime);
+    filter.Q.setValueAtTime(distortion > 0.35 ? 2.4 : 0.9, startTime);
 
-    gain.gain.setValueAtTime(0.0001, when);
-    gain.gain.linearRampToValueAtTime(Math.max(0.0002, volume), when + attack);
-    gain.gain.exponentialRampToValueAtTime(0.0001, when + duration);
+    gain.gain.setValueAtTime(0.0001, startTime);
+    gain.gain.linearRampToValueAtTime(Math.max(0.0002, volume), startTime + attack);
+    gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
 
+    let shaper: WaveShaperNode | null = null;
     if (distortion > 0.05) {
-      const shaper = this.ctx.createWaveShaper();
+      shaper = this.ctx.createWaveShaper();
       shaper.curve = this.getDistortionCurve(distortion);
       shaper.oversample = '2x';
       osc.connect(shaper);
@@ -1480,8 +1342,17 @@ export class IluminadoAudioEngine {
     filter.connect(gain);
     gain.connect(dest);
 
-    osc.start(when);
-    osc.stop(when + duration + 0.03);
+    osc.onended = () => {
+      try {
+        osc.disconnect();
+        shaper?.disconnect();
+        filter.disconnect();
+        gain.disconnect();
+      } catch {}
+    };
+
+    osc.start(startTime);
+    osc.stop(stopTime);
   }
 
   private scheduleNoise(
@@ -1495,24 +1366,35 @@ export class IluminadoAudioEngine {
   ): void {
     if (!this.canSchedule() || !this.ctx || !dest || !this.noiseBuffer) return;
 
+    const startTime = Math.max(this.ctx.currentTime + 0.002, when);
+    const stopTime = startTime + duration + 0.02;
+
     const src = this.ctx.createBufferSource();
     src.buffer = this.noiseBuffer;
 
     const filter = this.ctx.createBiquadFilter();
     filter.type = filterType;
-    filter.frequency.setValueAtTime(filterFreq, when);
-    filter.Q.setValueAtTime(q, when);
+    filter.frequency.setValueAtTime(filterFreq, startTime);
+    filter.Q.setValueAtTime(q, startTime);
 
     const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(Math.max(0.0002, volume), when);
-    gain.gain.exponentialRampToValueAtTime(0.0001, when + duration);
+    gain.gain.setValueAtTime(Math.max(0.0002, volume), startTime);
+    gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
 
     src.connect(filter);
     filter.connect(gain);
     gain.connect(dest);
 
-    src.start(when);
-    src.stop(when + duration + 0.02);
+    src.onended = () => {
+      try {
+        src.disconnect();
+        filter.disconnect();
+        gain.disconnect();
+      } catch {}
+    };
+
+    src.start(startTime);
+    src.stop(stopTime);
   }
 
   private scheduleKick(when: number, vol: number, style: MusicStyleId): void {
@@ -1666,28 +1548,40 @@ export class IluminadoAudioEngine {
 
   private scheduleVocalPad(when: number, midi: number, dur: number, vol: number): void {
     if (!this.canSchedule() || !this.ctx || !this.stemVocalGain) return;
+
+    const startTime = Math.max(this.ctx.currentTime + 0.002, when);
+    const stopTime = startTime + dur + 0.03;
+
     const osc = this.ctx.createOscillator();
     const f1 = this.ctx.createBiquadFilter();
     const gain = this.ctx.createGain();
 
     osc.type = 'sawtooth';
-    osc.frequency.setValueAtTime(midiToFreq(midi), when);
+    osc.frequency.setValueAtTime(midiToFreq(midi), startTime);
 
     f1.type = 'bandpass';
-    f1.frequency.setValueAtTime(760, when);
-    f1.frequency.linearRampToValueAtTime(1120, when + dur * 0.6);
-    f1.Q.setValueAtTime(4.2, when);
+    f1.frequency.setValueAtTime(760, startTime);
+    f1.frequency.linearRampToValueAtTime(1120, startTime + dur * 0.6);
+    f1.Q.setValueAtTime(4.2, startTime);
 
-    gain.gain.setValueAtTime(0.0001, when);
-    gain.gain.linearRampToValueAtTime(vol, when + Math.min(0.06, dur * 0.25));
-    gain.gain.exponentialRampToValueAtTime(0.0001, when + dur);
+    gain.gain.setValueAtTime(0.0001, startTime);
+    gain.gain.linearRampToValueAtTime(vol, startTime + Math.min(0.06, dur * 0.25));
+    gain.gain.exponentialRampToValueAtTime(0.0001, startTime + dur);
 
     osc.connect(f1);
     f1.connect(gain);
     gain.connect(this.stemVocalGain);
 
-    osc.start(when);
-    osc.stop(when + dur + 0.03);
+    osc.onended = () => {
+      try {
+        osc.disconnect();
+        f1.disconnect();
+        gain.disconnect();
+      } catch {}
+    };
+
+    osc.start(startTime);
+    osc.stop(stopTime);
   }
 
   /**
@@ -2479,8 +2373,8 @@ export class IluminadoAudioEngine {
     if (this.musicFilter) {
       this.cancelAudioParamSafe(this.musicFilter.frequency, now);
       this.musicFilter.Q.setTargetAtTime(0.72, now, 0.04);
-      this.musicFilter.frequency.setValueAtTime(1400, now);
-      this.musicFilter.frequency.setTargetAtTime(14500, now + 0.04, 0.28);
+      this.musicFilter.frequency.setTargetAtTime(1400, now, 0.03);
+      this.musicFilter.frequency.setTargetAtTime(14500, now + 0.05, 0.28);
       this.transitionBloomUntilCtxTime = now + 0.85;
     }
   }
@@ -2500,5 +2394,27 @@ export class IluminadoAudioEngine {
         1400
       );
     });
+  }
+
+  public dispose(): void {
+    this.stopActiveMusic(0);
+    for (const entry of this.fadingBufferNodes) {
+      try {
+        entry.node.stop();
+        entry.node.disconnect();
+        entry.gain.disconnect();
+      } catch {}
+    }
+    this.fadingBufferNodes.clear();
+    this.audioBuffers.clear();
+    this.rawTrackCache.clear();
+    this.rawFetchPromises.clear();
+    this.decodePromises.clear();
+    if (this.ctx && this.ctx.state !== 'closed') {
+      try {
+        this.ctx.close().catch(() => {});
+      } catch {}
+    }
+    this.ctx = null;
   }
 }

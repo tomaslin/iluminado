@@ -173,7 +173,10 @@ export default function App() {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const rendererRef = useRef<IluminadoCanvasRenderer>(new IluminadoCanvasRenderer());
-  const audioRef = useRef<IluminadoAudioEngine>(new IluminadoAudioEngine());
+  const audioRef = useRef<IluminadoAudioEngine>(undefined as unknown as IluminadoAudioEngine);
+  if (!audioRef.current) {
+    audioRef.current = new IluminadoAudioEngine();
+  }
 
   const [progress, setProgress] = useState<SavedProgress>(() => loadProgress());
   const progressRef = useRef<SavedProgress>(progress);
@@ -1349,12 +1352,21 @@ export default function App() {
       p2DasRef.current = { dir: 0, hold: 0, repeat: 0 };
     };
 
+    const onVisibilityChange = () => {
+      clearHeld();
+      if (document.visibilityState === 'visible') {
+        audioRef.current.unlock();
+        bufferClockSyncRef.current = { trackUrl: null, lastRawBufBeat: 0 };
+        audioRef.current.notifyClockReset();
+      }
+    };
+
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     window.addEventListener('pointerdown', onPointerUnlock);
     window.addEventListener('pointermove', onPointerMove, { passive: true });
     window.addEventListener('blur', clearHeld);
-    document.addEventListener('visibilitychange', clearHeld);
+    document.addEventListener('visibilitychange', onVisibilityChange);
 
     return () => {
       window.removeEventListener('keydown', onKeyDown);
@@ -1362,7 +1374,7 @@ export default function App() {
       window.removeEventListener('pointerdown', onPointerUnlock);
       window.removeEventListener('pointermove', onPointerMove);
       window.removeEventListener('blur', clearHeld);
-      document.removeEventListener('visibilitychange', clearHeld);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
     };
   }, [handleNextStage, handlePlayerAction, returnToTitle, startNewGame, toggleMute, togglePause]);
 
@@ -1596,25 +1608,13 @@ export default function App() {
               rawBufBeat >= syncState.lastRawBufBeat &&
               rawBufBeat - syncState.lastRawBufBeat <= 0.75
             ) {
-              sim.beatAccum += rawBufBeat - syncState.lastRawBufBeat;
+              const deltaBeat = rawBufBeat - syncState.lastRawBufBeat;
+              sim.beatAccum += Math.min(0.12, deltaBeat);
               syncState.lastRawBufBeat = rawBufBeat;
             } else {
-              const targetMod = ((rawBufBeat % 8) + 8) % 8;
-              const prevMod = ((prevBeat % 8) + 8) % 8;
-              const diffMod = ((targetMod - prevMod + 12) % 8) - 4;
-              if (diffMod >= 0 && diffMod < 0.75) {
-                sim.beatAccum = prevBeat + diffMod;
-                syncState.trackUrl = activeTrackUrl;
-                syncState.lastRawBufBeat = rawBufBeat;
-              } else if (diffMod < 0 && diffMod > -0.5) {
-                // Hold briefly for buffer cursor to catch up (<0.5 beats) without jumping backward
-                sim.beatAccum = prevBeat;
-              } else {
-                const forwardShift = (targetMod - prevMod + 8) % 8;
-                sim.beatAccum = prevBeat + forwardShift;
-                syncState.trackUrl = activeTrackUrl;
-                syncState.lastRawBufBeat = rawBufBeat;
-              }
+              syncState.trackUrl = activeTrackUrl;
+              syncState.lastRawBufBeat = rawBufBeat;
+              sim.beatAccum += Math.min(0.08, dt * (effectiveBpm / 60));
             }
           } else {
             syncState.trackUrl = null;
@@ -2098,8 +2098,9 @@ export default function App() {
             processColumn(targetCol);
           } else if (currSweepIdx > prevSweepIdx || targetCol !== sim.lastStepCol) {
             let c = Math.max(0, Math.min(liveCols - 1, sim.lastStepCol));
-            let safety = 0;
-            while (c !== targetCol && safety < liveCols + 4) {
+            let stepsTaken = 0;
+            const maxStepsPerFrame = 2;
+            while (c !== targetCol && stepsTaken < maxStepsPerFrame) {
               c = isRtlSweep
                 ? (c - 1 + liveCols) % liveCols
                 : (c + 1) % liveCols;
@@ -2112,13 +2113,9 @@ export default function App() {
                 if ((sim.board?.cols || BOARD_COLS) !== liveCols) break;
               }
               processColumn(c);
-              safety++;
+              stepsTaken++;
             }
-            const latestCols = sim.board?.cols || BOARD_COLS;
-            const latestRtl = sim.board?.activeShift === 'reverse_sweep';
-            sim.lastStepCol = latestRtl
-              ? Math.max(0, latestCols - 1 - (Math.floor(timelineNorm * latestCols) % latestCols))
-              : Math.floor(timelineNorm * latestCols) % latestCols;
+            sim.lastStepCol = targetCol;
           }
 
           // Continuous held controls (DAS/ARR directional) & passive gravity + lock delay
@@ -2436,6 +2433,7 @@ export default function App() {
       ro.disconnect();
       window.removeEventListener('resize', updateSize);
       window.removeEventListener('orientationchange', updateSize);
+      audioRef.current.dispose();
     };
   }, [buildHudSnapshot, commitHighScoreAndUnlocks, finishRun]);
 
