@@ -11,7 +11,7 @@ import {
   getMsUntilNextDaily,
 } from '../game/daily';
 import { MISSION_LEVELS, PUZZLE_LEVELS } from '../game/modes';
-import { getHexLuminance, isHexColorDark, SKINS } from '../game/skins';
+import { isSkyDarkForHero, SKINS } from '../game/skins';
 import {
   getEffectiveDailyStreak,
   isDailyCompletedForDate,
@@ -492,8 +492,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
         : selectedMode
     ] ?? 0;
 
-  const darkWater = getHexLuminance(palette.waterSurface) < 0.55;
-  const darkSky = isHexColorDark(palette.skyMid);
+  const darkSky = isSkyDarkForHero(palette);
 
   const dailyRecord = progress.dailyHistory[dailySpec.dateKey];
   const dailyCompletedToday = isDailyCompletedForDate(progress, dailySpec.dateKey);
@@ -502,13 +501,13 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
   const startBlocked = selectedMode === 'daily' && dailyCompletedToday;
 
   const heroInk = darkSky ? '#faf6ee' : palette.hudInk;
-  const heroMuted = darkSky ? 'rgba(250, 246, 238, 0.8)' : palette.hudMuted;
+  const heroMuted = darkSky ? 'rgba(250, 246, 238, 0.90)' : palette.hudInk;
   const topChipBg = darkSky
-    ? 'rgba(22, 24, 40, 0.54)'
-    : 'rgba(250, 246, 238, 0.72)';
+    ? 'rgba(22, 24, 40, 0.62)'
+    : 'rgba(250, 246, 238, 0.80)';
   const topChipBorder = darkSky
-    ? '1px solid rgba(250, 246, 238, 0.16)'
-    : '1px solid rgba(32, 28, 44, 0.1)';
+    ? '1px solid rgba(250, 246, 238, 0.18)'
+    : '1px solid rgba(32, 28, 44, 0.12)';
 
   return (
     <div className="fixed inset-0 z-20 flex flex-col justify-between pointer-events-none overflow-y-auto lg:overflow-hidden">
@@ -1040,10 +1039,11 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
         </div>
 
         <div
-          className="kbd-hint-bar text-center text-xs font-medium py-0.5 px-4 pointer-events-none transition-colors duration-300"
+          className="kbd-hint-bar text-center text-xs font-medium py-0.5 px-3.5 rounded-full pointer-events-none transition-colors duration-300 shadow-xs"
           style={{
-            color: darkWater ? 'rgba(250, 246, 238, 0.92)' : palette.hudInk,
-            textShadow: darkWater ? '0 1px 3px rgba(32, 28, 44, 0.45)' : 'none',
+            backgroundColor: palette.hudCardBg,
+            color: palette.hudInk,
+            border: '1px solid rgba(32, 28, 44, 0.1)',
           }}
         >
           ← → Move · ↑ Rotate · ↓ Slam · Esc Pause · Enter Play

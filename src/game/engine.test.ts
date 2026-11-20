@@ -66,10 +66,13 @@ import {
   INITIAL_UNLOCKED_SKIN_IDS,
   SKINS,
   advanceShuffledSkinDeck,
+  compositeColorOnHex,
   createShuffledSkinDeck,
   getBlockStyle,
   getHexLuminance,
+  getWcagContrast,
   isPureBlackOrWhite,
+  isSkyDarkForHero,
   pickRandomSkinIndex,
 } from './skins';
 import {
@@ -2590,4 +2593,58 @@ test('V7 shifts, sweep timing, beam anticipation helpers, and hold/metronome mec
   finalizeSweep(frostBoard, true);
   assert.equal(frostBoard.grid[9][4]?.frostHp, 1, 'frost tile drops to cracked HP 1 and falls');
 });
+
+test('All 50 skins pass strict WCAG contrast checks for blocks, borders, emblems, frames, HUD cards, and hero skies', () => {
+  for (const sk of SKINS) {
+    const p = sk.palette;
+    const boardBg = compositeColorOnHex(p.boardSurface, p.skyMid);
+    const hudBg = compositeColorOnHex(p.hudCardBg, p.skyMid);
+
+    for (const [label, b] of [
+      ['blockA', p.blockA],
+      ['blockB', p.blockB],
+      ['blockC', p.blockC],
+    ] as const) {
+      const fillVsBoard = getWcagContrast(b.fill, boardBg);
+      const borderVsBoard = getWcagContrast(b.border, boardBg);
+      const emblemVsFill = getWcagContrast(b.emblemColor, b.fill);
+      const bestChainVsFill = Math.max(emblemVsFill, getWcagContrast('#faf6ee', b.fill));
+
+      assert.ok(
+        fillVsBoard >= 1.35,
+        `${sk.id} ${label} fillVsBoard=${fillVsBoard.toFixed(2)} below 1.35`
+      );
+      assert.ok(
+        borderVsBoard >= 1.8,
+        `${sk.id} ${label} borderVsBoard=${borderVsBoard.toFixed(2)} below 1.80`
+      );
+      assert.ok(
+        emblemVsFill >= 2.2,
+        `${sk.id} ${label} emblemVsFill=${emblemVsFill.toFixed(2)} below 2.20`
+      );
+      assert.ok(
+        bestChainVsFill >= 3.0,
+        `${sk.id} ${label} bestChainVsFill=${bestChainVsFill.toFixed(2)} below 3.00`
+      );
+    }
+
+    const frameVsSky = getWcagContrast(p.boardFrame, p.skyMid);
+    const beamVsBoard = getWcagContrast(p.timelineBeam, boardBg);
+    const hudInkVsBg = getWcagContrast(p.hudInk, hudBg);
+    const hudMutedVsBg = getWcagContrast(p.hudMuted, hudBg);
+
+    assert.ok(frameVsSky >= 1.4, `${sk.id} frameVsSky=${frameVsSky.toFixed(2)}`);
+    assert.ok(beamVsBoard >= 1.6, `${sk.id} beamVsBoard=${beamVsBoard.toFixed(2)}`);
+    assert.ok(hudInkVsBg >= 4.5, `${sk.id} hudInkVsBg=${hudInkVsBg.toFixed(2)}`);
+    assert.ok(hudMutedVsBg >= 3.0, `${sk.id} hudMutedVsBg=${hudMutedVsBg.toFixed(2)}`);
+
+    const heroInk = isSkyDarkForHero(p) ? '#faf6ee' : p.hudInk;
+    const heroVsTop = getWcagContrast(heroInk, p.skyTop);
+    assert.ok(
+      heroVsTop >= 4.5,
+      `${sk.id} heroInk (${heroInk}) vs skyTop (${p.skyTop}) contrast=${heroVsTop.toFixed(2)}`
+    );
+  }
+});
+
 

@@ -1,5 +1,5 @@
 import React from 'react';
-import { getBlockStyle, getHexLuminance } from '../game/skins';
+import { getBlockStyle, getWcagContrast } from '../game/skins';
 import { Piece, SkinConfig } from '../game/types';
 
 interface PiecePreviewProps {
@@ -154,7 +154,8 @@ export const PiecePreview: React.FC<PiecePreviewProps> = React.memo(({
 
           const strokeWidth = style.strokeVariant === 'painterly' ? 1.4 : 1.05;
           const symInk =
-            getHexLuminance(style.fill) > 0.72 && getHexLuminance(style.emblemColor) < 0.45
+            getWcagContrast(style.emblemColor, style.fill) >=
+            getWcagContrast('#faf6ee', style.fill)
               ? style.emblemColor
               : '#faf6ee';
 
@@ -288,8 +289,8 @@ export const PiecePreview: React.FC<PiecePreviewProps> = React.memo(({
               )}
               {pCell.isChain && (() => {
                 const chainFill =
-                  getHexLuminance(style.fill) > 0.78 &&
-                  getHexLuminance(style.emblemColor) < 0.45
+                  getWcagContrast(style.emblemColor, style.fill) >=
+                  getWcagContrast('#faf6ee', style.fill)
                     ? style.emblemColor
                     : '#faf6ee';
                 return (

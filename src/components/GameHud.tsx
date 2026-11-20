@@ -1,5 +1,4 @@
 import React from 'react';
-import { getHexLuminance } from '../game/skins';
 import { HudSnapshot, SkinConfig } from '../game/types';
 import { PiecePreview } from './PiecePreview';
 
@@ -861,16 +860,11 @@ export const GameHud: React.FC<GameHudProps> = ({
         </div>
 
         <div
-          className="kbd-hint-bar text-center text-xs font-medium transition-colors duration-300"
+          className="kbd-hint-bar text-center text-xs font-medium py-0.5 px-3.5 rounded-full mx-auto w-fit transition-colors duration-300 shadow-xs"
           style={{
-            color:
-              getHexLuminance(palette.waterSurface) < 0.55
-                ? 'rgba(250, 246, 238, 0.94)'
-                : palette.hudInk,
-            textShadow:
-              getHexLuminance(palette.waterSurface) < 0.55
-                ? '0 1px 3px rgba(32, 28, 44, 0.48)'
-                : 'none',
+            backgroundColor: palette.hudCardBg,
+            color: palette.hudInk,
+            border: '1px solid rgba(32, 28, 44, 0.1)',
           }}
         >
           {hud.mode === 'battle_2p'

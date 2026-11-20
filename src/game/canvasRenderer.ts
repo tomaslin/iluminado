@@ -10,7 +10,14 @@ import {
   getPieceLandingColumns,
 } from './engine';
 import { getShiftPolarity, getSweepBeatsForShift } from './shifts';
-import { getBlockStyle, getHexLuminance, isHexColorDark } from './skins';
+import {
+  compositeColorOnHex,
+  getBlockStyle,
+  getHexLuminance,
+  getWcagContrast,
+  getWcagLuminance,
+  isHexColorDark,
+} from './skins';
 import {
   BlockStyle,
   BoardOrientation,
@@ -1177,7 +1184,7 @@ export class IluminadoCanvasRenderer {
         const isDesktopWide = width >= 1024 && height > 560;
         const headerReserve = isDesktopWide ? 44 : isPortrait ? 74 : 48;
         const bottomMargin = isDesktopWide ? 76 : isPortrait ? 148 : 22;
-        const leftReserve = isDesktopWide ? 148 : isCompactLandscape ? 128 : 14;
+        const leftReserve = isDesktopWide ? 168 : isCompactLandscape ? 128 : 14;
         const rightReserve = isDesktopWide ? 24 : isCompactLandscape ? 128 : 14;
         const availW = Math.max(220, width - leftReserve - rightReserve);
         const availH = Math.max(180, height - headerReserve - bottomMargin);
@@ -1287,46 +1294,46 @@ export class IluminadoCanvasRenderer {
 
     ctx.save();
 
-    const mandalaX =
-      (isTitleScreen ? width * 0.62 : width * 0.5) - this.parallaxX * 0.38;
-    const mandalaY =
-      (isTitleScreen ? height * 0.46 : height * 0.48) - this.parallaxY * 0.28;
-    const baseOrbR =
-      Math.min(width, height) *
-      (0.28 + beatPulse * 0.02 + subBass * 0.036 + this.sweepBloom * 0.045);
+    if (isTitleScreen) {
+      const mandalaX = width * 0.62 - this.parallaxX * 0.38;
+      const mandalaY = height * 0.46 - this.parallaxY * 0.28;
+      const baseOrbR =
+        Math.min(width, height) *
+        (0.28 + beatPulse * 0.02 + subBass * 0.036 + this.sweepBloom * 0.045);
 
-    const glowSprite = this.getMandalaGlowSprite();
-    if (glowSprite) {
-      const glowR = baseOrbR * 1.38;
-      ctx.drawImage(glowSprite, mandalaX - glowR, mandalaY - glowR, glowR * 2, glowR * 2);
-    }
+      const glowSprite = this.getMandalaGlowSprite();
+      if (glowSprite) {
+        const glowR = baseOrbR * 1.38;
+        ctx.drawImage(glowSprite, mandalaX - glowR, mandalaY - glowR, glowR * 2, glowR * 2);
+      }
 
-    ctx.fillStyle = palette.architectureLight;
-    ctx.globalAlpha = 0.045 + beatPulse * 0.03 + mid * 0.04 + this.sweepBloom * 0.05;
-    ctx.beginPath();
-    ctx.arc(mandalaX, mandalaY, baseOrbR, 0, Math.PI * 2);
-    ctx.fill();
+      ctx.fillStyle = palette.architectureLight;
+      ctx.globalAlpha = 0.045 + beatPulse * 0.03 + mid * 0.04 + this.sweepBloom * 0.05;
+      ctx.beginPath();
+      ctx.arc(mandalaX, mandalaY, baseOrbR, 0, Math.PI * 2);
+      ctx.fill();
 
-    ctx.fillStyle = palette.architectureMid;
-    ctx.globalAlpha = 0.035 + high * 0.035;
-    ctx.beginPath();
-    ctx.arc(mandalaX, mandalaY, baseOrbR * (0.72 + subBass * 0.04), 0, Math.PI * 2);
-    ctx.fill();
+      ctx.fillStyle = palette.architectureMid;
+      ctx.globalAlpha = 0.035 + high * 0.035;
+      ctx.beginPath();
+      ctx.arc(mandalaX, mandalaY, baseOrbR * (0.72 + subBass * 0.04), 0, Math.PI * 2);
+      ctx.fill();
 
-    for (let i = 0; i < 12; i++) {
-      const ang = (i / 12) * Math.PI * 2 + timeSec * 0.04;
-      const orbitR = baseOrbR * (1.14 + (i % 2 === 0 ? mid : high) * 0.06);
-      const sx = mandalaX + Math.cos(ang) * orbitR;
-      const sy = mandalaY + Math.sin(ang) * orbitR;
-      const shapeR = i % 3 === 0 ? 5.5 + beatPulse * 2.5 : 3.2 + subBass * 2;
-      ctx.fillStyle = i % 2 === 0 ? palette.architectureLight : palette.blockA.highlight;
-      ctx.globalAlpha = i % 3 === 0 ? 0.14 + beatPulse * 0.09 : 0.08 + high * 0.08;
-      if (i % 2 === 0) {
-        this.drawDiamond(ctx, sx, sy, shapeR);
-      } else {
-        ctx.beginPath();
-        ctx.arc(sx, sy, shapeR * 0.78, 0, Math.PI * 2);
-        ctx.fill();
+      for (let i = 0; i < 12; i++) {
+        const ang = (i / 12) * Math.PI * 2 + timeSec * 0.04;
+        const orbitR = baseOrbR * (1.14 + (i % 2 === 0 ? mid : high) * 0.06);
+        const sx = mandalaX + Math.cos(ang) * orbitR;
+        const sy = mandalaY + Math.sin(ang) * orbitR;
+        const shapeR = i % 3 === 0 ? 5.5 + beatPulse * 2.5 : 3.2 + subBass * 2;
+        ctx.fillStyle = i % 2 === 0 ? palette.architectureLight : palette.blockA.highlight;
+        ctx.globalAlpha = i % 3 === 0 ? 0.14 + beatPulse * 0.09 : 0.08 + high * 0.08;
+        if (i % 2 === 0) {
+          this.drawDiamond(ctx, sx, sy, shapeR);
+        } else {
+          ctx.beginPath();
+          ctx.arc(sx, sy, shapeR * 0.78, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
     }
 
@@ -1439,27 +1446,37 @@ export class IluminadoCanvasRenderer {
         ctx.fill();
       }
     } else if (theme === 'gorogoa' || theme === 'transistor' || theme === 'sayonara') {
-      const cx = width * 0.5 - this.parallaxX * 0.4;
-      const cy = height * 0.45 - this.parallaxY * 0.3;
-      const radius = Math.min(width, height) * 0.34;
-      ctx.save();
-      ctx.translate(cx, cy);
-      ctx.rotate(timeSec * 0.045);
-      for (let k = 0; k < 6; k++) {
-        const a = (k / 6) * Math.PI * 2;
-        const px = Math.cos(a) * radius;
-        const py = Math.sin(a) * radius;
-        ctx.fillStyle = k % 2 === 0 ? palette.architectureLight : palette.blockA.highlight;
-        ctx.globalAlpha = 0.11 + beatPulse * 0.06;
-        if (k % 2 === 0) {
-          this.drawDiamond(ctx, px, py, 16 + beatPulse * 4);
-        } else {
-          ctx.beginPath();
-          ctx.arc(px, py, 12 + mid * 8, 0, Math.PI * 2);
-          ctx.fill();
+      if (isTitleScreen) {
+        const cx = width * 0.5 - this.parallaxX * 0.4;
+        const cy = height * 0.45 - this.parallaxY * 0.3;
+        const radius = Math.min(width, height) * 0.34;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(timeSec * 0.045);
+        for (let k = 0; k < 6; k++) {
+          const a = (k / 6) * Math.PI * 2;
+          const px = Math.cos(a) * radius;
+          const py = Math.sin(a) * radius;
+          ctx.fillStyle = k % 2 === 0 ? palette.architectureLight : palette.blockA.highlight;
+          ctx.globalAlpha = 0.11 + beatPulse * 0.06;
+          if (k % 2 === 0) {
+            this.drawDiamond(ctx, px, py, 16 + beatPulse * 4);
+          } else {
+            ctx.beginPath();
+            ctx.arc(px, py, 12 + mid * 8, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+        ctx.restore();
+      } else {
+        for (let side = 0; side < 2; side++) {
+          const cx = (side === 0 ? width * 0.1 : width * 0.9) - this.parallaxX * 0.45;
+          const cy = height * 0.46 - this.parallaxY * 0.3;
+          ctx.fillStyle = side === 0 ? palette.architectureLight : palette.blockA.highlight;
+          ctx.globalAlpha = 0.14 + beatPulse * 0.06;
+          this.drawDiamond(ctx, cx, cy, 18 + beatPulse * 4);
         }
       }
-      ctx.restore();
     } else if (theme === 'indigo_risograph') {
       for (let idx = 0; idx < 2; idx++) {
         const rx = (idx === 0 ? width * 0.13 : width * 0.87) - this.parallaxX * 0.58;
@@ -1481,7 +1498,8 @@ export class IluminadoCanvasRenderer {
       }
     } else if (theme === 'gris') {
       for (let idx = 0; idx < 3; idx++) {
-        const rx = idx === 0 ? 0.18 : idx === 1 ? 0.5 : 0.82;
+        if (!isTitleScreen && idx === 1) continue;
+        const rx = idx === 0 ? 0.14 : idx === 1 ? 0.5 : 0.86;
         const bx = width * rx + Math.sin(timeSec * 0.35 + idx * 2) * 26 - this.parallaxX * 0.5;
         const by = height * (0.34 + (idx % 2) * 0.18) + Math.cos(timeSec * 0.28 + idx) * 18;
         const br = 76 + beatPulse * 18 + subBass * 22;
@@ -1694,13 +1712,6 @@ export class IluminadoCanvasRenderer {
         }
         ctx.restore();
       }
-      ctx.strokeStyle = palette.architectureShadow;
-      ctx.globalAlpha = 0.12 + beatPulse * 0.05;
-      ctx.lineWidth = 10;
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.arc(width * 0.5 - this.parallaxX * 0.3, height * 0.48, Math.min(width, height) * 0.31, 0.3, Math.PI * 1.85);
-      ctx.stroke();
     } else if (theme === 'cubist_atelier') {
       for (let idx = 0; idx < 2; idx++) {
         const cx = (idx === 0 ? width * 0.13 : width * 0.87) - this.parallaxX * 0.58;
@@ -1750,13 +1761,15 @@ export class IluminadoCanvasRenderer {
         ctx.stroke();
       }
     } else if (theme === 'miami_vice') {
-      for (let i = 0; i < 5; i++) {
-        const sy = horizonY + 12 + i * 18;
-        const sw = width * (0.28 - i * 0.03) + beatPulse * 18;
-        ctx.fillStyle = i % 2 === 0 ? palette.blockA.fill : palette.blockB.fill;
-        ctx.globalAlpha = 0.18 + beatPulse * 0.09;
-        this.roundRect(ctx, width * 0.5 - sw * 0.5 - this.parallaxX * 0.4, sy, sw, 4, 2);
-        ctx.fill();
+      if (isTitleScreen) {
+        for (let i = 0; i < 5; i++) {
+          const sy = horizonY + 12 + i * 18;
+          const sw = width * (0.28 - i * 0.03) + beatPulse * 18;
+          ctx.fillStyle = i % 2 === 0 ? palette.blockA.fill : palette.blockB.fill;
+          ctx.globalAlpha = 0.18 + beatPulse * 0.09;
+          this.roundRect(ctx, width * 0.5 - sw * 0.5 - this.parallaxX * 0.4, sy, sw, 4, 2);
+          ctx.fill();
+        }
       }
       for (let idx = 0; idx < 2; idx++) {
         const px = (idx === 0 ? width * 0.12 : width * 0.88) - this.parallaxX * 0.65;
@@ -1849,10 +1862,8 @@ export class IluminadoCanvasRenderer {
           ctx.stroke();
         } else {
           ctx.fillStyle = palette.architectureShadow;
-          ctx.beginPath();
-          ctx.arc(-7, -16, 2.5, 0, Math.PI * 2);
-          ctx.arc(7, -16, 2.5, 0, Math.PI * 2);
-          ctx.fill();
+          this.fillCircle(ctx, -7, -16, 2.5);
+          this.fillCircle(ctx, 7, -16, 2.5);
         }
         ctx.lineWidth = 1.2;
         ctx.beginPath();
@@ -1881,24 +1892,47 @@ export class IluminadoCanvasRenderer {
       ctx.arc(yarnX, yarnY, 7, 0.3, 2.6);
       ctx.stroke();
     } else if (theme === 'stained_glass') {
-      const rx = width * 0.5 - this.parallaxX * 0.35;
-      const ry = height * 0.44 - this.parallaxY * 0.25;
-      const rad = Math.min(width, height) * 0.36;
-      ctx.save();
-      ctx.translate(rx, ry);
-      ctx.rotate(timeSec * 0.035);
-      for (let i = 0; i < 12; i++) {
-        const a0 = (i / 12) * Math.PI * 2;
-        const a1 = ((i + 0.78) / 12) * Math.PI * 2;
-        ctx.fillStyle = i % 3 === 0 ? palette.blockA.fill : i % 3 === 1 ? palette.blockB.fill : palette.blockC.fill;
-        ctx.globalAlpha = 0.14 + beatPulse * 0.06;
-        ctx.beginPath();
-        ctx.moveTo(0, 0);
-        ctx.arc(0, 0, rad, a0, a1);
-        ctx.closePath();
-        ctx.fill();
+      if (isTitleScreen) {
+        const rx = width * 0.5 - this.parallaxX * 0.35;
+        const ry = height * 0.44 - this.parallaxY * 0.25;
+        const rad = Math.min(width, height) * 0.36;
+        ctx.save();
+        ctx.translate(rx, ry);
+        ctx.rotate(timeSec * 0.035);
+        for (let i = 0; i < 12; i++) {
+          const a0 = (i / 12) * Math.PI * 2;
+          const a1 = ((i + 0.78) / 12) * Math.PI * 2;
+          ctx.fillStyle = i % 3 === 0 ? palette.blockA.fill : i % 3 === 1 ? palette.blockB.fill : palette.blockC.fill;
+          ctx.globalAlpha = 0.14 + beatPulse * 0.06;
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.arc(0, 0, rad, a0, a1);
+          ctx.closePath();
+          ctx.fill();
+        }
+        ctx.restore();
+      } else {
+        for (let side = 0; side < 2; side++) {
+          const rx = (side === 0 ? width * 0.1 : width * 0.9) - this.parallaxX * 0.4;
+          const ry = height * 0.42 - this.parallaxY * 0.25;
+          const rad = Math.min(width, height) * 0.12;
+          ctx.save();
+          ctx.translate(rx, ry);
+          ctx.rotate(timeSec * 0.035 * (side === 0 ? 1 : -1));
+          for (let i = 0; i < 8; i++) {
+            const a0 = (i / 8) * Math.PI * 2;
+            const a1 = ((i + 0.72) / 8) * Math.PI * 2;
+            ctx.fillStyle = i % 3 === 0 ? palette.blockA.fill : i % 3 === 1 ? palette.blockB.fill : palette.blockC.fill;
+            ctx.globalAlpha = 0.16 + beatPulse * 0.06;
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.arc(0, 0, rad, a0, a1);
+            ctx.closePath();
+            ctx.fill();
+          }
+          ctx.restore();
+        }
       }
-      ctx.restore();
     } else if (theme === 'constructivist') {
       const cx = width * 0.12 - this.parallaxX * 0.6;
       const cy = height * 0.5 - this.parallaxY * 0.5;
@@ -2328,16 +2362,6 @@ export class IluminadoCanvasRenderer {
           ctx.arc(cx, height * 0.36, 26, 0, Math.PI * 2);
           ctx.fill();
         });
-        ctx.fillStyle = palette.timelineBeam;
-        ctx.globalAlpha = 0.09;
-        ctx.beginPath();
-        ctx.arc(width * 0.5, height * 0.42, 168, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = palette.architectureLight;
-        ctx.globalAlpha = 0.1;
-        ctx.beginPath();
-        ctx.arc(width * 0.5, height * 0.42, 118, 0, Math.PI * 2);
-        ctx.fill();
         ctx.globalAlpha = 1;
         break;
       }
@@ -2593,10 +2617,8 @@ export class IluminadoCanvasRenderer {
         ctx.fill();
         ctx.fillStyle = palette.blockA.highlight;
         ctx.globalAlpha = 0.25;
-        ctx.beginPath();
-        ctx.arc(95, 160, 22, 0, Math.PI * 2);
-        ctx.arc(width - 95, 160, 22, 0, Math.PI * 2);
-        ctx.fill();
+        this.fillCircle(ctx, 95, 160, 22);
+        this.fillCircle(ctx, width - 95, 160, 22);
         ctx.restore();
         break;
       }
@@ -2720,19 +2742,17 @@ export class IluminadoCanvasRenderer {
       }
       case 'sayonara': {
         ctx.save();
-        const cx = width * 0.5;
-        const cy = height * 0.48;
-        ctx.fillStyle = palette.architectureLight;
-        ctx.globalAlpha = 0.14;
-        ctx.beginPath();
-        ctx.arc(cx, cy, 240, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = palette.blockA.highlight;
-        ctx.globalAlpha = 0.16;
-        this.drawDiamond(ctx, cx, cy, 270);
-        ctx.fillStyle = palette.skyMid;
-        ctx.globalAlpha = 0.24;
-        this.drawDiamond(ctx, cx, cy, 180);
+        [width * 0.12, width * 0.88].forEach((cx, idx) => {
+          const cy = height * 0.44;
+          ctx.fillStyle = palette.architectureLight;
+          ctx.globalAlpha = 0.14;
+          ctx.beginPath();
+          ctx.arc(cx, cy, 86, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = idx === 0 ? palette.blockA.highlight : palette.blockB.highlight;
+          ctx.globalAlpha = 0.18;
+          this.drawDiamond(ctx, cx, cy, 94);
+        });
         ctx.restore();
         break;
       }
@@ -3172,12 +3192,10 @@ export class IluminadoCanvasRenderer {
         [0.24, 0.38, 0.52, 0.66].forEach((ry, idx) => {
           const px = idx % 2 === 0 ? width * 0.07 : width * 0.93;
           const py = height * ry;
-          ctx.beginPath();
-          ctx.arc(px, py, 7, 0, Math.PI * 2);
-          ctx.arc(px - 6, py - 9, 2.8, 0, Math.PI * 2);
-          ctx.arc(px, py - 11, 2.8, 0, Math.PI * 2);
-          ctx.arc(px + 6, py - 9, 2.8, 0, Math.PI * 2);
-          ctx.fill();
+          this.fillCircle(ctx, px, py, 7);
+          this.fillCircle(ctx, px - 6, py - 9, 2.8);
+          this.fillCircle(ctx, px, py - 11, 2.8);
+          this.fillCircle(ctx, px + 6, py - 9, 2.8);
         });
         ctx.globalAlpha = 1;
         break;
@@ -3389,8 +3407,8 @@ export class IluminadoCanvasRenderer {
           ctx.lineTo(px + pw, py + ph * 0.45);
           ctx.stroke();
         };
-        drawPanel(width * 0.03, horizonY - 230, 145, 210);
-        drawPanel(width * 0.85, horizonY - 210, 140, 195);
+        drawPanel(width * 0.025, horizonY - 230, 130, 200);
+        drawPanel(width * 0.875, horizonY - 210, 124, 185);
         ctx.globalAlpha = 1;
         break;
       }
@@ -3630,6 +3648,8 @@ export class IluminadoCanvasRenderer {
       ctx.globalAlpha = 0.32;
       ctx.beginPath();
       ctx.ellipse(width * 0.03, height * 0.96, 110, 74, -0.25, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
       ctx.ellipse(width * 0.97, height * 0.95, 118, 82, 0.25, 0, Math.PI * 2);
       ctx.fill();
     } else {
@@ -3662,6 +3682,8 @@ export class IluminadoCanvasRenderer {
     ctx.globalAlpha = 0.16;
     ctx.beginPath();
     ctx.ellipse(width * 0.14, horizonY + 14, 72, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
     ctx.ellipse(width * 0.86, horizonY + 16, 84, 7, 0, 0, Math.PI * 2);
     ctx.fill();
 
@@ -3879,6 +3901,9 @@ export class IluminadoCanvasRenderer {
       ctx.restore();
     }
 
+    ctx.fillStyle = compositeColorOnHex(palette.boardSurface, palette.skyMid);
+    this.roundRect(ctx, x - 6, y - 6, width + 12, height + 12, 10);
+    ctx.fill();
     ctx.fillStyle = palette.boardSurface;
     this.roundRect(ctx, x - 6, y - 6, width + 12, height + 12, 10);
     ctx.fill();
@@ -4701,19 +4726,15 @@ export class IluminadoCanvasRenderer {
         ctx.lineTo(mx, y + height);
         ctx.stroke();
       } else if (fx.type === 'vortex_swirl' || fx.type === 'cyclotron_flow') {
-        const cxB = x + width * 0.5;
-        const cyB = y + height * 0.5;
-        const rMax = Math.min(width, height) * 0.42;
-        const spin = (1 - frac) * Math.PI * 1.4;
+        // Outer perimeter orbital pulse outside the playfield so blocks stay 100% unobstructed
+        ctx.restore();
+        ctx.save();
+        const pad = 9 + (1 - frac) * 6;
         ctx.strokeStyle = palette.hudAccent;
-        ctx.lineWidth = 2.5;
+        ctx.lineWidth = 2.6;
         ctx.globalAlpha = frac * 0.72;
-        for (let k = 0; k < 3; k++) {
-          const arcR = rMax * (0.45 + k * 0.26);
-          ctx.beginPath();
-          ctx.arc(cxB, cyB, arcR, spin + k * 1.1, spin + k * 1.1 + Math.PI * 1.15);
-          ctx.stroke();
-        }
+        this.roundRect(ctx, x - pad, y - pad, width + pad * 2, height + pad * 2, 14);
+        ctx.stroke();
       }
       ctx.restore();
     }
@@ -4801,12 +4822,17 @@ export class IluminadoCanvasRenderer {
         const activeMeasure = Math.floor(activeBeatCol / Math.max(2, Math.floor(boardCols / 4))) + 1;
         const isCurrMeasure = measureNum === activeMeasure;
         if (!(sweepBeats !== 8 && c === 0)) {
+          const fallbackMeasureInk =
+            getWcagContrast('#faf7f2', palette.skyMid) >=
+            getWcagContrast(palette.hudInk, palette.skyMid)
+              ? '#faf7f2'
+              : palette.hudInk;
           ctx.fillStyle = isCurrMeasure
             ? palette.hudAccent
             : isSkyDark
             ? '#faf7f2'
-            : palette.hudInk;
-          ctx.globalAlpha = isCurrMeasure ? 0.88 : 0.32;
+            : fallbackMeasureInk;
+          ctx.globalAlpha = isCurrMeasure ? 0.92 : 0.56;
           ctx.font = '600 9.5px "JetBrains Mono", monospace';
           ctx.textAlign = 'center';
           ctx.fillText(`${measureNum}`, dx, y - 22);
@@ -4947,19 +4973,21 @@ export class IluminadoCanvasRenderer {
         const wrappedBeat = ((beatPhase % 1) + 1) % 1;
         const distToBeat = Math.min(wrappedBeat, 1 - wrappedBeat);
         const inBeatWindow = distToBeat <= 0.2;
-        const ringR =
-          Math.max(pieceCols, pieceRows) *
-          cellSize *
-          (inBeatWindow ? 0.72 + beatPulse * 0.09 : 0.68);
+        const bx = x + smoothPieceX * cellSize - 3;
+        const by = y + smoothPieceY * cellSize - 3;
+        const bw = pieceCols * cellSize + 6;
+        const bh = pieceRows * cellSize + 6;
+        const arm = Math.max(5, cellSize * 0.28);
         ctx.save();
         ctx.strokeStyle = inBeatWindow ? '#3db87a' : palette.hudAccent;
-        ctx.lineWidth = inBeatWindow ? 2.6 : 1.25;
-        ctx.globalAlpha = inBeatWindow ? 0.85 : 0.28;
-        if (!inBeatWindow) ctx.setLineDash([4, 4]);
+        ctx.lineWidth = inBeatWindow ? 2.4 : 1.4;
+        ctx.globalAlpha = inBeatWindow ? 0.88 : 0.35;
         ctx.beginPath();
-        ctx.arc(pieceCx, pieceCy, ringR, 0, Math.PI * 2);
+        ctx.moveTo(bx, by + arm); ctx.lineTo(bx, by); ctx.lineTo(bx + arm, by);
+        ctx.moveTo(bx + bw - arm, by); ctx.lineTo(bx + bw, by); ctx.lineTo(bx + bw, by + arm);
+        ctx.moveTo(bx, by + bh - arm); ctx.lineTo(bx, by + bh); ctx.lineTo(bx + arm, by + bh);
+        ctx.moveTo(bx + bw - arm, by + bh); ctx.lineTo(bx + bw, by + bh); ctx.lineTo(bx + bw, by + bh - arm);
         ctx.stroke();
-        ctx.setLineDash([]);
         ctx.restore();
       }
 
@@ -5098,9 +5126,10 @@ export class IluminadoCanvasRenderer {
 
     if (board.activeShift === 'ceiling_press') {
       const lockRows = board.ceilingLockRows ?? 0;
+      const badgeY = label ? y - 34 : y - 42;
       ctx.save();
-      ctx.fillStyle = 'rgba(24, 20, 34, 0.78)';
-      this.roundRect(ctx, x + 6, y + 6, 76, 17, 4);
+      ctx.fillStyle = 'rgba(24, 20, 34, 0.84)';
+      this.roundRect(ctx, x + 2, badgeY, 76, 17, 4);
       ctx.fill();
       ctx.strokeStyle = lockRows >= 2 ? '#e05b5b' : palette.hudAccent;
       ctx.lineWidth = 1;
@@ -5109,17 +5138,18 @@ export class IluminadoCanvasRenderer {
       ctx.font = '700 9.5px "JetBrains Mono", monospace';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(`SHUTTER ${lockRows}/3`, x + 44, y + 14.5);
+      ctx.fillText(`SHUTTER ${lockRows}/3`, x + 40, badgeY + 8.5);
       ctx.restore();
     } else if (board.activeShift === 'metronome_charge') {
       const accum = board.beatChargeAccum ?? 0;
+      const badgeY = label ? y - 34 : y - 42;
       ctx.save();
-      ctx.fillStyle = 'rgba(24, 20, 34, 0.72)';
-      this.roundRect(ctx, x + width - 58, y + 6, 52, 16, 4);
+      ctx.fillStyle = 'rgba(24, 20, 34, 0.82)';
+      this.roundRect(ctx, x + width - 54, badgeY, 52, 16, 4);
       ctx.fill();
       for (let pip = 0; pip < 3; pip++) {
-        ctx.fillStyle = pip < accum ? '#3db87a' : 'rgba(250, 246, 238, 0.24)';
-        this.drawDiamond(ctx, x + width - 46 + pip * 14, y + 14, 4.2);
+        ctx.fillStyle = pip < accum ? '#3db87a' : 'rgba(250, 246, 238, 0.28)';
+        this.drawDiamond(ctx, x + width - 42 + pip * 14, badgeY + 8, 4.2);
       }
       ctx.restore();
     }
@@ -5438,12 +5468,10 @@ export class IluminadoCanvasRenderer {
       ctx.globalAlpha = 0.85;
       const px = fx - 5;
       const py = fy + fh - 6;
-      ctx.beginPath();
-      ctx.arc(px, py, 3.6, 0, Math.PI * 2);
-      ctx.arc(px - 4, py - 5, 1.5, 0, Math.PI * 2);
-      ctx.arc(px, py - 6.5, 1.5, 0, Math.PI * 2);
-      ctx.arc(px + 4, py - 5, 1.5, 0, Math.PI * 2);
-      ctx.fill();
+      this.fillCircle(ctx, px, py, 3.6);
+      this.fillCircle(ctx, px - 4, py - 5, 1.5);
+      this.fillCircle(ctx, px, py - 6.5, 1.5);
+      this.fillCircle(ctx, px + 4, py - 5, 1.5);
     } else if (theme === 'sumi_bamboo') {
       ctx.fillStyle = palette.hudAccent;
       this.roundRect(ctx, fx + fw - 14, fy + fh - 14, 18, 18, 2.5);
@@ -5520,15 +5548,11 @@ export class IluminadoCanvasRenderer {
       ctx.fill();
     } else if (theme === 'memphis_milano') {
       ctx.fillStyle = palette.blockC.fill;
-      ctx.beginPath();
-      ctx.arc(fx, fy, 6, 0, Math.PI * 2);
-      ctx.arc(fx + fw, fy + fh, 6, 0, Math.PI * 2);
-      ctx.fill();
+      this.fillCircle(ctx, fx, fy, 6);
+      this.fillCircle(ctx, fx + fw, fy + fh, 6);
       ctx.fillStyle = palette.blockA.fill;
-      ctx.beginPath();
-      ctx.arc(fx + fw, fy, 5.5, 0, Math.PI * 2);
-      ctx.arc(fx, fy + fh, 5.5, 0, Math.PI * 2);
-      ctx.fill();
+      this.fillCircle(ctx, fx + fw, fy, 5.5);
+      this.fillCircle(ctx, fx, fy + fh, 5.5);
     } else if (theme === 'cubist_atelier') {
       ctx.fillStyle = palette.blockB.fill;
       ctx.globalAlpha = 0.8;
@@ -5539,19 +5563,15 @@ export class IluminadoCanvasRenderer {
       ctx.fillStyle = palette.blockB.fill;
       ctx.fillRect(fx + fw - 26, fy - 5, 22, 9);
       ctx.fillStyle = palette.blockA.fill;
-      ctx.beginPath();
-      ctx.arc(fx + 1, fy + 1, 4, 0, Math.PI * 2);
-      ctx.arc(fx + 1, fy + fh - 1, 4, 0, Math.PI * 2);
-      ctx.arc(fx + fw - 1, fy + fh - 1, 4, 0, Math.PI * 2);
-      ctx.fill();
+      this.fillCircle(ctx, fx + 1, fy + 1, 4);
+      this.fillCircle(ctx, fx + 1, fy + fh - 1, 4);
+      this.fillCircle(ctx, fx + fw - 1, fy + fh - 1, 4);
     } else if (theme === 'grand_budapest' || theme === 'space_terminal') {
       ctx.fillStyle = theme === 'space_terminal' ? palette.blockA.fill : palette.blockB.fill;
-      ctx.beginPath();
-      ctx.arc(fx + 1, fy + 1, 4.2, 0, Math.PI * 2);
-      ctx.arc(fx + fw - 1, fy + 1, 4.2, 0, Math.PI * 2);
-      ctx.arc(fx + 1, fy + fh - 1, 4.2, 0, Math.PI * 2);
-      ctx.arc(fx + fw - 1, fy + fh - 1, 4.2, 0, Math.PI * 2);
-      ctx.fill();
+      this.fillCircle(ctx, fx + 1, fy + 1, 4.2);
+      this.fillCircle(ctx, fx + fw - 1, fy + 1, 4.2);
+      this.fillCircle(ctx, fx + 1, fy + fh - 1, 4.2);
+      this.fillCircle(ctx, fx + fw - 1, fy + fh - 1, 4.2);
     } else if (theme === 'de_stijl' || theme === 'kodak_cinema') {
       ctx.fillStyle = palette.blockA.fill;
       ctx.fillRect(fx - 3, fy - 3, 18, 4);
@@ -5562,10 +5582,8 @@ export class IluminadoCanvasRenderer {
     } else if (theme === 'vinyl_lounge') {
       ctx.fillStyle = palette.blockA.fill;
       ctx.globalAlpha = 0.65 + beatPulse * 0.35;
-      ctx.beginPath();
-      ctx.arc(fx + 18, fy - 2, 4.5, 0, Math.PI * 2);
-      ctx.arc(fx + fw - 18, fy - 2, 4.5, 0, Math.PI * 2);
-      ctx.fill();
+      this.fillCircle(ctx, fx + 18, fy - 2, 4.5);
+      this.fillCircle(ctx, fx + fw - 18, fy - 2, 4.5);
     } else if (
       theme === 'monument_valley' ||
       theme === 'sennaar' ||
@@ -5588,12 +5606,10 @@ export class IluminadoCanvasRenderer {
         ctx.fillRect(fx + 1 - r, fy + fh - 1 - r, r * 2, r * 2);
         ctx.fillRect(fx + fw - 1 - r, fy + fh - 1 - r, r * 2, r * 2);
       } else {
-        ctx.beginPath();
-        ctx.arc(fx + 1, fy + 1, r, 0, Math.PI * 2);
-        ctx.arc(fx + fw - 1, fy + 1, r, 0, Math.PI * 2);
-        ctx.arc(fx + 1, fy + fh - 1, r, 0, Math.PI * 2);
-        ctx.arc(fx + fw - 1, fy + fh - 1, r, 0, Math.PI * 2);
-        ctx.fill();
+        this.fillCircle(ctx, fx + 1, fy + 1, r);
+        this.fillCircle(ctx, fx + fw - 1, fy + 1, r);
+        this.fillCircle(ctx, fx + 1, fy + fh - 1, r);
+        this.fillCircle(ctx, fx + fw - 1, fy + fh - 1, r);
       }
     }
     ctx.restore();
@@ -5793,6 +5809,19 @@ export class IluminadoCanvasRenderer {
       }
 
       const style = getBlockStyle(skin.palette, gc.color);
+      const boardOpaqueHex = compositeColorOnHex(
+        skin.palette.boardSurface,
+        skin.palette.skyMid
+      );
+      const darkBoard = getWcagLuminance(boardOpaqueHex) < 0.25;
+      const borderVsBoard = getWcagContrast(style.border, boardOpaqueHex);
+      const ghostStroke = gc.isWild
+        ? skin.palette.hudAccent
+        : borderVsBoard >= 2.2
+        ? style.border
+        : darkBoard
+        ? style.highlight
+        : skin.palette.hudInk;
 
       const joinTop = !gc.isWild && hasGhostAt(gc.x, gc.y - 1, gc.color);
       const joinBot = !gc.isWild && hasGhostAt(gc.x, gc.y + 1, gc.color);
@@ -5800,12 +5829,12 @@ export class IluminadoCanvasRenderer {
       const joinRight = !gc.isWild && hasGhostAt(gc.x + 1, gc.y, gc.color);
 
       ctx.fillStyle = gc.isWild ? skin.palette.squareHighlight : style.fill;
-      ctx.globalAlpha = 0.22 + beatPulse * 0.06;
+      ctx.globalAlpha = (darkBoard ? 0.28 : 0.22) + beatPulse * 0.06;
       ctx.fillRect(cx + 1, cy + 1, cellSize - 2, cellSize - 2);
 
-      ctx.globalAlpha = 0.64 + beatPulse * 0.14;
-      ctx.strokeStyle = gc.isWild ? skin.palette.hudAccent : style.border;
-      ctx.lineWidth = 1.75;
+      ctx.globalAlpha = (darkBoard ? 0.8 : 0.68) + beatPulse * 0.14;
+      ctx.strokeStyle = ghostStroke;
+      ctx.lineWidth = darkBoard ? 2 : 1.75;
       if (!joinTop) {
         ctx.beginPath();
         ctx.moveTo(cx + 2, cy + 2);
@@ -5859,20 +5888,23 @@ export class IluminadoCanvasRenderer {
     const bw = Math.max(2, size - pad * 2);
     const bh = Math.max(2, size - pad * 2);
 
+    const boardOpaqueHex = compositeColorOnHex(palette.boardSurface, palette.skyMid);
+    const darkBoard = getWcagLuminance(boardOpaqueHex) < 0.25;
+
     ctx.save();
     if (styleType === 'blocked') {
       this.drawBlockedObsidianTile(ctx, x, y, size, cell.landFlash);
     } else if (styleType === 'chasm') {
       ctx.fillStyle = '#181422';
       ctx.fillRect(bx, by, bw, bh);
-      ctx.strokeStyle = 'rgba(250, 246, 238, 0.14)';
+      ctx.strokeStyle = darkBoard ? 'rgba(250, 246, 238, 0.28)' : 'rgba(250, 246, 238, 0.14)';
       ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.moveTo(bx + bw * 0.5, by + 2);
       ctx.lineTo(bx + bw * 0.38, by + bh * 0.5);
       ctx.lineTo(bx + bw * 0.62, by + bh - 2);
       ctx.stroke();
-      ctx.strokeStyle = palette.boardFrame;
+      ctx.strokeStyle = darkBoard ? '#8f84ab' : palette.boardFrame;
       ctx.strokeRect(bx + 0.5, by + 0.5, bw - 1, bh - 1);
     } else if (styleType === 'girder') {
       const grad = ctx.createLinearGradient(bx, by, bx, by + bh);
@@ -5993,7 +6025,7 @@ export class IluminadoCanvasRenderer {
       ctx.lineTo(bx + bw * 0.78, by + bh * 0.22);
       ctx.stroke();
 
-      ctx.strokeStyle = '#1f1b29';
+      ctx.strokeStyle = darkBoard ? '#9287ad' : '#1f1b29';
       ctx.strokeRect(bx + 0.5, by + 0.5, bw - 1, bh - 1);
     }
 
@@ -6665,9 +6697,11 @@ export class IluminadoCanvasRenderer {
       ctx.restore();
     }
 
-    const useDarkChainGlyph =
-      getHexLuminance(style.fill) > 0.78 &&
-      getHexLuminance(style.emblemColor) < 0.45;
+    const chainFill =
+      getWcagContrast(style.emblemColor, style.fill) >=
+      getWcagContrast('#faf6ee', style.fill)
+        ? style.emblemColor
+        : '#faf6ee';
     if (isChain) {
       const cx = left + bw * 0.5;
       const cy = top + bh * 0.5;
@@ -6677,17 +6711,17 @@ export class IluminadoCanvasRenderer {
       ctx.scale(pulse, pulse);
       const arm = size * 0.28;
       const thick = size * 0.1;
-      ctx.fillStyle = useDarkChainGlyph ? style.emblemColor : '#faf6ee';
+      ctx.fillStyle = chainFill;
       ctx.fillRect(-arm, -thick / 2, arm * 2, thick);
       ctx.fillRect(-thick / 2, -arm, thick, arm * 2);
-      ctx.strokeStyle = useDarkChainGlyph ? style.highlight : style.border;
+      ctx.strokeStyle = chainFill === '#faf6ee' ? style.border : style.highlight;
       ctx.lineWidth = 1;
       ctx.strokeRect(-arm, -thick / 2, arm * 2, thick);
       ctx.restore();
     }
 
     if (fx.chainMarked) {
-      ctx.strokeStyle = useDarkChainGlyph ? style.emblemColor : '#faf6ee';
+      ctx.strokeStyle = chainFill;
       ctx.lineWidth = 2;
       ctx.strokeRect(left + 2, top + 2, bw - 4, bh - 4);
     }
@@ -6792,12 +6826,11 @@ export class IluminadoCanvasRenderer {
         ctx.fill();
         break;
       case 'gouache':
-        ctx.strokeStyle = style.highlight;
-        ctx.globalAlpha = 0.24;
-        ctx.lineWidth = 2.6;
+        ctx.fillStyle = style.highlight;
+        ctx.globalAlpha = 0.16;
         ctx.beginPath();
-        ctx.arc(x + w * 0.5, y + h * 0.8, w * 0.52, Math.PI * 1.15, Math.PI * 1.85);
-        ctx.stroke();
+        ctx.ellipse(x + w * 0.42, y + h * 0.34, w * 0.3, h * 0.12, -0.35, 0, Math.PI * 2);
+        ctx.fill();
         break;
       case 'silk_sand':
         ctx.strokeStyle = style.highlight;
@@ -7099,12 +7132,10 @@ export class IluminadoCanvasRenderer {
       case 'paw_print':
         ctx.fillStyle = style.emblemColor;
         ctx.globalAlpha = 0.24;
-        ctx.beginPath();
-        ctx.arc(x + w * 0.5, y + h * 0.62, Math.max(1.8, w * 0.14), 0, Math.PI * 2);
-        ctx.arc(x + w * 0.3, y + h * 0.38, Math.max(1.1, w * 0.075), 0, Math.PI * 2);
-        ctx.arc(x + w * 0.5, y + h * 0.3, Math.max(1.1, w * 0.075), 0, Math.PI * 2);
-        ctx.arc(x + w * 0.7, y + h * 0.38, Math.max(1.1, w * 0.075), 0, Math.PI * 2);
-        ctx.fill();
+        this.fillCircle(ctx, x + w * 0.5, y + h * 0.62, Math.max(1.8, w * 0.14));
+        this.fillCircle(ctx, x + w * 0.3, y + h * 0.38, Math.max(1.1, w * 0.075));
+        this.fillCircle(ctx, x + w * 0.5, y + h * 0.3, Math.max(1.1, w * 0.075));
+        this.fillCircle(ctx, x + w * 0.7, y + h * 0.38, Math.max(1.1, w * 0.075));
         break;
       case 'stained_glass':
         ctx.strokeStyle = style.border;
@@ -7145,7 +7176,11 @@ export class IluminadoCanvasRenderer {
         ctx.globalAlpha = 0.22;
         ctx.beginPath();
         ctx.ellipse(x + w * 0.5, y + h * 0.32, w * 0.14, h * 0.22, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
         ctx.ellipse(x + w * 0.34, y + h * 0.62, w * 0.14, h * 0.18, -0.6, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
         ctx.ellipse(x + w * 0.66, y + h * 0.62, w * 0.14, h * 0.18, 0.6, 0, Math.PI * 2);
         ctx.fill();
         break;
@@ -7174,10 +7209,8 @@ export class IluminadoCanvasRenderer {
         ctx.stroke();
         ctx.fillStyle = style.emblemColor;
         ctx.globalAlpha = 0.26;
-        ctx.beginPath();
-        ctx.arc(x + w * 0.22, y + h * 0.22, 1.5, 0, Math.PI * 2);
-        ctx.arc(x + w * 0.78, y + h * 0.78, 1.5, 0, Math.PI * 2);
-        ctx.fill();
+        this.fillCircle(ctx, x + w * 0.22, y + h * 0.22, 1.5);
+        this.fillCircle(ctx, x + w * 0.78, y + h * 0.78, 1.5);
         break;
       case 'flatpack_blueprint':
         ctx.strokeStyle = style.emblemColor;
@@ -7378,8 +7411,8 @@ export class IluminadoCanvasRenderer {
       const pop = this.popups[i];
       if (!pop.active) continue;
       const t = pop.life / pop.maxLife;
-      const alpha = t < 0.16 ? t / 0.16 : 1 - (t - 0.16) / 0.84;
-      const popScale = t < 0.14 ? 0.85 + (t / 0.14) * 0.25 : 1 + Math.max(0, 0.28 - t) * 0.28;
+      const alpha = t < 0.06 ? t / 0.06 : t > 0.78 ? Math.max(0, (1 - t) / 0.22) : 1;
+      const popScale = t < 0.1 ? 0.88 + (t / 0.1) * 0.18 : 1 + Math.max(0, 0.25 - t) * 0.2;
       const rect =
         pop.boardIdx === 1 && this.lastSecondaryRect
           ? this.lastSecondaryRect
@@ -7389,7 +7422,7 @@ export class IluminadoCanvasRenderer {
       const isBrightText = getHexLuminance(pop.color) > 0.54;
 
       ctx.save();
-      ctx.globalAlpha = Math.max(0, alpha);
+      ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
       ctx.translate(anchorX, anchorY);
       ctx.scale(popScale, popScale);
       ctx.textAlign = 'center';
@@ -7407,10 +7440,10 @@ export class IluminadoCanvasRenderer {
       const boxX = -boxW * 0.5;
       const boxY = pop.subtext ? -21 : -17;
 
-      ctx.fillStyle = isBrightText ? 'rgba(26, 22, 36, 0.86)' : 'rgba(250, 246, 238, 0.94)';
+      ctx.fillStyle = isBrightText ? 'rgba(20, 18, 30, 0.92)' : 'rgba(252, 248, 242, 0.96)';
       this.selectiveRoundRect(ctx, boxX, boxY, boxW, boxH, 11, 11, 11, 11);
       ctx.fill();
-      ctx.lineWidth = 1.4;
+      ctx.lineWidth = 1.5;
       ctx.strokeStyle = pop.color;
       ctx.stroke();
 
@@ -7418,12 +7451,23 @@ export class IluminadoCanvasRenderer {
       ctx.font = '700 20px "Fraunces", Georgia, serif';
       ctx.fillText(pop.text, 0, pop.subtext ? -5 : 0);
       if (pop.subtext) {
-        ctx.fillStyle = isBrightText ? 'rgba(250, 246, 238, 0.9)' : 'rgba(32, 28, 44, 0.8)';
+        ctx.fillStyle = isBrightText ? 'rgba(252, 248, 242, 0.94)' : 'rgba(24, 21, 34, 0.88)';
         ctx.font = '700 11px "Plus Jakarta Sans", sans-serif';
         ctx.fillText(pop.subtext, 0, 15);
       }
       ctx.restore();
     }
+  }
+
+  private fillCircle(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    r: number
+  ): void {
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
   }
 
   private drawDiamond(
