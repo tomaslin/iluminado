@@ -88,12 +88,15 @@ export const GameHud: React.FC<GameHudProps> = ({
     [onTouchAction, stopHoldRepeat]
   );
 
-  const cardStyle: React.CSSProperties = {
-    backgroundColor: palette.hudCardBg,
-    color: palette.hudInk,
-    border: '1px solid rgba(32, 28, 44, 0.08)',
-    boxShadow: '0 8px 24px rgba(34, 24, 42, 0.08)',
-  };
+  const cardStyle = React.useMemo<React.CSSProperties>(
+    () => ({
+      backgroundColor: palette.hudCardBg,
+      color: palette.hudInk,
+      border: '1px solid rgba(32, 28, 44, 0.08)',
+      boxShadow: '0 8px 24px rgba(34, 24, 42, 0.08)',
+    }),
+    [palette.hudCardBg, palette.hudInk]
+  );
 
   return (
     <div
@@ -101,7 +104,6 @@ export const GameHud: React.FC<GameHudProps> = ({
         isCompactLandscape ? 'p-2 sm:p-2.5' : 'p-3 sm:p-4 lg:p-5'
       }`}
     >
-      {/* Top Perimeter Strip */}
       <div
         className={`flex items-start gap-2 sm:gap-4 ${
           hud.timeRemaining !== null || isDual ? 'justify-between' : 'justify-end'
@@ -185,7 +187,6 @@ export const GameHud: React.FC<GameHudProps> = ({
           </div>
         ) : null}
 
-        {/* Top-Right Utility Controls */}
         <div className="flex items-center gap-2 pointer-events-auto">
           <button
             type="button"
@@ -253,10 +254,8 @@ export const GameHud: React.FC<GameHudProps> = ({
         </div>
       </div>
 
-      {/* Compact Landscape Side-Split Touch Wings (Mobile Landscape Sideways Mode) */}
       {showSideTouchWings && (
         <div className="touch-landscape-wings items-center justify-between flex-1 gap-2 py-1 min-h-0">
-          {/* Left Wing: Score/Combo summary + Directional Thumb Pad */}
           <div className="w-[118px] flex flex-col gap-1.5 pointer-events-auto">
             <div className="px-2.5 py-1.5 rounded-xl text-[11px]" style={cardStyle}>
               <div className="flex items-baseline justify-between">
@@ -321,7 +320,6 @@ export const GameHud: React.FC<GameHudProps> = ({
             </div>
           </div>
 
-          {/* Right Wing: Next preview + Hold (if stash_hold) + Rotate / Slam Action Buttons */}
           <div className="w-[118px] flex flex-col gap-1.5 pointer-events-auto">
             {hud.nextPieces[0] && (
               <div className="px-2.5 py-1.5 rounded-xl flex items-center justify-between gap-2" style={cardStyle}>
@@ -406,11 +404,9 @@ export const GameHud: React.FC<GameHudProps> = ({
         </div>
       )}
 
-      {/* Consolidated Single-Player Left Sidebar (Desktop Wide Viewports) */}
       {!isDual && !isCompactLandscape && (
         <div className="hidden lg:flex items-center justify-start flex-1 pointer-events-none">
           <div className="w-[126px] flex flex-col gap-2.5 items-stretch">
-            {/* Unified Score + Level + Combo Card */}
             <div
               className="px-3 py-2.5 rounded-xl transition-transform duration-150"
               style={{
@@ -580,7 +576,6 @@ export const GameHud: React.FC<GameHudProps> = ({
               </button>
             )}
 
-            {/* Next Queue Card */}
             <div className="px-3 py-2.5 rounded-xl flex flex-col items-center" style={cardStyle}>
               <div
                 className="text-[10px] font-semibold uppercase tracking-wider mb-2 self-start"

@@ -78,13 +78,13 @@ define(['./workbox-cca9a3a2'], (function (workbox) { 'use strict';
    */
   workbox.precacheAndRoute([{
     "url": "index.html",
-    "revision": "0.hnri044ttf8"
+    "revision": "0.5dbpaojosqo"
   }], {});
   workbox.cleanupOutdatedCaches();
   workbox.registerRoute(new workbox.NavigationRoute(workbox.createHandlerBoundToURL("index.html"), {
     allowlist: [/^\/$/]
   }));
-  workbox.registerRoute(/\/music\/world\d+\.mp3/i, new workbox.CacheFirst({
+  workbox.registerRoute(/\/music\/world\d+\.ogg/i, new workbox.CacheFirst({
     "cacheName": "iluminado-soundtracks-v1",
     plugins: [new workbox.RangeRequestsPlugin(), new workbox.ExpirationPlugin({
       maxEntries: 60,

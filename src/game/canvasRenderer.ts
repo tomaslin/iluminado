@@ -331,6 +331,8 @@ export class IluminadoCanvasRenderer {
     isVirus: false,
     patternMode: false,
   };
+  private tmpBeamCols1 = [0];
+  private tmpBeamCols2 = [0, 0];
 
   public setPointerOffset(nx: number, ny: number): void {
     this.pointerNormX = Math.max(-1, Math.min(1, nx));
@@ -378,13 +380,11 @@ export class IluminadoCanvasRenderer {
     toOrientation: BoardOrientation
   ): void {
     if (fromOrientation === toOrientation) return;
-    // Slide sideways + elevate during orientation pivot for tactile diorama continuity
     const dir = toOrientation === 'portrait' ? 1 : -1;
     this.shiftAnimT = 1;
     this.shiftFromX = dir * 135;
     this.shiftFromY = toOrientation === 'portrait' ? 42 : -36;
     this.shiftScaleFrom = toOrientation === 'portrait' ? 0.94 : 1.05;
-    // Whip camera parallax gently across the horizon when flipping device orientation
     this.targetParallaxX = dir * 32;
     this.sweepBloom = Math.min(1.2, Math.max(this.sweepBloom, 0.45));
   }
@@ -458,7 +458,6 @@ export class IluminadoCanvasRenderer {
       positions.length >= 16 ? 5 : positions.length >= 8 ? 4 : 3;
 
     for (const pos of positions) {
-      // Pooled GhostClearCell for pop -> white flash -> shrink animation over ~0.30s
       const gc = this.ghostClears[this.ghostClearCursor];
       this.ghostClearCursor = (this.ghostClearCursor + 1) % MAX_GHOST_CLEARS;
       gc.active = true;
@@ -475,7 +474,6 @@ export class IluminadoCanvasRenderer {
       const style = getBlockStyle(skin.palette, pos.color);
 
       if (!this.reducedMotion) {
-        // High-energy radial + arc burst particles (3-5x velocity, scaled by sweep size, downward gravity)
         for (let i = 0; i < perCellParticles; i++) {
           const p = this.particles[this.particleCursor];
           this.particleCursor = (this.particleCursor + 1) % MAX_PARTICLES;
@@ -518,7 +516,6 @@ export class IluminadoCanvasRenderer {
         }
       }
 
-      // Soft expanding water ripple halo on clear
       const ring = this.clearRings[this.ringCursor];
       this.ringCursor = (this.ringCursor + 1) % MAX_RINGS;
       ring.active = true;
@@ -529,7 +526,6 @@ export class IluminadoCanvasRenderer {
       ring.maxLife = 0.45;
       ring.color = style.highlight;
 
-      // Subtle vertical translucent wake veil
       const flare = this.sweepFlares[this.flareCursor];
       this.flareCursor = (this.flareCursor + 1) % MAX_FLARES;
       flare.active = true;
@@ -654,7 +650,6 @@ export class IluminadoCanvasRenderer {
       }
     }
 
-    // Active piece rotation tween (~70ms settle)
     const rotDamp = Math.exp(-dt / 0.024);
     for (let i = 0; i < 2; i++) {
       const ps = this.pieceSmooth[i];
@@ -664,7 +659,6 @@ export class IluminadoCanvasRenderer {
       }
     }
 
-    // Hold brick fallOffset steady while the board pivots 90 deg, then drop bricks to the new bottom
     const fallRate = prevRotateT > 0.48 ? 0 : prevRotateT > 0 ? 15 : 24;
 
     const animDamp = 1 - Math.exp(-dt * 8.2);
@@ -912,7 +906,6 @@ export class IluminadoCanvasRenderer {
         this.currLayerCache = this.prevLayerCache;
         this.prevLayerCache = tmp;
       } else if (prevKey && this.currLayerCache?.key === prevKey) {
-        // Promote the just-left world directly into prevLayerCache to avoid rebuilding it
         const spare = this.prevLayerCache;
         this.prevLayerCache = this.currLayerCache;
         this.currLayerCache = this.buildLayerCache(width, height, skin, spare);
@@ -1001,7 +994,6 @@ export class IluminadoCanvasRenderer {
       ? primaryBoard.grid.length ?? primaryBoard.rows ?? BOARD_ROWS
       : BOARD_ROWS;
 
-    // Update target camera parallax from player piece movement, pointer gaze, or title drift (gated by reducedMotion)
     if (this.reducedMotion) {
       this.targetParallaxX = 0;
       this.targetParallaxY = 0;
@@ -1051,14 +1043,12 @@ export class IluminadoCanvasRenderer {
     );
 
     if (!isTitleScreen && primaryBoard) {
-      // Smooth cubic ease for orientation slide-and-lift transition
       const shiftEase =
         this.shiftAnimT > 0 ? Math.pow(this.shiftAnimT, 2.2) : 0;
       const shiftDx = this.shiftFromX * shiftEase;
       const shiftDy = this.shiftFromY * shiftEase;
       const shiftScale = 1 + (this.shiftScaleFrom - 1) * shiftEase;
 
-      // 90-degree board rotation pivot on level change
       const rotProgress = 1 - this.rotateAnimT;
       const rotPivotNorm = Math.min(1, rotProgress / 0.62);
       const rotEase =
@@ -1199,7 +1189,6 @@ export class IluminadoCanvasRenderer {
         const startX = isDesktopWide
           ? Math.floor(leftReserve + (availW - boardW) * 0.5)
           : Math.floor((width - boardW) / 2);
-        // Slightly elevated ("moved up") bias in portrait so lower courtyard horizon/water breathes cleanly
         const slackBias = isPortrait ? 0.38 : 0.42;
         const startY = Math.floor(
           headerReserve +
@@ -1254,7 +1243,6 @@ export class IluminadoCanvasRenderer {
           0
         );
 
-        // Glowing architectural pivot guide bracket while screen orientation settles
         if (shiftEase > 0.04) {
           ctx.save();
           ctx.strokeStyle = skin.palette.hudAccent;
@@ -1299,7 +1287,6 @@ export class IluminadoCanvasRenderer {
 
     ctx.save();
 
-    // Zen acoustic mandala halo behind central stage (responds smoothly to both beat & audio spectrum)
     const mandalaX =
       (isTitleScreen ? width * 0.62 : width * 0.5) - this.parallaxX * 0.38;
     const mandalaY =
@@ -1314,7 +1301,6 @@ export class IluminadoCanvasRenderer {
       ctx.drawImage(glowSprite, mandalaX - glowR, mandalaY - glowR, glowR * 2, glowR * 2);
     }
 
-    // Soft translucent breathing mandala ring + orbiting geometric petals
     ctx.fillStyle = palette.architectureLight;
     ctx.globalAlpha = 0.045 + beatPulse * 0.03 + mid * 0.04 + this.sweepBloom * 0.05;
     ctx.beginPath();
@@ -1344,7 +1330,6 @@ export class IluminadoCanvasRenderer {
       }
     }
 
-    // Soft drifting mist wisps across sky/midground with subtle parallax + gentle move reaction
     ctx.fillStyle = palette.horizonMist;
     for (let i = 0; i < 4; i++) {
       const drift = ((timeSec * (0.011 + i * 0.004) + i * 0.27) % 1.35) - 0.18;
@@ -1361,7 +1346,6 @@ export class IluminadoCanvasRenderer {
       ctx.fill();
     }
 
-    // Volumetric sunlit/celestial caustic light shafts from solar disc
     const sunX = width * 0.72 - this.parallaxX * 0.22;
     const sunY = height * 0.24 - this.parallaxY * 0.16;
     const shaftTilt = Math.sin(timeSec * 0.22) * 24 - this.parallaxX * 0.45;
@@ -1394,7 +1378,6 @@ export class IluminadoCanvasRenderer {
     ctx.arc(sunX, sunY, pulseR * 0.92, 0, Math.PI * 2);
     ctx.fill();
 
-    // Interactive cursor & piece-steering shimmering reflection ripples across water plane
     {
       const rippleX =
         width * 0.5 +
@@ -1421,7 +1404,6 @@ export class IluminadoCanvasRenderer {
       }
     }
 
-    // Theme-authentic subtle shape-rich background animations
     if (
       theme === 'monument_valley' ||
       theme === 'old_mans_journey' ||
@@ -1446,7 +1428,6 @@ export class IluminadoCanvasRenderer {
         ctx.fill();
       }
     } else if (theme === 'ochre_skyline') {
-      // Gently bobbing maritime signal buoys & sunlit harbor wakes
       for (let i = 0; i < 5; i++) {
         const ry = horizonY + 18 + i * 16;
         const sway = Math.sin(timeSec * 1.1 + i * 1.3) * 22 - this.parallaxX * 0.68;
@@ -1480,16 +1461,12 @@ export class IluminadoCanvasRenderer {
       }
       ctx.restore();
     } else if (theme === 'indigo_risograph') {
-      // Rotating risograph registration crosshairs & overprint moiré circles
-      [
-        { x: width * 0.13, y: height * 0.34, dir: 1 },
-        { x: width * 0.87, y: height * 0.64, dir: -1 },
-      ].forEach((reg, idx) => {
-        const rx = reg.x - this.parallaxX * 0.58;
-        const ry = reg.y - this.parallaxY * 0.45;
+      for (let idx = 0; idx < 2; idx++) {
+        const rx = (idx === 0 ? width * 0.13 : width * 0.87) - this.parallaxX * 0.58;
+        const ry = (idx === 0 ? height * 0.34 : height * 0.64) - this.parallaxY * 0.45;
         ctx.save();
         ctx.translate(rx, ry);
-        ctx.rotate(timeSec * 0.22 * reg.dir);
+        ctx.rotate(timeSec * 0.22 * (idx === 0 ? 1 : -1));
         ctx.strokeStyle = idx === 0 ? palette.blockA.fill : palette.blockB.fill;
         ctx.globalAlpha = 0.28 + beatPulse * 0.12;
         ctx.lineWidth = 2;
@@ -1501,10 +1478,10 @@ export class IluminadoCanvasRenderer {
         ctx.lineTo(0, 36);
         ctx.stroke();
         ctx.restore();
-      });
+      }
     } else if (theme === 'gris') {
-      // Drifting translucent watercolor washes breathing to sub-bass
-      [0.18, 0.5, 0.82].forEach((rx, idx) => {
+      for (let idx = 0; idx < 3; idx++) {
+        const rx = idx === 0 ? 0.18 : idx === 1 ? 0.5 : 0.82;
         const bx = width * rx + Math.sin(timeSec * 0.35 + idx * 2) * 26 - this.parallaxX * 0.5;
         const by = height * (0.34 + (idx % 2) * 0.18) + Math.cos(timeSec * 0.28 + idx) * 18;
         const br = 76 + beatPulse * 18 + subBass * 22;
@@ -1513,17 +1490,13 @@ export class IluminadoCanvasRenderer {
         ctx.beginPath();
         ctx.arc(bx, by, br, 0, Math.PI * 2);
         ctx.fill();
-      });
+      }
     } else if (theme === 'fez') {
-      // Rotating golden anti-cube shards hovering over floating ruins
-      [
-        { x: width * 0.13, y: height * 0.27 },
-        { x: width * 0.87, y: height * 0.23 },
-        { x: width * 0.11, y: height * 0.56 },
-        { x: width * 0.89, y: height * 0.55 },
-      ].forEach((pt, idx) => {
-        const cx = pt.x - this.parallaxX * 0.65;
-        const cy = pt.y + Math.sin(timeSec * 1.4 + idx * 1.5) * 9 - this.parallaxY * 0.52;
+      for (let idx = 0; idx < 4; idx++) {
+        const ptX = idx === 0 ? width * 0.13 : idx === 1 ? width * 0.87 : idx === 2 ? width * 0.11 : width * 0.89;
+        const ptY = idx === 0 ? height * 0.27 : idx === 1 ? height * 0.23 : idx === 2 ? height * 0.56 : height * 0.55;
+        const cx = ptX - this.parallaxX * 0.65;
+        const cy = ptY + Math.sin(timeSec * 1.4 + idx * 1.5) * 9 - this.parallaxY * 0.52;
         ctx.save();
         ctx.translate(cx, cy);
         ctx.rotate(timeSec * 0.55 * (idx % 2 === 0 ? 1 : -1));
@@ -1535,15 +1508,11 @@ export class IluminadoCanvasRenderer {
         ctx.lineWidth = 1.4;
         ctx.strokeRect(-s * 0.5, -s * 0.5, s, s);
         ctx.restore();
-      });
+      }
     } else if (theme === 'papetura') {
-      // Warm flickering paper-lantern backlighting & rising embers
-      [
-        { x: width * 0.11, y: height * 0.45 },
-        { x: width * 0.89, y: height * 0.42 },
-      ].forEach((lt, idx) => {
-        const lx = lt.x - this.parallaxX * 0.6;
-        const ly = lt.y + Math.sin(timeSec * 1.2 + idx * 2.1) * 8 - this.parallaxY * 0.5;
+      for (let idx = 0; idx < 2; idx++) {
+        const lx = (idx === 0 ? width * 0.11 : width * 0.89) - this.parallaxX * 0.6;
+        const ly = (idx === 0 ? height * 0.45 : height * 0.42) + Math.sin(timeSec * 1.2 + idx * 2.1) * 8 - this.parallaxY * 0.5;
         const flicker = 0.16 + 0.06 * Math.sin(timeSec * 5.2 + idx * 1.9) + beatPulse * 0.1;
         const g = ctx.createRadialGradient(lx, ly, 4, lx, ly, 78);
         g.addColorStop(0, 'rgba(255, 224, 160, 0.55)');
@@ -1553,9 +1522,8 @@ export class IluminadoCanvasRenderer {
         ctx.beginPath();
         ctx.arc(lx, ly, 78, 0, Math.PI * 2);
         ctx.fill();
-      });
+      }
     } else if (theme === 'hohokum') {
-      // Joyful floating kite beads drifting in gentle arcs
       for (let i = 0; i < 8; i++) {
         const driftX = ((timeSec * (28 + i * 5) + i * 160) % (width + 180)) - 90 - this.parallaxX * 0.6;
         const driftY = height * (0.2 + (i % 4) * 0.15) + Math.sin(timeSec * 1.7 + i * 1.1) * 18;
@@ -1566,9 +1534,8 @@ export class IluminadoCanvasRenderer {
         ctx.fill();
       }
     } else if (theme === 'kentucky_rz') {
-      // Atmospheric sodium streetlamp cone glows & mist specks
-      [width * 0.12, width * 0.88].forEach((lx, idx) => {
-        const px = lx - this.parallaxX * 0.62;
+      for (let idx = 0; idx < 2; idx++) {
+        const px = (idx === 0 ? width * 0.12 : width * 0.88) - this.parallaxX * 0.62;
         const topY = horizonY - 178 - this.parallaxY * 0.52;
         const flicker = 0.14 + 0.05 * Math.sin(timeSec * 8.4 + idx * 3.1) + beatPulse * 0.08;
         ctx.fillStyle = palette.architectureLight;
@@ -1580,7 +1547,7 @@ export class IluminadoCanvasRenderer {
         ctx.lineTo(px - 72, horizonY + 12);
         ctx.closePath();
         ctx.fill();
-      });
+      }
     } else if (theme === 'abzu') {
       for (let i = 0; i < 3; i++) {
         const base =
@@ -1598,17 +1565,16 @@ export class IluminadoCanvasRenderer {
         ctx.fill();
       }
     } else if (theme === 'spiritfarer') {
-      const lanternXs = [width * 0.1, width * 0.18, width * 0.84, width * 0.91];
-      const lanternYs = [height * 0.25, height * 0.36, height * 0.24, height * 0.38];
-      lanternXs.forEach((lx, idx) => {
-        const ly = lanternYs[idx] - this.parallaxY * 0.62;
+      for (let idx = 0; idx < 4; idx++) {
+        const lx = width * (idx === 0 ? 0.1 : idx === 1 ? 0.18 : idx === 2 ? 0.84 : 0.91);
+        const ly = height * (idx === 0 ? 0.25 : idx === 1 ? 0.36 : idx === 2 ? 0.24 : 0.38) - this.parallaxY * 0.62;
         const sway = Math.sin(timeSec * 1.1 + idx * 1.7) * 5 - this.parallaxX * 0.62;
         ctx.fillStyle = palette.blockA.highlight;
         ctx.globalAlpha = 0.14 + beatPulse * 0.1;
         ctx.beginPath();
         ctx.arc(lx + sway, ly + 14, 24 + beatPulse * 6, 0, Math.PI * 2);
         ctx.fill();
-      });
+      }
     } else if (theme === 'machinarium') {
       const drawTinyGear = (gx: number, gy: number, gr: number, teeth: number, rot: number) => {
         ctx.save();
@@ -1669,9 +1635,8 @@ export class IluminadoCanvasRenderer {
         ctx.fill();
       }
     } else if (theme === 'cityscape_deco') {
-      // Sweeping golden Art Deco premiere searchlights across dusk sky
-      [width * 0.13, width * 0.87].forEach((sx, idx) => {
-        const baseX = sx - this.parallaxX * 0.6;
+      for (let idx = 0; idx < 2; idx++) {
+        const baseX = (idx === 0 ? width * 0.13 : width * 0.87) - this.parallaxX * 0.6;
         const baseY = horizonY - 40 - this.parallaxY * 0.5;
         const angle = -Math.PI * 0.5 + Math.sin(timeSec * 0.65 + idx * 1.8) * 0.42;
         const spread = 0.14;
@@ -1684,11 +1649,10 @@ export class IluminadoCanvasRenderer {
         ctx.lineTo(baseX + Math.cos(angle + spread) * len, baseY + Math.sin(angle + spread) * len);
         ctx.closePath();
         ctx.fill();
-      });
+      }
     } else if (theme === 'noland_target' || theme === 'artisan_blocks') {
-      const cxPositions = [width * 0.12, width * 0.88];
-      cxPositions.forEach((tx, idx) => {
-        const px = tx - this.parallaxX * 0.62;
+      for (let idx = 0; idx < 2; idx++) {
+        const px = (idx === 0 ? width * 0.12 : width * 0.88) - this.parallaxX * 0.62;
         const py = height * 0.46 - this.parallaxY * 0.52;
         ctx.fillStyle = idx === 0 ? palette.blockA.fill : palette.blockB.fill;
         ctx.globalAlpha = 0.11 + beatPulse * 0.06;
@@ -1700,7 +1664,7 @@ export class IluminadoCanvasRenderer {
         ctx.beginPath();
         ctx.arc(px, py, 28 + mid * 6, 0, Math.PI * 2);
         ctx.fill();
-      });
+      }
     } else if (theme === 'limbo_inside') {
       const swayX = width * 0.5 + Math.sin(timeSec * 0.32) * 32 - this.parallaxX * 0.4;
       const spot = ctx.createRadialGradient(swayX, 0, 20, swayX, height * 0.65, width * 0.36);
@@ -1710,7 +1674,6 @@ export class IluminadoCanvasRenderer {
       ctx.globalAlpha = 1;
       ctx.fillRect(0, 0, width, height);
     } else if (theme === 'sumi_bamboo') {
-      // Swaying bamboo leaf silhouettes & floating red cinnabar hanko accents
       for (let i = 0; i < 6; i++) {
         const sideLeft = i < 3;
         const bx = width * (sideLeft ? 0.06 + i * 0.04 : 0.84 + (i - 3) * 0.04) - this.parallaxX * 0.72;
@@ -1731,7 +1694,6 @@ export class IluminadoCanvasRenderer {
         }
         ctx.restore();
       }
-      // Subtle floating calligraphy ink brushstroke circle behind center
       ctx.strokeStyle = palette.architectureShadow;
       ctx.globalAlpha = 0.12 + beatPulse * 0.05;
       ctx.lineWidth = 10;
@@ -1740,16 +1702,12 @@ export class IluminadoCanvasRenderer {
       ctx.arc(width * 0.5 - this.parallaxX * 0.3, height * 0.48, Math.min(width, height) * 0.31, 0.3, Math.PI * 1.85);
       ctx.stroke();
     } else if (theme === 'cubist_atelier') {
-      // Rotating overlapping fractured planes & plucked guitar-string guidelines
-      [
-        { x: width * 0.13, y: height * 0.42, dir: 1 },
-        { x: width * 0.87, y: height * 0.44, dir: -1 },
-      ].forEach((st, idx) => {
-        const cx = st.x - this.parallaxX * 0.58;
-        const cy = st.y - this.parallaxY * 0.48;
+      for (let idx = 0; idx < 2; idx++) {
+        const cx = (idx === 0 ? width * 0.13 : width * 0.87) - this.parallaxX * 0.58;
+        const cy = (idx === 0 ? height * 0.42 : height * 0.44) - this.parallaxY * 0.48;
         ctx.save();
         ctx.translate(cx, cy);
-        ctx.rotate(timeSec * 0.12 * st.dir);
+        ctx.rotate(timeSec * 0.12 * (idx === 0 ? 1 : -1));
         ctx.fillStyle = idx === 0 ? palette.blockA.fill : palette.blockB.fill;
         ctx.globalAlpha = 0.2 + beatPulse * 0.08;
         ctx.fillRect(-38, -52, 54, 88);
@@ -1767,9 +1725,8 @@ export class IluminadoCanvasRenderer {
           ctx.stroke();
         }
         ctx.restore();
-      });
+      }
     } else if (theme === 'detroit_visor') {
-      // Scanning crimson RoboCop visor sweep + crisp cyan targeting telemetry crosshairs
       const scanY = ((timeSec * 85) % (height * 0.86)) + height * 0.07;
       const scanGrad = ctx.createLinearGradient(0, scanY - 18, 0, scanY + 18);
       scanGrad.addColorStop(0, 'rgba(232, 74, 95, 0)');
@@ -1778,8 +1735,8 @@ export class IluminadoCanvasRenderer {
       ctx.fillStyle = scanGrad;
       ctx.fillRect(0, scanY - 18, width, 36);
 
-      [width * 0.11, width * 0.89].forEach((tx, idx) => {
-        const px = tx - this.parallaxX * 0.56;
+      for (let idx = 0; idx < 2; idx++) {
+        const px = (idx === 0 ? width * 0.11 : width * 0.89) - this.parallaxX * 0.56;
         const py = height * (idx === 0 ? 0.34 : 0.62) - this.parallaxY * 0.45;
         ctx.strokeStyle = palette.blockA.fill;
         ctx.globalAlpha = 0.28 + beatPulse * 0.18;
@@ -1791,9 +1748,8 @@ export class IluminadoCanvasRenderer {
         ctx.moveTo(px + 18, py);
         ctx.lineTo(px + 38, py);
         ctx.stroke();
-      });
+      }
     } else if (theme === 'miami_vice') {
-      // Swaying sunset palm fronds + glowing horizontal Venetian horizon shimmer
       for (let i = 0; i < 5; i++) {
         const sy = horizonY + 12 + i * 18;
         const sw = width * (0.28 - i * 0.03) + beatPulse * 18;
@@ -1802,9 +1758,8 @@ export class IluminadoCanvasRenderer {
         this.roundRect(ctx, width * 0.5 - sw * 0.5 - this.parallaxX * 0.4, sy, sw, 4, 2);
         ctx.fill();
       }
-      // Subtle neon flamingo crescent glow rings
-      [width * 0.12, width * 0.88].forEach((nx, idx) => {
-        const px = nx - this.parallaxX * 0.65;
+      for (let idx = 0; idx < 2; idx++) {
+        const px = (idx === 0 ? width * 0.12 : width * 0.88) - this.parallaxX * 0.65;
         const py = height * 0.34 - this.parallaxY * 0.5;
         ctx.strokeStyle = idx === 0 ? palette.blockA.fill : palette.blockB.fill;
         ctx.globalAlpha = 0.25 + beatPulse * 0.14;
@@ -1812,22 +1767,17 @@ export class IluminadoCanvasRenderer {
         ctx.beginPath();
         ctx.arc(px, py, 32 + Math.sin(timeSec * 2 + idx) * 4, 0, Math.PI * 2);
         ctx.stroke();
-      });
+      }
     } else if (theme === 'neo_andean') {
-      // Pulsing polychrome stepped Chakana stars flanking the Cholet courtyard
-      [
-        { x: width * 0.11, y: height * 0.38, col: palette.blockA.fill },
-        { x: width * 0.89, y: height * 0.38, col: palette.blockB.fill },
-        { x: width * 0.12, y: height * 0.64, col: palette.blockC.fill },
-        { x: width * 0.88, y: height * 0.64, col: palette.blockA.fill },
-      ].forEach((ck, idx) => {
-        const px = ck.x - this.parallaxX * 0.6;
-        const py = ck.y - this.parallaxY * 0.48;
+      for (let idx = 0; idx < 4; idx++) {
+        const px = width * (idx === 0 ? 0.11 : idx === 1 ? 0.89 : idx === 2 ? 0.12 : 0.88) - this.parallaxX * 0.6;
+        const py = height * (idx < 2 ? 0.38 : 0.64) - this.parallaxY * 0.48;
+        const col = idx === 0 || idx === 3 ? palette.blockA.fill : idx === 1 ? palette.blockB.fill : palette.blockC.fill;
         const scale = 1 + beatPulse * 0.14 + (idx % 2 === 0 ? subBass : mid) * 0.1;
         ctx.save();
         ctx.translate(px, py);
         ctx.scale(scale, scale);
-        ctx.fillStyle = ck.col;
+        ctx.fillStyle = col;
         ctx.globalAlpha = 0.22 + beatPulse * 0.1;
         ctx.fillRect(-10, -28, 20, 56);
         ctx.fillRect(-28, -10, 56, 20);
@@ -1838,24 +1788,20 @@ export class IluminadoCanvasRenderer {
         ctx.arc(0, 0, 7, 0, Math.PI * 2);
         ctx.fill();
         ctx.restore();
-      });
+      }
     } else if (theme === 'neko_sketchbook') {
-      // Animated sketchbook kitties positioned in open margins so neither HUD cards nor board occlude them!
-      const cats = [
-        { x: width * 0.062, y: height * 0.72, col: palette.blockA.fill, flip: 1, phase: 0.4 },
-        { x: width * 0.946, y: height * 0.44, col: palette.blockB.fill, flip: -1, phase: 2.2 },
-      ];
-      cats.forEach((cat) => {
-        const cx = cat.x - this.parallaxX * 0.62;
-        const cy = cat.y + Math.sin(timeSec * 1.4 + cat.phase) * 4 - this.parallaxY * 0.5;
-        const blink = Math.sin(timeSec * 0.9 + cat.phase * 3.1) > 0.92;
-        const tailSwing = Math.sin(timeSec * 3.2 + cat.phase) * 0.35;
+      for (let cIdx = 0; cIdx < 2; cIdx++) {
+        const flip = cIdx === 0 ? 1 : -1;
+        const phase = cIdx === 0 ? 0.4 : 2.2;
+        const cx = (cIdx === 0 ? width * 0.062 : width * 0.946) - this.parallaxX * 0.62;
+        const cy = (cIdx === 0 ? height * 0.72 : height * 0.44) + Math.sin(timeSec * 1.4 + phase) * 4 - this.parallaxY * 0.5;
+        const blink = Math.sin(timeSec * 0.9 + phase * 3.1) > 0.92;
+        const tailSwing = Math.sin(timeSec * 3.2 + phase) * 0.35;
         ctx.save();
         ctx.translate(cx, cy);
-        ctx.scale(cat.flip, 1);
+        ctx.scale(flip, 1);
         ctx.globalAlpha = 0.78;
 
-        // Curled animated tail
         ctx.save();
         ctx.translate(-22, 22);
         ctx.rotate(tailSwing);
@@ -1868,16 +1814,14 @@ export class IluminadoCanvasRenderer {
         ctx.stroke();
         ctx.restore();
 
-        // Rounded cat torso + ears
-        ctx.fillStyle = cat.col;
+        ctx.fillStyle = cIdx === 0 ? palette.blockA.fill : palette.blockB.fill;
         ctx.beginPath();
         ctx.ellipse(0, 14, 24, 26, 0, 0, Math.PI * 2);
         ctx.fill();
         ctx.beginPath();
         ctx.arc(0, -14, 20, 0, Math.PI * 2);
         ctx.fill();
-        // Ears
-        const earTwitch = Math.sin(timeSec * 4.5 + cat.phase) > 0.85 ? 0.12 : 0;
+        const earTwitch = Math.sin(timeSec * 4.5 + phase) > 0.85 ? 0.12 : 0;
         ctx.beginPath();
         ctx.moveTo(-16, -24);
         ctx.lineTo(-22, -44 + earTwitch * 18);
@@ -1891,7 +1835,6 @@ export class IluminadoCanvasRenderer {
         ctx.closePath();
         ctx.fill();
 
-        // Crisp fountain-pen outline & expressive face
         ctx.strokeStyle = palette.architectureShadow;
         ctx.lineWidth = 2;
         ctx.beginPath();
@@ -1911,7 +1854,6 @@ export class IluminadoCanvasRenderer {
           ctx.arc(7, -16, 2.5, 0, Math.PI * 2);
           ctx.fill();
         }
-        // Whiskers
         ctx.lineWidth = 1.2;
         ctx.beginPath();
         ctx.moveTo(-11, -10);
@@ -1924,9 +1866,8 @@ export class IluminadoCanvasRenderer {
         ctx.lineTo(24, -6);
         ctx.stroke();
         ctx.restore();
-      });
+      }
 
-      // Bouncing yarn ball along skyline terrace
       const yarnX = width * 0.18 + Math.sin(timeSec * 0.9) * 28 - this.parallaxX * 0.65;
       const yarnY = horizonY - 12 - Math.abs(Math.sin(timeSec * 2.8)) * (14 + beatPulse * 8);
       ctx.fillStyle = palette.blockA.fill;
@@ -1940,7 +1881,6 @@ export class IluminadoCanvasRenderer {
       ctx.arc(yarnX, yarnY, 7, 0.3, 2.6);
       ctx.stroke();
     } else if (theme === 'stained_glass') {
-      // Rotating Gothic rose mandala + warm stained-glass sunbeams
       const rx = width * 0.5 - this.parallaxX * 0.35;
       const ry = height * 0.44 - this.parallaxY * 0.25;
       const rad = Math.min(width, height) * 0.36;
@@ -1960,7 +1900,6 @@ export class IluminadoCanvasRenderer {
       }
       ctx.restore();
     } else if (theme === 'constructivist') {
-      // Spinning bold crimson constructivist cog & sweeping red wedge beams
       const cx = width * 0.12 - this.parallaxX * 0.6;
       const cy = height * 0.5 - this.parallaxY * 0.5;
       ctx.save();
@@ -1979,8 +1918,8 @@ export class IluminadoCanvasRenderer {
       ctx.stroke();
       ctx.restore();
     } else if (theme === 'botanical_herbarium') {
-      // Gently swaying pressed fern fronds flanking the conservatory glass
-      [width * 0.09, width * 0.91].forEach((fx, idx) => {
+      for (let idx = 0; idx < 2; idx++) {
+        const fx = idx === 0 ? width * 0.09 : width * 0.91;
         const sway = Math.sin(timeSec * 1.1 + idx * 1.7) * 0.08;
         ctx.save();
         ctx.translate(fx - this.parallaxX * 0.65, height * 0.72 - this.parallaxY * 0.5);
@@ -1993,9 +1932,8 @@ export class IluminadoCanvasRenderer {
           ctx.fill();
         }
         ctx.restore();
-      });
+      }
     } else if (theme === 'memphis_milano') {
-      // Kinetic Memphis squiggles, bouncing geometric spheres & festive triangle confetti
       for (let i = 0; i < 7; i++) {
         const cx = width * (0.08 + ((i * 0.15) % 0.84)) + Math.sin(timeSec * 1.2 + i) * 16 - this.parallaxX * 0.6;
         const cy = height * (0.24 + ((i * 0.17) % 0.48)) + Math.cos(timeSec * 1.4 + i) * 14 - this.parallaxY * 0.5;
@@ -2020,7 +1958,6 @@ export class IluminadoCanvasRenderer {
       }
     }
 
-    // Music-reactive soft rounded capsule shapes along the waterline (shape-forward, minimal lines)
     {
       const barCount = 20;
       const spanW = width * 0.9;
@@ -2047,7 +1984,6 @@ export class IluminadoCanvasRenderer {
       }
     }
 
-    // Encore Finale heightened aurora ribbons across upper sky
     if (encoreIntensity > 0.02) {
       ctx.save();
       for (let band = 0; band < 2; band++) {
@@ -2073,7 +2009,6 @@ export class IluminadoCanvasRenderer {
       ctx.restore();
     }
 
-    // Shape-matched floating ambient motes with depth-scaled parallax drift
     const moteColor =
       theme === 'ori' || theme === 'spiritfarer'
         ? 'rgba(255, 246, 204, 0.55)'
@@ -2133,7 +2068,6 @@ export class IluminadoCanvasRenderer {
     ctx.fillStyle = skyGrad;
     ctx.fillRect(0, 0, width, height);
 
-    // Subtle twilight starfield pinpoints when sky canopy is nocturnal
     if (isHexColorDark(palette.skyTop)) {
       ctx.save();
       for (let i = 0; i < 16; i++) {
@@ -2149,7 +2083,6 @@ export class IluminadoCanvasRenderer {
       ctx.restore();
     }
 
-    // Soft atmospheric scatter band hugging the horizon
     const horizBand = ctx.createLinearGradient(0, horizonY - 90, 0, horizonY + 12);
     horizBand.addColorStop(0, 'rgba(250, 246, 238, 0)');
     horizBand.addColorStop(0.78, palette.horizonMist);
@@ -2192,7 +2125,6 @@ export class IluminadoCanvasRenderer {
       ctx.fillStyle = waterGrad;
       ctx.fillRect(0, horizonY, width, height - horizonY);
 
-      // Sunlit specular reflection column tapering below solar axis
       const sunX = width * 0.72;
       const specGrad = ctx.createLinearGradient(0, horizonY, 0, height);
       specGrad.addColorStop(0, palette.architectureLight);
@@ -2234,7 +2166,6 @@ export class IluminadoCanvasRenderer {
 
     ctx.save();
     if (theme === 'sumi_bamboo') {
-      // Soft misty sumi-e mountain ink wash silhouettes + pale mist rim
       ctx.fillStyle = palette.architectureMid;
       ctx.globalAlpha = 0.28;
       ctx.beginPath();
@@ -2245,7 +2176,6 @@ export class IluminadoCanvasRenderer {
       ctx.closePath();
       ctx.fill();
     } else if (theme === 'ukiyoe_wave') {
-      // Iconic distant snow-capped Fuji peak behind sea mist
       ctx.fillStyle = palette.architectureMid;
       ctx.globalAlpha = 0.38;
       ctx.beginPath();
@@ -2267,7 +2197,6 @@ export class IluminadoCanvasRenderer {
       ctx.closePath();
       ctx.fill();
     } else if (theme === 'ghibli_express') {
-      // Towering sunlit studio cumulonimbus sky clouds
       ctx.fillStyle = palette.architectureLight;
       ctx.globalAlpha = 0.58;
       [
@@ -2281,7 +2210,6 @@ export class IluminadoCanvasRenderer {
         ctx.fill();
       });
     } else if (theme === 'space_terminal') {
-      // Distant ringed Saturnian planetoid & trajectory arc
       ctx.fillStyle = palette.blockC.fill;
       ctx.globalAlpha = 0.32;
       ctx.beginPath();
@@ -2294,7 +2222,6 @@ export class IluminadoCanvasRenderer {
       ctx.ellipse(width * 0.82, height * 0.22, 86, 18, -0.22, 0, Math.PI * 2);
       ctx.stroke();
     } else {
-      // Distant terraced pastel skyline / ridge common across worlds (atmospheric fade + crisp backlit rim)
       ctx.fillStyle = palette.architectureMid;
       ctx.globalAlpha = 0.28;
       ctx.beginPath();
@@ -2326,7 +2253,6 @@ export class IluminadoCanvasRenderer {
       ctx.stroke();
     }
 
-    // Distant isometric background spires / colonnades for architectural depth
     if (
       theme === 'monument_valley' ||
       theme === 'sennaar' ||
@@ -2346,7 +2272,6 @@ export class IluminadoCanvasRenderer {
       this.drawIsoTower(ctx, width * 0.42, horizonY - 14, 48, 86, skin, false, false);
     }
 
-    // Soft atmospheric horizon mist veil separating far plane from mid architecture
     const mistGrad = ctx.createLinearGradient(0, horizonY - 95, 0, horizonY + 20);
     mistGrad.addColorStop(0, 'rgba(250, 246, 238, 0)');
     mistGrad.addColorStop(0.65, palette.horizonMist);
@@ -2376,7 +2301,6 @@ export class IluminadoCanvasRenderer {
         this.drawIsoTower(ctx, width * 0.08, horizonY + 12, 82, 145, skin, true, true);
         this.drawIsoTower(ctx, width * 0.78, horizonY + 6, 76, 125, skin, true, false);
         this.drawIsoTower(ctx, width * 0.93, horizonY + 14, 90, 170, skin, true, false);
-        // Subtle isometric horizon walkway linking left/right wings
         ctx.fillStyle = palette.architectureLight;
         ctx.globalAlpha = 0.52;
         ctx.fillRect(width * 0.14, horizonY - 68, width * 0.14, 12);
@@ -2385,7 +2309,6 @@ export class IluminadoCanvasRenderer {
         break;
       }
       case 'gorogoa': {
-        // Layered rounded gallery niches & overlapping solar discs (shape-forward instead of box strokes)
         [width * 0.13, width * 0.87].forEach((cx, idx) => {
           ctx.fillStyle = palette.architectureLight;
           ctx.globalAlpha = 0.52;
@@ -2461,7 +2384,6 @@ export class IluminadoCanvasRenderer {
             this.roundRect(ctx, cx - tw / 2, ty, tw, th + 4, 8);
             ctx.fill();
           }
-          // Soft sun dome atop ziggurat
           ctx.fillStyle = palette.architectureLight;
           ctx.beginPath();
           ctx.arc(cx, horizonY - tiers * 36, baseW * 0.18, Math.PI, 0);
@@ -2864,7 +2786,6 @@ export class IluminadoCanvasRenderer {
         break;
       }
       case 'cityscape_deco': {
-        // Sculptural domed & stepped Art Deco skyline towers with round porthole & arch windows (no rigid outlines)
         const towers = [
           { x: width * 0.03, w: 64, h: 245, tone: palette.architectureShadow, dome: true },
           { x: width * 0.09, w: 58, h: 315, tone: palette.blockA.fill, dome: false },
@@ -2889,7 +2810,6 @@ export class IluminadoCanvasRenderer {
             this.roundRect(ctx, t.x + t.w * 0.22, topY - 18, t.w * 0.56, 22, 8);
             ctx.fill();
           }
-          // Soft circular & pill arch windows
           ctx.fillStyle = palette.architectureLight;
           ctx.globalAlpha = 0.48;
           for (let wy = topY + 24; wy < horizonY - 16; wy += 24) {
@@ -2905,7 +2825,6 @@ export class IluminadoCanvasRenderer {
         break;
       }
       case 'noland_target': {
-        // Concentric color-field target medallions framed on warm gallery bays
         const targets = [
           { x: width * 0.11, y: height * 0.36, outer: palette.blockA.fill, inner: palette.blockB.fill, r: 54 },
           { x: width * 0.11, y: height * 0.62, outer: palette.blockB.fill, inner: palette.blockA.highlight, r: 44 },
@@ -2932,7 +2851,6 @@ export class IluminadoCanvasRenderer {
         break;
       }
       case 'artisan_blocks': {
-        // Curated mixed-media woodblock relief tiles flanking the stage
         const tiles = [
           { x: width * 0.06, y: height * 0.28, s: 58, fill: palette.blockA.fill, accent: palette.architectureLight },
           { x: width * 0.13, y: height * 0.46, s: 52, fill: palette.blockB.fill, accent: palette.blockA.highlight },
@@ -2964,7 +2882,6 @@ export class IluminadoCanvasRenderer {
         break;
       }
       case 'verdigris_terrace': {
-        // Oxidized jade colonnade aqueduct arches
         const drawArcade = (baseX: number, count: number) => {
           const span = 58;
           const archTop = horizonY - 120;
@@ -2994,7 +2911,6 @@ export class IluminadoCanvasRenderer {
         break;
       }
       case 'terracotta_mosaic': {
-        // Aegean terracotta domes & stepped courtyard terraces
         const drawDome = (cx: number, r: number) => {
           ctx.fillStyle = palette.architectureMid;
           ctx.globalAlpha = 0.52;
@@ -3014,7 +2930,6 @@ export class IluminadoCanvasRenderer {
         break;
       }
       case 'indigo_risograph': {
-        // Printmaker overlapping geometric halftones & Bauhaus half-moons
         ctx.fillStyle = palette.blockA.fill;
         ctx.globalAlpha = 0.28;
         ctx.beginPath();
@@ -3037,7 +2952,6 @@ export class IluminadoCanvasRenderer {
         break;
       }
       case 'amber_encaustic': {
-        // Warm beeswax canyon mesas & horizon ridges
         const drawMesa = (pts: Array<[number, number]>, color: string) => {
           ctx.fillStyle = color;
           ctx.beginPath();
@@ -3066,7 +2980,6 @@ export class IluminadoCanvasRenderer {
         break;
       }
       case 'celadon_fresco': {
-        // Graceful vaulted celadon porcelain domes & side alcoves (filled soft arches, no wire lines)
         [width * 0.11, width * 0.89].forEach((cx) => {
           ctx.fillStyle = palette.architectureMid;
           ctx.globalAlpha = 0.28;
@@ -3086,7 +2999,6 @@ export class IluminadoCanvasRenderer {
         break;
       }
       case 'ochre_skyline': {
-        // Sunlit amber maritime docks, gantry cranes & lateen sails (distinct from cityscape_deco)
         [
           { x: width * 0.08, h: 195 },
           { x: width * 0.89, h: 215 },
@@ -3098,7 +3010,6 @@ export class IluminadoCanvasRenderer {
           ctx.fillRect(crane.x - (idx === 0 ? 12 : 76), topY, 96, 12);
           ctx.fillStyle = palette.blockA.fill;
           ctx.globalAlpha = 0.56;
-          // Triangular lateen sail in harbor
           const sailX = idx === 0 ? crane.x + 68 : crane.x - 86;
           ctx.beginPath();
           ctx.moveTo(sailX, horizonY - 4);
@@ -3111,7 +3022,6 @@ export class IluminadoCanvasRenderer {
         break;
       }
       case 'aurora_prism': {
-        // Layered alpine dawn peaks & luminous prism shafts
         ctx.fillStyle = palette.architectureMid;
         ctx.globalAlpha = 0.42;
         ctx.beginPath();
@@ -3129,7 +3039,6 @@ export class IluminadoCanvasRenderer {
         break;
       }
       case 'sumi_bamboo': {
-        // Sumi ink brushstroke mountains, lakeside torii & vertical bamboo canes
         ctx.fillStyle = palette.architectureShadow;
         ctx.globalAlpha = 0.34;
         [0.05, 0.11, 0.88, 0.94].forEach((rx, idx) => {
@@ -3141,7 +3050,6 @@ export class IluminadoCanvasRenderer {
             ctx.fill();
           }
         });
-        // Minimalist torii silhouette on left bank & vermilion red ink seal on right
         ctx.fillStyle = palette.blockB.fill;
         ctx.globalAlpha = 0.65;
         ctx.fillRect(width * 0.14, horizonY - 96, 8, 96);
@@ -3154,7 +3062,6 @@ export class IluminadoCanvasRenderer {
         break;
       }
       case 'cubist_atelier': {
-        // Fractured overlapping paper-collage planes, arches & Picasso/Braque instrument curves
         const planes = [
           { x: width * 0.04, y: height * 0.22, w: 120, h: 250, col: palette.blockA.fill, a: 0.38 },
           { x: width * 0.11, y: height * 0.34, w: 92, h: 190, col: palette.blockB.fill, a: 0.44 },
@@ -3176,7 +3083,6 @@ export class IluminadoCanvasRenderer {
         break;
       }
       case 'detroit_visor': {
-        // Brushed steel Detroit corporate monoliths + horizontal visor neon slit
         [
           { x: width * 0.03, w: 74, h: 270 },
           { x: width * 0.11, w: 56, h: 200 },
@@ -3196,7 +3102,6 @@ export class IluminadoCanvasRenderer {
         break;
       }
       case 'miami_vice': {
-        // Ocean Drive Pastel Art Deco boutique hotels & tall twilight silhouettes of palms
         [
           { x: width * 0.04, w: 92, h: 205, col: palette.architectureLight },
           { x: width * 0.85, w: 102, h: 225, col: palette.architectureLight },
@@ -3211,7 +3116,6 @@ export class IluminadoCanvasRenderer {
           ctx.fillRect(hotel.x + 10, topY + 16, hotel.w - 20, 5);
           ctx.fillRect(hotel.x + 14, topY + 30, hotel.w - 28, 4);
         });
-        // Tall curved palm silhouettes
         [width * 0.16, width * 0.82].forEach((px, idx) => {
           ctx.strokeStyle = palette.architectureShadow;
           ctx.globalAlpha = 0.62;
@@ -3234,7 +3138,6 @@ export class IluminadoCanvasRenderer {
         break;
       }
       case 'neo_andean': {
-        // Freddy Mamani inspired vibrant Neo-Andean Cholet stepped facades & arched glass bays
         [
           { x: width * 0.04, w: 120, baseH: 225, primary: palette.blockA.fill, sec: palette.blockB.fill },
           { x: width * 0.84, w: 126, baseH: 240, primary: palette.blockB.fill, sec: palette.blockC.fill },
@@ -3243,12 +3146,10 @@ export class IluminadoCanvasRenderer {
           ctx.fillStyle = palette.architectureMid;
           ctx.globalAlpha = 0.68;
           ctx.fillRect(cholet.x, topY + 28, cholet.w, cholet.baseH);
-          // Stepped polychrome Andean crown tiers
           ctx.fillStyle = cholet.primary;
           ctx.fillRect(cholet.x + 12, topY + 12, cholet.w - 24, 20);
           ctx.fillStyle = cholet.sec;
           ctx.fillRect(cholet.x + 28, topY - 6, cholet.w - 56, 20);
-          // Tall arched mirror window bay
           ctx.fillStyle = palette.architectureLight;
           ctx.globalAlpha = 0.56;
           ctx.beginPath();
@@ -3262,12 +3163,10 @@ export class IluminadoCanvasRenderer {
         break;
       }
       case 'neko_sketchbook': {
-        // Sketchbook page margins, ink paw-print stamps & cozy sleeping cat silhouettes along shelf
         ctx.fillStyle = palette.architectureMid;
         ctx.globalAlpha = 0.25;
         ctx.fillRect(width * 0.04, horizonY - 12, width * 0.22, 16);
         ctx.fillRect(width * 0.74, horizonY - 12, width * 0.22, 16);
-        // Cute ink paw-print trail along side notebook margin
         ctx.fillStyle = palette.architectureShadow;
         ctx.globalAlpha = 0.22;
         [0.24, 0.38, 0.52, 0.66].forEach((ry, idx) => {
@@ -3284,7 +3183,6 @@ export class IluminadoCanvasRenderer {
         break;
       }
       case 'stained_glass': {
-        // Gothic lancet arches filled with jewel-toned translucent stained glass panes
         [width * 0.1, width * 0.9].forEach((lx) => {
           ctx.fillStyle = palette.architectureShadow;
           ctx.globalAlpha = 0.7;
@@ -3307,7 +3205,6 @@ export class IluminadoCanvasRenderer {
         break;
       }
       case 'constructivist': {
-        // Avant-garde El Lissitzky / Rodchenko diagonal crimson wedges & bold geometric pylons
         ctx.fillStyle = palette.blockA.fill;
         ctx.globalAlpha = 0.48;
         ctx.beginPath();
@@ -3330,7 +3227,6 @@ export class IluminadoCanvasRenderer {
         break;
       }
       case 'botanical_herbarium': {
-        // Victorian glass conservatory wrought-iron arched bays + botanical leaf arches
         [width * 0.11, width * 0.89].forEach((cx) => {
           ctx.strokeStyle = palette.architectureShadow;
           ctx.globalAlpha = 0.36;
@@ -3352,7 +3248,6 @@ export class IluminadoCanvasRenderer {
         break;
       }
       case 'memphis_milano': {
-        // Ettore Sottsass Memphis Totem bookshelves, cobalt arches & yellow triangles
         ctx.fillStyle = palette.blockB.fill;
         ctx.globalAlpha = 0.45;
         this.roundRect(ctx, width * 0.05, horizonY - 190, 96, 190, 14);
@@ -3374,14 +3269,11 @@ export class IluminadoCanvasRenderer {
         break;
       }
       case 'scandi_showroom': {
-        // IKEA Scandinavian showroom bays, birch shelving, hanging yellow dome pendant lamps & floor arrows
         [width * 0.09, width * 0.91].forEach((cx, idx) => {
-          // Showroom bay backdrop + birch frame
           ctx.fillStyle = palette.blockA.fill;
           ctx.globalAlpha = 0.22;
           this.roundRect(ctx, cx - 72, horizonY - 220, 144, 220, 10);
           ctx.fill();
-          // KALLAX-style 2x2 shelving unit silhouette
           ctx.strokeStyle = palette.architectureShadow;
           ctx.globalAlpha = 0.45;
           ctx.lineWidth = 4;
@@ -3392,12 +3284,10 @@ export class IluminadoCanvasRenderer {
           ctx.moveTo(cx - 46, horizonY - 72);
           ctx.lineTo(cx + 46, horizonY - 72);
           ctx.stroke();
-          // Yellow accent cube insert inside shelf
           ctx.fillStyle = palette.blockB.fill;
           ctx.globalAlpha = 0.55;
           ctx.fillRect(idx === 0 ? cx + 4 : cx - 42, horizonY - 68, 38, 38);
 
-          // Hanging Scandi pendant lamp from ceiling
           ctx.strokeStyle = palette.architectureShadow;
           ctx.globalAlpha = 0.52;
           ctx.lineWidth = 2;
@@ -3412,7 +3302,6 @@ export class IluminadoCanvasRenderer {
           ctx.closePath();
           ctx.fill();
         });
-        // Iconic floor directional arrow
         ctx.fillStyle = palette.blockB.fill;
         ctx.globalAlpha = 0.42;
         ctx.beginPath();
@@ -3426,12 +3315,10 @@ export class IluminadoCanvasRenderer {
         break;
       }
       case 'grand_budapest': {
-        // Symmetrical Grand Alpine hotel elevation with arched windows & striped awning wings
         [width * 0.11, width * 0.89].forEach((cx) => {
           ctx.fillStyle = palette.architectureMid;
           ctx.globalAlpha = 0.38;
           ctx.fillRect(cx - 70, horizonY - 210, 140, 210);
-          // Stepped Mansard pediment cap
           ctx.fillStyle = palette.blockB.fill;
           ctx.globalAlpha = 0.42;
           ctx.beginPath();
@@ -3440,7 +3327,6 @@ export class IluminadoCanvasRenderer {
           ctx.lineTo(cx + 78, horizonY - 210);
           ctx.closePath();
           ctx.fill();
-          // Symmetrical cream arched windows
           ctx.fillStyle = palette.architectureLight;
           ctx.globalAlpha = 0.72;
           [-34, 0, 34].forEach((ox) => {
@@ -3454,7 +3340,6 @@ export class IluminadoCanvasRenderer {
         break;
       }
       case 'ghibli_express': {
-        // Flooded ocean horizon railway trestle piers & vintage tram silhouette
         ctx.strokeStyle = palette.architectureShadow;
         ctx.globalAlpha = 0.42;
         ctx.lineWidth = 4;
@@ -3466,11 +3351,9 @@ export class IluminadoCanvasRenderer {
           ctx.fillStyle = palette.architectureShadow;
           ctx.globalAlpha = 0.35;
           ctx.fillRect(x - 3, horizonY + 12, 6, 46);
-          // Utility pole & catenary post
           ctx.fillRect(x - 1.5, horizonY - 56, 3, 68);
           ctx.fillRect(x - 10, horizonY - 50, 20, 2.5);
         }
-        // Distant vermilion railcar gliding along left horizon
         ctx.fillStyle = palette.blockA.fill;
         ctx.globalAlpha = 0.56;
         this.roundRect(ctx, width * 0.07, horizonY - 20, 128, 30, 6);
@@ -3484,7 +3367,6 @@ export class IluminadoCanvasRenderer {
         break;
       }
       case 'de_stijl': {
-        // Bold Mondrian neoplasticist ashlar orthogonal panels & primary planes
         const drawPanel = (px: number, py: number, pw: number, ph: number) => {
           ctx.fillStyle = palette.architectureLight;
           ctx.globalAlpha = 0.55;
@@ -3513,7 +3395,6 @@ export class IluminadoCanvasRenderer {
         break;
       }
       case 'ukiyoe_wave': {
-        // Sweeping Prussian-indigo Ukiyo-e cresting wave curves & foam scallops
         [
           { cx: width * 0.14, dir: 1 },
           { cx: width * 0.86, dir: -1 },
@@ -3526,7 +3407,6 @@ export class IluminadoCanvasRenderer {
           ctx.quadraticCurveTo(cx - dir * 5, horizonY - 82, cx + dir * 110, horizonY + 18);
           ctx.closePath();
           ctx.fill();
-          // Cream seafoam arc
           ctx.strokeStyle = palette.architectureLight;
           ctx.globalAlpha = 0.72;
           ctx.lineWidth = 5;
@@ -3534,7 +3414,6 @@ export class IluminadoCanvasRenderer {
           ctx.arc(cx + dir * 24, horizonY - 108, 44, 0.2, Math.PI * 1.15);
           ctx.stroke();
         });
-        // Edo vermilion seal cartouche on left sky
         ctx.fillStyle = palette.blockC.fill;
         ctx.globalAlpha = 0.58;
         ctx.fillRect(width * 0.04, height * 0.14, 24, 58);
@@ -3542,12 +3421,10 @@ export class IluminadoCanvasRenderer {
         break;
       }
       case 'kodak_cinema': {
-        // 70s Desert Modernist silhouette & vintage 35mm film sprocket strip frames
         ctx.fillStyle = palette.architectureShadow;
         ctx.globalAlpha = 0.36;
         ctx.fillRect(width * 0.03, horizonY - 110, 130, 110);
         ctx.fillRect(width * 0.84, horizonY - 135, 136, 135);
-        // Sunburst warm cinema frame bars along sides
         [width * 0.025, width * 0.96].forEach((fx) => {
           ctx.fillStyle = palette.blockA.fill;
           ctx.globalAlpha = 0.34;
@@ -3560,7 +3437,6 @@ export class IluminadoCanvasRenderer {
         break;
       }
       case 'kinetic_bauhaus': {
-        // Suspended Calder mobile arms, wires & counterbalanced shapes
         [
           { anchorX: width * 0.14, span: 78 },
           { anchorX: width * 0.86, span: -82 },
@@ -3574,7 +3450,6 @@ export class IluminadoCanvasRenderer {
           ctx.moveTo(anchorX - span * 0.6, height * 0.24);
           ctx.lineTo(anchorX + span * 0.8, height * 0.18);
           ctx.stroke();
-          // Terracotta disc & cobalt counterweight
           ctx.fillStyle = palette.blockA.fill;
           ctx.globalAlpha = 0.62;
           ctx.beginPath();
@@ -3592,7 +3467,6 @@ export class IluminadoCanvasRenderer {
         break;
       }
       case 'synth_greenhouse': {
-        // Twin ribbed geodesic glass solarium domes on left and right wings
         [width * 0.12, width * 0.88].forEach((cx) => {
           ctx.fillStyle = palette.architectureLight;
           ctx.globalAlpha = 0.34;
@@ -3609,7 +3483,6 @@ export class IluminadoCanvasRenderer {
             ctx.ellipse(cx, horizonY, Math.abs(rx) + 12, 108, 0, Math.PI, 0);
             ctx.stroke();
           }
-          // Orchid magenta blossom inside dome
           ctx.fillStyle = palette.blockC.fill;
           ctx.globalAlpha = 0.42;
           ctx.beginPath();
@@ -3620,13 +3493,11 @@ export class IluminadoCanvasRenderer {
         break;
       }
       case 'vinyl_lounge': {
-        // Acoustic walnut wall slats, Altec horn speakers & spinning vinyl disc
         [width * 0.1, width * 0.9].forEach((cx) => {
           ctx.fillStyle = palette.architectureShadow;
           ctx.globalAlpha = 0.48;
           this.roundRect(ctx, cx - 58, horizonY - 190, 116, 190, 8);
           ctx.fill();
-          // Brass horn flare
           ctx.fillStyle = palette.blockA.fill;
           ctx.globalAlpha = 0.42;
           ctx.beginPath();
@@ -3637,7 +3508,6 @@ export class IluminadoCanvasRenderer {
           ctx.beginPath();
           ctx.arc(cx, horizonY - 125, 11, 0, Math.PI * 2);
           ctx.fill();
-          // Large vinyl sleeve silhouette below
           ctx.fillStyle = palette.blockB.fill;
           ctx.globalAlpha = 0.36;
           ctx.beginPath();
@@ -3648,7 +3518,6 @@ export class IluminadoCanvasRenderer {
         break;
       }
       case 'space_terminal': {
-        // Saarinen sweeping gull-wing concrete vaults & illuminated capsule portals
         [
           { cx: width * 0.13, dir: 1 },
           { cx: width * 0.87, dir: -1 },
@@ -3661,7 +3530,6 @@ export class IluminadoCanvasRenderer {
           ctx.quadraticCurveTo(cx + dir * 35, horizonY - 95, cx + dir * 48, horizonY);
           ctx.closePath();
           ctx.fill();
-          // Capsule orange beacon port
           ctx.fillStyle = palette.blockA.fill;
           ctx.globalAlpha = 0.56;
           ctx.beginPath();
@@ -3685,14 +3553,12 @@ export class IluminadoCanvasRenderer {
 
     ctx.save();
     if (theme === 'sumi_bamboo') {
-      // Foreground swaying ink bamboo shoots
       ctx.fillStyle = palette.architectureShadow;
       ctx.globalAlpha = 0.38;
       [width * 0.025, width * 0.975].forEach((bx) => {
         ctx.fillRect(bx - 6, height * 0.64, 12, height * 0.42);
       });
     } else if (theme === 'neko_sketchbook') {
-      // Foreground sketchbook rounded ink corner tabs
       ctx.fillStyle = palette.blockA.fill;
       ctx.globalAlpha = 0.34;
       ctx.beginPath();
@@ -3703,7 +3569,6 @@ export class IluminadoCanvasRenderer {
       ctx.arc(width * 0.97, height * 0.95, 60, 0, Math.PI * 2);
       ctx.fill();
     } else if (theme === 'botanical_herbarium') {
-      // Lush foreground botanical corner fronds
       ctx.fillStyle = palette.architectureShadow;
       ctx.globalAlpha = 0.35;
       [0.03, 0.97].forEach((rx, idx) => {
@@ -3714,7 +3579,6 @@ export class IluminadoCanvasRenderer {
         }
       });
     } else if (theme === 'miami_vice') {
-      // Foreground Ocean Drive Art Deco railing posts with pastel neon speed-stripes & glowing top cap
       [width * 0.015, width * 0.985 - 72].forEach((rx, idx) => {
         const ry = idx === 0 ? height * 0.78 : height * 0.76;
         const rh = idx === 0 ? height * 0.25 : height * 0.27;
@@ -3722,7 +3586,6 @@ export class IluminadoCanvasRenderer {
         ctx.globalAlpha = 0.58;
         this.roundRect(ctx, rx, ry, 72, rh, 16);
         ctx.fill();
-        // Signature Ocean Drive neon speed-stripes
         ctx.fillStyle = palette.blockA.fill;
         ctx.globalAlpha = 0.55;
         this.roundRect(ctx, rx + 8, ry + 14, 56, 5, 2.5);
@@ -3737,7 +3600,6 @@ export class IluminadoCanvasRenderer {
         ctx.fill();
       });
     } else if (theme === 'constructivist' || theme === 'cubist_atelier' || theme === 'memphis_milano' || theme === 'de_stijl' || theme === 'kinetic_bauhaus') {
-      // Geometric corner plinth wedges matching modern art themes
       ctx.fillStyle = theme === 'constructivist' || theme === 'de_stijl' ? palette.blockA.fill : palette.architectureShadow;
       ctx.globalAlpha = 0.38;
       ctx.beginPath();
@@ -3754,7 +3616,6 @@ export class IluminadoCanvasRenderer {
       ctx.closePath();
       ctx.fill();
     } else if (theme === 'scandi_showroom') {
-      // Flat-pack birch corner crates with showroom blue/yellow tags
       ctx.fillStyle = palette.architectureLight;
       ctx.globalAlpha = 0.56;
       this.roundRect(ctx, width * 0.01, height * 0.81, 88, 96, 6);
@@ -3765,7 +3626,6 @@ export class IluminadoCanvasRenderer {
       ctx.fillStyle = palette.blockB.fill;
       ctx.fillRect(width * 0.91, height * 0.82, 74, 86);
     } else if (theme === 'gris' || theme === 'old_mans_journey' || theme === 'abzu' || theme === 'ori' || theme === 'ghibli_express' || theme === 'synth_greenhouse') {
-      // Soft rolling foreground wash mounds for painterly / organic worlds
       ctx.fillStyle = palette.architectureShadow;
       ctx.globalAlpha = 0.32;
       ctx.beginPath();
@@ -3773,7 +3633,6 @@ export class IluminadoCanvasRenderer {
       ctx.ellipse(width * 0.97, height * 0.95, 118, 82, 0.25, 0, Math.PI * 2);
       ctx.fill();
     } else {
-      // Subtle foreground corner isometric plinths that move fastest (1.05x) for tangible 3D framing
       ctx.globalAlpha = 0.42;
       this.drawIsoTower(
         ctx,
@@ -3797,7 +3656,6 @@ export class IluminadoCanvasRenderer {
       );
     }
 
-    // Soft filled shoreline mist band + elliptical reflection pebbles
     ctx.fillStyle = palette.architectureLight;
     ctx.globalAlpha = 0.1;
     ctx.fillRect(-PARALLAX_OVERSCAN_X, horizonY - 2, width + PARALLAX_OVERSCAN_X * 2, 5);
@@ -4079,32 +3937,30 @@ export class IluminadoCanvasRenderer {
     ctx.rect(x, y, width, height);
     ctx.clip();
 
-    // Subtle beat + sub-bass reactive grid vertices & soft hairlines
     const gridBeatPulse = Math.pow(1 - beatPhase, 2.8);
     ctx.save();
     ctx.strokeStyle = palette.gridLine;
     ctx.lineWidth = 1;
     ctx.globalAlpha = 0.42 + gridBeatPulse * 0.14 + subBass * 0.12;
+    ctx.beginPath();
     for (let c = 1; c < boardCols; c++) {
       const gx = x + c * cellSize;
-      ctx.beginPath();
       ctx.moveTo(gx, y);
       ctx.lineTo(gx, y + height);
-      ctx.stroke();
     }
     for (let r = 1; r < boardRows; r++) {
       const gy = y + r * cellSize;
-      ctx.beginPath();
       ctx.moveTo(x, gy);
       ctx.lineTo(x + width, gy);
-      ctx.stroke();
     }
+    ctx.stroke();
+
     ctx.fillStyle = palette.gridLine;
     ctx.globalAlpha = 0.55 + gridBeatPulse * 0.2;
     for (let r = 1; r < boardRows; r++) {
-      const gy = y + r * cellSize;
+      const gy = y + r * cellSize - 1;
       for (let c = 1; c < boardCols; c++) {
-        ctx.fillRect(x + c * cellSize - 1, gy - 1, 2, 2);
+        ctx.fillRect(x + c * cellSize - 1, gy, 2, 2);
       }
     }
     ctx.restore();
@@ -4123,7 +3979,6 @@ export class IluminadoCanvasRenderer {
       );
     }
 
-    // Hard-drop impact light beams (supports downward, upward, and horizontal flows)
     for (let i = 0; i < MAX_DROP_BEAMS; i++) {
       const beam = this.dropBeams[i];
       if (!beam.active || beam.boardIdx !== boardIdx) continue;
@@ -4228,7 +4083,6 @@ export class IluminadoCanvasRenderer {
       }
     }
 
-    // Subtle pulsing flow-direction entry chevrons when gravity is shifted away from downward
     const gravDir: GravityDirection = board.gravityDirection ?? 'down';
     if (gravDir !== 'down') {
       const flowPulse = 0.34 + 0.18 * Math.sin(timeSec * 4.2);
@@ -4272,7 +4126,6 @@ export class IluminadoCanvasRenderer {
       ctx.restore();
     }
 
-    // Portal edge ribbons when portal_wrap is active
     if (board.activeShift === 'portal_wrap') {
       const portalPulse = 0.42 + 0.24 * Math.sin(timeSec * 4.5);
       ctx.save();
@@ -4288,7 +4141,6 @@ export class IluminadoCanvasRenderer {
       ctx.restore();
     }
 
-    // Conveyor belt track chevrons along bottom row when conveyor_floor is active
     if (board.activeShift === 'conveyor_floor') {
       const dirSign = board.conveyorDir === -1 ? -1 : 1;
       const beltY = y + height - Math.max(5, cellSize * 0.22);
@@ -4311,7 +4163,6 @@ export class IluminadoCanvasRenderer {
       ctx.restore();
     }
 
-    // Fluid waterline / ink-brushstroke wake trail behind timeline beam(s)
     const isRtlSweep = board.activeShift === 'reverse_sweep';
     const isTwinSweep = board.activeShift === 'twin_sweep';
     const isSplitHalfSweep = board.activeShift === 'split_half_sweep';
@@ -4330,10 +4181,15 @@ export class IluminadoCanvasRenderer {
       ? Math.max(0, boardCols - 1 - (Math.floor(timelineNorm * boardCols) % boardCols))
       : Math.floor(timelineNorm * boardCols) % boardCols;
     const activeBeamColB = Math.floor(twinNorm * boardCols) % boardCols;
-    const beamColsForProx =
-      isTwinSweep || isSplitHalfSweep
-        ? [activeBeamColA, activeBeamColB]
-        : [activeBeamColA];
+    let beamColsForProx: number[];
+    if (isTwinSweep || isSplitHalfSweep) {
+      this.tmpBeamCols2[0] = activeBeamColA;
+      this.tmpBeamCols2[1] = activeBeamColB;
+      beamColsForProx = this.tmpBeamCols2;
+    } else {
+      this.tmpBeamCols1[0] = activeBeamColA;
+      beamColsForProx = this.tmpBeamCols1;
+    }
 
     const drawSweepWakeBand = (
       beamX: number,
@@ -4391,7 +4247,6 @@ export class IluminadoCanvasRenderer {
     if (isSplitHalfSweep) {
       drawSweepWakeBand(tlX, false, y, splitY - y);
       drawSweepWakeBand(tl2X, false, splitY, y + height - splitY);
-      // Crisp horizontal split-plane indicator across board midline
       ctx.save();
       ctx.strokeStyle = palette.timelineBeam;
       ctx.lineWidth = 1.4;
@@ -4421,7 +4276,6 @@ export class IluminadoCanvasRenderer {
       }
     }
 
-    // Rising Tide creeping waterline inside board clip
     if (board.activeShift === 'rising_tide') {
       const tideRows = board.risingTideRows ?? 0;
       const creep = board.sweepState.squaresThisSweep >= 4 ? 0 : timelineNorm * 0.42;
@@ -4457,7 +4311,6 @@ export class IluminadoCanvasRenderer {
       ctx.restore();
     }
 
-    // Ceiling Press descending flank shutter guide lines
     if (board.activeShift === 'ceiling_press') {
       const lockRows = board.ceilingLockRows ?? 0;
       const nextStepPreview = board.sweepState.squaresThisSweep < 4 && lockRows < 3 ? timelineNorm * 0.35 : 0;
@@ -4486,7 +4339,6 @@ export class IluminadoCanvasRenderer {
       ctx.restore();
     }
 
-    // Precompute exact logical visualX/visualY for ghost piece, plus smoothed visual X for active piece
     const activePiece = board.activePiece && !board.isGameOver ? board.activePiece : null;
     const { gx: gVecX, gy: gVecY } = getGravityVector(gravDir);
     const subStepOffset =
@@ -4532,7 +4384,6 @@ export class IluminadoCanvasRenderer {
       ps.rotAngle = 0;
     }
 
-    // Ghost landing preview & drop guide beam inside board (always pinned to exact logical position)
     if (activePiece) {
       this.drawGhostPiece(
         ctx,
@@ -4548,7 +4399,6 @@ export class IluminadoCanvasRenderer {
       );
     }
 
-    // Settled cells with ceramic/crystal distinction, landing rebound, and neighbor ripple
     for (let r = 0; r < boardRows; r++) {
       for (let c = 0; c < boardCols; c++) {
         const cell = board.grid[r][c];
@@ -4630,7 +4480,6 @@ export class IluminadoCanvasRenderer {
       }
     }
 
-    // Pooled Ghost Clear Cells (pop to 1.12 -> white flash -> shrink over ~0.30s)
     for (let i = 0; i < MAX_GHOST_CLEARS; i++) {
       const gc = this.ghostClears[i];
       if (!gc.active || gc.boardIdx !== boardIdx || gc.delay > 0) continue;
@@ -4693,7 +4542,6 @@ export class IluminadoCanvasRenderer {
       ctx.restore();
     }
 
-    // Luminous bridge filaments connecting chainMarked clusters (including isWild links)
     ctx.save();
     ctx.strokeStyle = '#faf6ee';
     ctx.lineWidth = Math.max(1.8, cellSize * 0.06);
@@ -4728,7 +4576,6 @@ export class IluminadoCanvasRenderer {
     }
     ctx.restore();
 
-    // Unified Iluminado 2x2 Formed-Square Cluster Perimeter & Center Nexus Gems
     const beatPulse = Math.pow(1 - beatPhase, 2.5);
     const isSettledCell = (cell: Cell | null) =>
       cell !== null &&
@@ -4774,51 +4621,37 @@ export class IluminadoCanvasRenderer {
       ctx.restore();
     }
 
-    // Exterior luminous outline around connected settled inSquare clusters
     ctx.save();
     ctx.strokeStyle = palette.squareHighlight;
     ctx.lineWidth = Math.max(2, cellSize * 0.085);
     ctx.lineCap = 'square';
+    ctx.beginPath();
     for (let r = 0; r < boardRows; r++) {
       for (let c = 0; c < boardCols; c++) {
         const cell = board.grid[r][c];
         if (!cell || !cell.inSquare || !isSettledCell(cell)) continue;
         const bx = x + c * cellSize;
         const by = y + r * cellSize;
-        const sameSq = (nr: number, nc: number) =>
-          nr >= 0 &&
-          nr < boardRows &&
-          nc >= 0 &&
-          nc < boardCols &&
-          isSettledCell(board.grid[nr][nc]) &&
-          board.grid[nr][nc]?.inSquare &&
-          board.grid[nr][nc]?.color === cell.color;
-        if (!sameSq(r - 1, c)) {
-          ctx.beginPath();
+        const color = cell.color;
+        if (r === 0 || !board.grid[r - 1][c]?.inSquare || board.grid[r - 1][c]?.color !== color || !isSettledCell(board.grid[r - 1][c])) {
           ctx.moveTo(bx + 1, by + 1);
           ctx.lineTo(bx + cellSize - 1, by + 1);
-          ctx.stroke();
         }
-        if (!sameSq(r + 1, c)) {
-          ctx.beginPath();
+        if (r + 1 >= boardRows || !board.grid[r + 1][c]?.inSquare || board.grid[r + 1][c]?.color !== color || !isSettledCell(board.grid[r + 1][c])) {
           ctx.moveTo(bx + 1, by + cellSize - 1);
           ctx.lineTo(bx + cellSize - 1, by + cellSize - 1);
-          ctx.stroke();
         }
-        if (!sameSq(r, c - 1)) {
-          ctx.beginPath();
+        if (c === 0 || !board.grid[r][c - 1]?.inSquare || board.grid[r][c - 1]?.color !== color || !isSettledCell(board.grid[r][c - 1])) {
           ctx.moveTo(bx + 1, by + 1);
           ctx.lineTo(bx + 1, by + cellSize - 1);
-          ctx.stroke();
         }
-        if (!sameSq(r, c + 1)) {
-          ctx.beginPath();
+        if (c + 1 >= boardCols || !board.grid[r][c + 1]?.inSquare || board.grid[r][c + 1]?.color !== color || !isSettledCell(board.grid[r][c + 1])) {
           ctx.moveTo(bx + cellSize - 1, by + 1);
           ctx.lineTo(bx + cellSize - 1, by + cellSize - 1);
-          ctx.stroke();
         }
       }
     }
+    ctx.stroke();
     ctx.restore();
 
     if (board.shiftEffect && board.shiftEffect.life > 0) {
@@ -4903,9 +4736,8 @@ export class IluminadoCanvasRenderer {
       ctx.restore();
     }
 
-    ctx.restore(); // end clip
+    ctx.restore();
 
-    // Beat top rhythm diamonds, measure labels, beat-ruler ticks, rising tide preview, & equalizer ticks
     const sweepBeats = getSweepBeatsForShift(board.activeShift);
     const activeBeatCol = isRtlSweep
       ? Math.max(0, boardCols - 1 - (Math.floor(timelineNorm * boardCols) % boardCols))
@@ -4923,7 +4755,6 @@ export class IluminadoCanvasRenderer {
     const isRisingTide = board.activeShift === 'rising_tide';
 
     ctx.save();
-    // Sweep-beat ruler along top edge (4, 8, or 16 ticks)
     const activeRulerTick = Math.floor(timelineNorm * sweepBeats) % sweepBeats;
     for (let bt = 0; bt < sweepBeats; bt++) {
       const normX = (bt + 0.5) / sweepBeats;
@@ -4982,7 +4813,6 @@ export class IluminadoCanvasRenderer {
         }
       }
 
-      // Rising Tide 1-row below-floor preview tiles
       if (isRisingTide) {
         const tideCount = board.colorCount ?? 2;
         const previewColor = ((c + (board.risingTideRows ?? 0)) % tideCount) as CellColor;
@@ -4995,7 +4825,6 @@ export class IluminadoCanvasRenderer {
         ctx.fill();
       }
 
-      // Subtle bottom rhythmic column tick that glows when column has formed marks
       let colHasMarks = false;
       for (let r = 0; r < boardRows; r++) {
         const cell = board.grid[r][c];
@@ -5033,14 +4862,12 @@ export class IluminadoCanvasRenderer {
     }
     ctx.restore();
 
-    // Active falling / staging piece (supports all shapes, smoothed lateral X, rotation tween, and all 4 flow directions)
     if (activePiece) {
       const pieceRows = activePiece.cells.length;
       const pieceCols = activePiece.cells[0]?.length ?? 2;
       const lockProgress =
         board.lockTimer > 0 ? Math.min(1, board.lockTimer / LOCK_DELAY_SEC) : 0;
 
-      // Subtle architectural staging terrace guide outside active entry edge
       if (gravDir === 'down' && smoothPieceY < 0) {
         ctx.save();
         ctx.strokeStyle = palette.boardFrame;
@@ -5116,7 +4943,6 @@ export class IluminadoCanvasRenderer {
       const pieceCx = x + (smoothPieceX + pieceCols * 0.5) * cellSize;
       const pieceCy = y + (smoothPieceY + pieceRows * 0.5) * cellSize;
 
-      // Metronome beat-window ring around active piece
       if (board.activeShift === 'metronome_charge') {
         const wrappedBeat = ((beatPhase % 1) + 1) % 1;
         const distToBeat = Math.min(wrappedBeat, 1 - wrappedBeat);
@@ -5189,7 +5015,6 @@ export class IluminadoCanvasRenderer {
       }
       ctx.restore();
 
-      // Crisp lock-delay bar along the leading grounded edge facing gravityDirection
       if (lockProgress > 0.04) {
         ctx.save();
         ctx.fillStyle = palette.hudAccent;
@@ -5219,7 +5044,6 @@ export class IluminadoCanvasRenderer {
       }
     }
 
-    // Lantern Spotlight atmospheric mask pass with clear radial apertures around beam & active piece
     if (board.activeShift === 'lantern_sweep' && typeof document !== 'undefined') {
       const mw = Math.max(1, Math.ceil(width));
       const mh = Math.max(1, Math.ceil(height));
@@ -5272,7 +5096,6 @@ export class IluminadoCanvasRenderer {
       }
     }
 
-    // Ceiling Press & Metronome Charge compact corner indicators
     if (board.activeShift === 'ceiling_press') {
       const lockRows = board.ceilingLockRows ?? 0;
       ctx.save();
@@ -5301,7 +5124,6 @@ export class IluminadoCanvasRenderer {
       ctx.restore();
     }
 
-    // Prominent Vertical / Modified Timeline Sweep Bar(s)
     const drawSweepCounterBadge = (beamX: number) => {
       if (board.sweepState.squaresThisSweep <= 0) return;
       const badgeText = `${board.sweepState.squaresThisSweep}`;
@@ -5390,13 +5212,11 @@ export class IluminadoCanvasRenderer {
 
     if (isSplitHalfSweep) {
       ctx.save();
-      // Upper half beam + top diamond + midline split junction node
       drawSweepSegment(tlX, y - 8, tlX, splitY);
       ctx.fillStyle = palette.timelineBeam;
       this.drawDiamond(ctx, tlX, y - 9, 6 + beatPulse * 1.1);
       this.drawDiamond(ctx, tlX, splitY, 4.6 + beatPulse * 0.8);
 
-      // Lower half beam (phase-shifted 50%) + midline split junction node + bottom diamond
       drawSweepSegment(tl2X, splitY, tl2X, y + height + 8);
       this.drawDiamond(ctx, tl2X, splitY, 4.6 + beatPulse * 0.8);
       this.drawDiamond(ctx, tl2X, y + height + 9, 6 + beatPulse * 1.1);
@@ -5456,7 +5276,6 @@ export class IluminadoCanvasRenderer {
     ctx.strokeStyle = hasPendingGarbage ? palette.hudAccent : palette.boardFrame;
 
     if (theme === 'miami_vice') {
-      // Double Art Deco glowing flamingo + turquoise neon tubes
       ctx.lineWidth = hasPendingGarbage ? 3.2 : 2.6;
       ctx.shadowColor = palette.blockA.fill;
       ctx.shadowBlur = 10 + beatPulse * 6;
@@ -5468,7 +5287,6 @@ export class IluminadoCanvasRenderer {
       this.roundRect(ctx, fx + 2, fy + 2, fw - 4, fh - 4, 8);
       ctx.stroke();
     } else if (theme === 'detroit_visor') {
-      // Chamfered 45° brushed gunmetal HUD housing + subtle inner telemetry line
       const ch = 12;
       ctx.lineWidth = hasPendingGarbage ? 3 : 2.4;
       ctx.beginPath();
@@ -5488,7 +5306,6 @@ export class IluminadoCanvasRenderer {
       ctx.lineWidth = 1.1;
       ctx.strokeRect(fx + 3, fy + 3, fw - 6, fh - 6);
     } else if (theme === 'sumi_bamboo') {
-      // Layered painterly charcoal ink-brush double stroke
       ctx.lineWidth = hasPendingGarbage ? 3.2 : 2.6;
       this.roundRect(ctx, fx, fy, fw, fh, 6);
       ctx.stroke();
@@ -5497,7 +5314,6 @@ export class IluminadoCanvasRenderer {
       this.roundRect(ctx, fx - 2.5, fy + 1.5, fw + 5, fh - 3, 7);
       ctx.stroke();
     } else if (theme === 'stained_glass') {
-      // Thick dark pewter lead came border + warm amber hairline inner bevel
       ctx.lineWidth = 4.2;
       this.roundRect(ctx, fx, fy, fw, fh, 10);
       ctx.stroke();
@@ -5507,7 +5323,6 @@ export class IluminadoCanvasRenderer {
       this.roundRect(ctx, fx + 2.5, fy + 2.5, fw - 5, fh - 5, 7);
       ctx.stroke();
     } else if (theme === 'neo_andean') {
-      // Double polychrome border frame (cobalt outer + magenta/teal inset rule)
       ctx.lineWidth = hasPendingGarbage ? 3.2 : 2.6;
       this.roundRect(ctx, fx, fy, fw, fh, 6);
       ctx.stroke();
@@ -5517,7 +5332,6 @@ export class IluminadoCanvasRenderer {
       this.roundRect(ctx, fx + 2.6, fy + 2.6, fw - 5.2, fh - 5.2, 4);
       ctx.stroke();
     } else if (theme === 'constructivist' || theme === 'cubist_atelier') {
-      // Sharp crisp geometric poster border + asymmetric hairline
       ctx.lineWidth = hasPendingGarbage ? 3.2 : 2.5;
       ctx.strokeRect(fx, fy, fw, fh);
       ctx.strokeStyle = palette.hudAccent;
@@ -5528,7 +5342,6 @@ export class IluminadoCanvasRenderer {
       ctx.lineWidth = hasPendingGarbage ? 2.6 : 2.1;
       this.roundRect(ctx, fx, fy, fw, fh, 10);
       ctx.stroke();
-      // Subtle inner museum mat hairline on gallery/art themes
       if (
         theme === 'gorogoa' ||
         theme === 'gris' ||
@@ -5569,7 +5382,6 @@ export class IluminadoCanvasRenderer {
 
     ctx.save();
     if (theme === 'neko_sketchbook') {
-      // Playful sketched cat ears anchored directly along the top rail + curled swishing tail + paw stamp!
       const drawEar = (cx: number, cy: number, side: -1 | 1) => {
         ctx.save();
         ctx.translate(cx, cy);
@@ -5584,7 +5396,6 @@ export class IluminadoCanvasRenderer {
         ctx.closePath();
         ctx.fill();
         ctx.stroke();
-        // Pink inner ear triangle
         ctx.fillStyle = '#f5a9a9';
         ctx.beginPath();
         ctx.moveTo(side * -2, 0);
@@ -5597,21 +5408,19 @@ export class IluminadoCanvasRenderer {
       drawEar(fx + 28, fy + 1, -1);
       drawEar(fx + fw - 28, fy + 1, 1);
 
-      // Whisker ticks on side rails
       ctx.strokeStyle = palette.boardFrame;
       ctx.lineWidth = 1.4;
       ctx.globalAlpha = 0.6;
-      [-4, 0, 4].forEach((dy) => {
-        ctx.beginPath();
+      ctx.beginPath();
+      for (let dy = -4; dy <= 4; dy += 4) {
         ctx.moveTo(fx - 9, fy + fh * 0.5 + dy);
         ctx.lineTo(fx - 1, fy + fh * 0.5 + dy * 0.6);
         ctx.moveTo(fx + fw + 9, fy + fh * 0.5 + dy);
         ctx.lineTo(fx + fw + 1, fy + fh * 0.5 + dy * 0.6);
-        ctx.stroke();
-      });
+      }
+      ctx.stroke();
       ctx.globalAlpha = 1;
 
-      // Curled animated wagging cat tail at bottom-right corner
       const wag = Math.sin(timeSec * 3.4) * 0.25;
       ctx.save();
       ctx.translate(fx + fw - 1, fy + fh - 10);
@@ -5625,7 +5434,6 @@ export class IluminadoCanvasRenderer {
       ctx.stroke();
       ctx.restore();
 
-      // Tiny paw stamp at bottom-left
       ctx.fillStyle = palette.hudAccent;
       ctx.globalAlpha = 0.85;
       const px = fx - 5;
@@ -5637,7 +5445,6 @@ export class IluminadoCanvasRenderer {
       ctx.arc(px + 4, py - 5, 1.5, 0, Math.PI * 2);
       ctx.fill();
     } else if (theme === 'sumi_bamboo') {
-      // Cinnabar red hanko seal chop stamped at bottom-right & top-left ink bamboo joint notches
       ctx.fillStyle = palette.hudAccent;
       this.roundRect(ctx, fx + fw - 14, fy + fh - 14, 18, 18, 2.5);
       ctx.fill();
@@ -5651,61 +5458,51 @@ export class IluminadoCanvasRenderer {
       ctx.lineTo(fx + fw, fy + fh - 5);
       ctx.stroke();
     } else if (theme === 'detroit_visor') {
-      // Glowing crimson visor HUD corner brackets
       ctx.strokeStyle = palette.timelineBeam;
       ctx.lineWidth = 2.4;
       const arm = 16;
-      [
-        [fx - 4, fy - 4, 1, 1],
-        [fx + fw + 4, fy - 4, -1, 1],
-        [fx - 4, fy + fh + 4, 1, -1],
-        [fx + fw + 4, fy + fh + 4, -1, -1],
-      ].forEach(([cx, cy, dx, dy]) => {
-        ctx.beginPath();
+      ctx.beginPath();
+      for (let i = 0; i < 4; i++) {
+        const cx = i % 2 === 0 ? fx - 4 : fx + fw + 4;
+        const cy = i < 2 ? fy - 4 : fy + fh + 4;
+        const dx = i % 2 === 0 ? 1 : -1;
+        const dy = i < 2 ? 1 : -1;
         ctx.moveTo(cx, cy + dy * arm);
         ctx.lineTo(cx, cy);
         ctx.lineTo(cx + dx * arm, cy);
-        ctx.stroke();
-      });
+      }
+      ctx.stroke();
     } else if (theme === 'neo_andean') {
-      // True stepped Tiwanaku Chakana corner crosses in fuchsia, teal, gold
-      const cornerCols = [palette.blockA.fill, palette.blockB.fill, palette.blockC.fill, palette.blockA.fill];
-      [
-        [fx + 1, fy + 1],
-        [fx + fw - 1, fy + 1],
-        [fx + 1, fy + fh - 1],
-        [fx + fw - 1, fy + fh - 1],
-      ].forEach(([cx, cy], idx) => {
-        ctx.fillStyle = cornerCols[idx];
+      for (let idx = 0; idx < 4; idx++) {
+        const cx = idx % 2 === 0 ? fx + 1 : fx + fw - 1;
+        const cy = idx < 2 ? fy + 1 : fy + fh - 1;
+        ctx.fillStyle =
+          idx === 0 || idx === 3 ? palette.blockA.fill : idx === 1 ? palette.blockB.fill : palette.blockC.fill;
         ctx.fillRect(cx - 4, cy - 9, 8, 18);
         ctx.fillRect(cx - 9, cy - 4, 18, 8);
         ctx.fillRect(cx - 6, cy - 6, 12, 12);
         ctx.fillStyle = palette.architectureLight;
         ctx.fillRect(cx - 2.5, cy - 2.5, 5, 5);
-      });
+      }
     } else if (theme === 'stained_glass') {
-      // Glowing cathedral jewel cabochons set into four lead corners
-      [
-        [fx + 1, fy + 1, palette.blockA.fill],
-        [fx + fw - 1, fy + 1, palette.blockB.fill],
-        [fx + 1, fy + fh - 1, palette.blockC.fill],
-        [fx + fw - 1, fy + fh - 1, palette.blockA.fill],
-      ].forEach(([cx, cy, col]) => {
-        ctx.fillStyle = col as string;
-        this.drawDiamond(ctx, cx as number, cy as number, 6 + beatPulse * 1.2);
-        ctx.strokeStyle = palette.boardFrame;
-        ctx.lineWidth = 1.4;
+      const r = 6 + beatPulse * 1.2;
+      ctx.strokeStyle = palette.boardFrame;
+      ctx.lineWidth = 1.4;
+      for (let idx = 0; idx < 4; idx++) {
+        const cx = idx % 2 === 0 ? fx + 1 : fx + fw - 1;
+        const cy = idx < 2 ? fy + 1 : fy + fh - 1;
+        ctx.fillStyle =
+          idx === 0 || idx === 3 ? palette.blockA.fill : idx === 1 ? palette.blockB.fill : palette.blockC.fill;
+        this.drawDiamond(ctx, cx, cy, r);
         ctx.stroke();
-      });
+      }
     } else if (theme === 'constructivist') {
-      // Bold asymmetric crimson L-tabs at top-left & bottom-right corners
       ctx.fillStyle = palette.blockA.fill;
       ctx.fillRect(fx - 4, fy - 4, 24, 5);
       ctx.fillRect(fx - 4, fy - 4, 5, 24);
       ctx.fillRect(fx + fw - 20, fy + fh - 1, 24, 5);
       ctx.fillRect(fx + fw - 1, fy + fh - 20, 5, 24);
     } else if (theme === 'botanical_herbarium') {
-      // Brass botanical specimen mounting corner triangles
       ctx.fillStyle = palette.blockC.fill;
       ctx.globalAlpha = 0.85;
       const tri = 14;
@@ -5722,7 +5519,6 @@ export class IluminadoCanvasRenderer {
       ctx.closePath();
       ctx.fill();
     } else if (theme === 'memphis_milano') {
-      // Playful Memphis corner circles & coral squiggle bar accents
       ctx.fillStyle = palette.blockC.fill;
       ctx.beginPath();
       ctx.arc(fx, fy, 6, 0, Math.PI * 2);
@@ -5734,41 +5530,29 @@ export class IluminadoCanvasRenderer {
       ctx.arc(fx, fy + fh, 5.5, 0, Math.PI * 2);
       ctx.fill();
     } else if (theme === 'cubist_atelier') {
-      // Offset faceted collage tabs on corners
       ctx.fillStyle = palette.blockB.fill;
       ctx.globalAlpha = 0.8;
       ctx.fillRect(fx - 3, fy + 6, 6, 16);
       ctx.fillStyle = palette.blockA.fill;
       ctx.fillRect(fx + fw - 3, fy + fh - 22, 6, 16);
     } else if (theme === 'scandi_showroom') {
-      // Flat-pack wooden dowel corner circles + showroom yellow corner price tab
       ctx.fillStyle = palette.blockB.fill;
       ctx.fillRect(fx + fw - 26, fy - 5, 22, 9);
       ctx.fillStyle = palette.blockA.fill;
-      [
-        [fx + 1, fy + 1],
-        [fx + 1, fy + fh - 1],
-        [fx + fw - 1, fy + fh - 1],
-      ].forEach(([cx, cy]) => {
-        ctx.beginPath();
-        ctx.arc(cx, cy, 4, 0, Math.PI * 2);
-        ctx.fill();
-      });
+      ctx.beginPath();
+      ctx.arc(fx + 1, fy + 1, 4, 0, Math.PI * 2);
+      ctx.arc(fx + 1, fy + fh - 1, 4, 0, Math.PI * 2);
+      ctx.arc(fx + fw - 1, fy + fh - 1, 4, 0, Math.PI * 2);
+      ctx.fill();
     } else if (theme === 'grand_budapest' || theme === 'space_terminal') {
-      // Concierge / space capsule corner medallions
       ctx.fillStyle = theme === 'space_terminal' ? palette.blockA.fill : palette.blockB.fill;
-      [
-        [fx + 1, fy + 1],
-        [fx + fw - 1, fy + 1],
-        [fx + 1, fy + fh - 1],
-        [fx + fw - 1, fy + fh - 1],
-      ].forEach(([cx, cy]) => {
-        ctx.beginPath();
-        ctx.arc(cx, cy, 4.2, 0, Math.PI * 2);
-        ctx.fill();
-      });
+      ctx.beginPath();
+      ctx.arc(fx + 1, fy + 1, 4.2, 0, Math.PI * 2);
+      ctx.arc(fx + fw - 1, fy + 1, 4.2, 0, Math.PI * 2);
+      ctx.arc(fx + 1, fy + fh - 1, 4.2, 0, Math.PI * 2);
+      ctx.arc(fx + fw - 1, fy + fh - 1, 4.2, 0, Math.PI * 2);
+      ctx.fill();
     } else if (theme === 'de_stijl' || theme === 'kodak_cinema') {
-      // Crisp extending orthogonal primary ticks / slide-mount corners
       ctx.fillStyle = palette.blockA.fill;
       ctx.fillRect(fx - 3, fy - 3, 18, 4);
       ctx.fillRect(fx - 3, fy - 3, 4, 18);
@@ -5776,7 +5560,6 @@ export class IluminadoCanvasRenderer {
       ctx.fillRect(fx + fw - 15, fy + fh - 1, 18, 4);
       ctx.fillRect(fx + fw - 1, fy + fh - 15, 4, 18);
     } else if (theme === 'vinyl_lounge') {
-      // Glowing vacuum-tube amber dots on top rail
       ctx.fillStyle = palette.blockA.fill;
       ctx.globalAlpha = 0.65 + beatPulse * 0.35;
       ctx.beginPath();
@@ -5796,24 +5579,22 @@ export class IluminadoCanvasRenderer {
       theme === 'kinetic_bauhaus' ||
       theme === 'synth_greenhouse'
     ) {
-      // Architectural corner pins / rivets / deco studs matching classic worlds
       ctx.fillStyle = theme === 'machinarium' ? palette.blockA.highlight : palette.boardFrame;
       ctx.globalAlpha = 0.72;
       const r = theme === 'fez' ? 3.5 : 3;
-      [
-        [fx + 1, fy + 1],
-        [fx + fw - 1, fy + 1],
-        [fx + 1, fy + fh - 1],
-        [fx + fw - 1, fy + fh - 1],
-      ].forEach(([cx, cy]) => {
-        if (theme === 'fez') {
-          ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
-        } else {
-          ctx.beginPath();
-          ctx.arc(cx, cy, r, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      });
+      if (theme === 'fez') {
+        ctx.fillRect(fx + 1 - r, fy + 1 - r, r * 2, r * 2);
+        ctx.fillRect(fx + fw - 1 - r, fy + 1 - r, r * 2, r * 2);
+        ctx.fillRect(fx + 1 - r, fy + fh - 1 - r, r * 2, r * 2);
+        ctx.fillRect(fx + fw - 1 - r, fy + fh - 1 - r, r * 2, r * 2);
+      } else {
+        ctx.beginPath();
+        ctx.arc(fx + 1, fy + 1, r, 0, Math.PI * 2);
+        ctx.arc(fx + fw - 1, fy + 1, r, 0, Math.PI * 2);
+        ctx.arc(fx + 1, fy + fh - 1, r, 0, Math.PI * 2);
+        ctx.arc(fx + fw - 1, fy + fh - 1, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
     ctx.restore();
   }
@@ -5966,7 +5747,6 @@ export class IluminadoCanvasRenderer {
       }
     }
 
-    // Draw directional ghost cell outlines from landing.ghostCells without Set allocations
     const hasGhostAt = (gx: number, gy: number, color: CellColor): boolean => {
       for (let i = 0; i < landing.ghostCells.length; i++) {
         const o = landing.ghostCells[i];
@@ -6101,12 +5881,10 @@ export class IluminadoCanvasRenderer {
       grad.addColorStop(1, '#292534');
       ctx.fillStyle = grad;
       ctx.fillRect(bx, by, bw, bh);
-      // Top & bottom girder flanges
       ctx.fillStyle = '#8b839d';
       ctx.fillRect(bx, by, bw, Math.max(2, size * 0.16));
       ctx.fillStyle = '#201c2c';
       ctx.fillRect(bx, by + bh - Math.max(2, size * 0.16), bw, Math.max(2, size * 0.16));
-      // Diagonal truss cross-brace
       ctx.strokeStyle = 'rgba(250, 246, 238, 0.25)';
       ctx.lineWidth = 1.4;
       ctx.beginPath();
@@ -6115,7 +5893,6 @@ export class IluminadoCanvasRenderer {
       ctx.moveTo(bx + bw - 2, by + bh * 0.25);
       ctx.lineTo(bx + 2, by + bh * 0.75);
       ctx.stroke();
-      // Corner rivets
       ctx.fillStyle = palette.hudAccent;
       const r = Math.max(1.2, size * 0.065);
       ctx.fillRect(bx + 3, by + 3, r, r);
@@ -6133,7 +5910,6 @@ export class IluminadoCanvasRenderer {
       ctx.lineWidth = 1.6;
       this.roundRect(ctx, bx + 1.5, by + 1.5, bw - 3, bh - 3, Math.max(1.5, size * 0.1));
       ctx.stroke();
-      // Patrol chevron arrow hint
       const dir = board.patrollingBumper?.dir ?? 1;
       const cx = bx + bw * 0.5;
       const cy = by + bh * 0.5;
@@ -6147,7 +5923,6 @@ export class IluminadoCanvasRenderer {
       ctx.lineTo(cx - tip, cy + size * 0.14);
       ctx.stroke();
     } else if (styleType === 'spring') {
-      // Coiled trampoline pad with amber bounce plate
       const compress = Math.min(4, cell.landFlash * 4);
       ctx.fillStyle = '#2d2638';
       ctx.fillRect(bx, by + bh * 0.72, bw, bh * 0.28);
@@ -6171,7 +5946,6 @@ export class IluminadoCanvasRenderer {
       ctx.lineTo(cx + size * 0.14, cy + 2);
       ctx.stroke();
     } else if (styleType === 'crumble') {
-      // Brittle crystal ledge with HP fracture lines when cracked (hp <= 1)
       const hp = cell.crumbleHp ?? 2;
       const grad = ctx.createLinearGradient(bx, by, bx + bw, by + bh);
       grad.addColorStop(0, hp <= 1 ? '#e2a3b7' : '#d5c7df');
@@ -6198,7 +5972,6 @@ export class IluminadoCanvasRenderer {
         ctx.stroke();
       }
     } else {
-      // 'stone' or 'sawtooth': carved matte dark-granite neutral masonry block
       const grad = ctx.createLinearGradient(bx, by, bx + bw, by + bh);
       grad.addColorStop(0, '#4d465c');
       grad.addColorStop(1, '#312b3d');
@@ -6213,7 +5986,6 @@ export class IluminadoCanvasRenderer {
       ctx.lineTo(bx + bw - 1, by + 1);
       ctx.stroke();
 
-      // Subtle diagonal architectural hatch so neutral blocks look carved and non-clearable
       ctx.strokeStyle = 'rgba(250, 246, 238, 0.12)';
       ctx.lineWidth = 1;
       ctx.beginPath();
@@ -6255,13 +6027,11 @@ export class IluminadoCanvasRenderer {
     this.roundRect(ctx, bx, by, bw, bh, radius);
     ctx.fill();
 
-    // Carved obsidian rim bevel (high visibility on both pastel & dark boards)
     ctx.strokeStyle = '#7d719c';
     ctx.lineWidth = Math.max(1.2, size * 0.05);
     this.roundRect(ctx, bx + 0.5, by + 0.5, bw - 1, bh - 1, radius);
     ctx.stroke();
 
-    // Inner hairline recessed frame
     const inset = Math.max(2.5, size * 0.13);
     ctx.strokeStyle = 'rgba(250, 246, 238, 0.26)';
     ctx.lineWidth = 1;
@@ -6275,7 +6045,6 @@ export class IluminadoCanvasRenderer {
     );
     ctx.stroke();
 
-    // Crisp etched cross seal mark
     const markPad = Math.max(4.5, size * 0.28);
     ctx.strokeStyle = '#9287ad';
     ctx.lineWidth = Math.max(1.6, size * 0.085);
@@ -6742,7 +6511,6 @@ export class IluminadoCanvasRenderer {
   ): void {
     const style: BlockStyle = getBlockStyle(skin.palette, color);
 
-    // Soft landing compression -> tiny upward rebound overshoot anchored to bottom edge
     let squashOffset = 0;
     if (fx.landFlash > 0.22) {
       const p = (fx.landFlash - 0.22) / 0.78;
@@ -6796,7 +6564,6 @@ export class IluminadoCanvasRenderer {
       );
     }
 
-    // Formed 2x2 square living pearl wash & beat-synced glint
     if (fx.inSquare) {
       ctx.fillStyle = skin.palette.squareHighlight;
       ctx.globalAlpha = baseAlpha * (0.16 + fx.shimmerWave * 0.24);
@@ -6824,7 +6591,6 @@ export class IluminadoCanvasRenderer {
       ctx.globalAlpha = baseAlpha;
     }
 
-    // Crash Gem faceted prism overlay + glint + halo
     if (fx.isCrashGem) {
       const cx = left + bw * 0.5;
       const cy = top + bh * 0.5;
@@ -6845,7 +6611,6 @@ export class IluminadoCanvasRenderer {
       ctx.globalAlpha = baseAlpha * 0.9;
       ctx.stroke();
 
-      // Inner crown facet & slow glint cross
       ctx.fillStyle = style.highlight;
       ctx.globalAlpha = baseAlpha * 0.55;
       this.drawDiamond(ctx, cx, cy, gemR * 0.45);
@@ -6864,7 +6629,6 @@ export class IluminadoCanvasRenderer {
       ctx.restore();
     }
 
-    // Anchored Color Node (Virus) brackets & pulsing core
     if (fx.isVirus) {
       const cx = left + bw * 0.5;
       const cy = top + bh * 0.5;
@@ -6901,7 +6665,6 @@ export class IluminadoCanvasRenderer {
       ctx.restore();
     }
 
-    // Chain enhancement cross glyph
     const useDarkChainGlyph =
       getHexLuminance(style.fill) > 0.78 &&
       getHexLuminance(style.emblemColor) < 0.45;
@@ -6935,7 +6698,6 @@ export class IluminadoCanvasRenderer {
       ctx.fillRect(left, top, bw, bh);
     }
 
-    // Frost rime overlay + crack fracture when frostHp === 1
     const frostHp = fx.frostHp ?? 0;
     if (frostHp > 0) {
       ctx.save();
@@ -6945,7 +6707,6 @@ export class IluminadoCanvasRenderer {
       ctx.globalAlpha = frostHp >= 2 ? 0.78 : 0.52;
       ctx.lineWidth = 1.4;
       ctx.strokeRect(left + 1.5, top + 1.5, Math.max(2, bw - 3), Math.max(2, bh - 3));
-      // Corner ice bevel triangles
       const tri = Math.max(3, Math.floor(size * 0.22));
       ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
       ctx.beginPath();
@@ -6971,7 +6732,6 @@ export class IluminadoCanvasRenderer {
       ctx.restore();
     }
 
-    // Subtle soft illumination from landing flash + passing neighbor ripple
     const totalWash = Math.min(0.42, fx.landFlash * 0.34 + fx.rippleGlow);
     if (totalWash > 0.01) {
       ctx.fillStyle = style.highlight;
@@ -7323,7 +7083,6 @@ export class IluminadoCanvasRenderer {
         ctx.stroke();
         break;
       case 'cat_doodle':
-        // Tiny minimalist kitty head silhouette inside block
         ctx.strokeStyle = style.emblemColor;
         ctx.globalAlpha = 0.28;
         ctx.lineWidth = 1.25;
@@ -7404,7 +7163,6 @@ export class IluminadoCanvasRenderer {
         ctx.stroke();
         break;
       case 'scandi_birch':
-        // Warm Scandinavian birch veneer grain + corner dowel peg pins
         ctx.strokeStyle = style.shade;
         ctx.globalAlpha = 0.24;
         ctx.lineWidth = 1;
@@ -7422,7 +7180,6 @@ export class IluminadoCanvasRenderer {
         ctx.fill();
         break;
       case 'flatpack_blueprint':
-        // Flat-pack assembly manual dotted fold lines + hex screw circle
         ctx.strokeStyle = style.emblemColor;
         ctx.globalAlpha = 0.32;
         ctx.lineWidth = 1;
@@ -7435,7 +7192,6 @@ export class IluminadoCanvasRenderer {
         ctx.stroke();
         break;
       case 'hotel_keycard':
-        // Concierge oval keytag crest + border hairline
         ctx.strokeStyle = style.highlight;
         ctx.globalAlpha = 0.35;
         ctx.lineWidth = 1.1;
@@ -7443,14 +7199,12 @@ export class IluminadoCanvasRenderer {
         ctx.stroke();
         break;
       case 'de_stijl_grid':
-        // Asymmetric Mondrian orthogonal bars splitting block quadrant
         ctx.fillStyle = style.border;
         ctx.globalAlpha = 0.34;
         ctx.fillRect(x + w * 0.28, y + h * 0.12, 2, h * 0.76);
         ctx.fillRect(x + w * 0.12, y + h * 0.64, w * 0.76, 2);
         break;
       case 'woodblock_wave':
-        // Seigaiha concentric wave arcs
         ctx.strokeStyle = style.emblemColor;
         ctx.globalAlpha = 0.26;
         ctx.lineWidth = 1.1;
@@ -7461,7 +7215,6 @@ export class IluminadoCanvasRenderer {
         }
         break;
       case 'kodak_slide':
-        // 35mm cardboard slide mount frame + sprocket holes
         ctx.strokeStyle = style.highlight;
         ctx.globalAlpha = 0.34;
         ctx.lineWidth = 1.4;
@@ -7473,7 +7226,6 @@ export class IluminadoCanvasRenderer {
         ctx.fillRect(x + w * 0.72, y + h * 0.12, 3, 2);
         break;
       case 'bauhaus_arc':
-        // Kinetic quarter-circle counterweight arc
         ctx.fillStyle = style.highlight;
         ctx.globalAlpha = 0.24;
         ctx.beginPath();
@@ -7483,7 +7235,6 @@ export class IluminadoCanvasRenderer {
         ctx.fill();
         break;
       case 'terrarium_hex':
-        // Geodesic hexagonal dome rib lines
         ctx.strokeStyle = style.emblemColor;
         ctx.globalAlpha = 0.26;
         ctx.lineWidth = 1;
@@ -7498,7 +7249,6 @@ export class IluminadoCanvasRenderer {
         ctx.stroke();
         break;
       case 'vinyl_groove':
-        // Concentric hi-fi LP microgrooves
         ctx.strokeStyle = style.highlight;
         ctx.globalAlpha = 0.24;
         ctx.lineWidth = 0.9;
@@ -7510,7 +7260,6 @@ export class IluminadoCanvasRenderer {
         ctx.stroke();
         break;
       case 'space_porthole':
-        // Retro space-age molded porthole ring
         ctx.strokeStyle = style.highlight;
         ctx.globalAlpha = 0.36;
         ctx.lineWidth = 1.6;

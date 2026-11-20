@@ -20,6 +20,53 @@ interface GameModalsProps {
   onTogglePatternMode?: () => void;
 }
 
+interface VolumeSliderProps {
+  id: string;
+  testId: string;
+  label: string;
+  ariaLabel: string;
+  value: number;
+  onChange: (val: number) => void;
+  mutedColor: string;
+  accentColor: string;
+}
+
+const VolumeSlider: React.FC<VolumeSliderProps> = ({
+  id,
+  testId,
+  label,
+  ariaLabel,
+  value,
+  onChange,
+  mutedColor,
+  accentColor,
+}) => {
+  const pct = Math.round(value * 100);
+  return (
+    <div>
+      <div className="flex items-center justify-between text-xs font-semibold mb-1">
+        <label htmlFor={id}>{label}</label>
+        <span className="font-mono-tabular text-[11px]" style={{ color: mutedColor }}>
+          {pct}%
+        </span>
+      </div>
+      <input
+        id={id}
+        data-testid={testId}
+        type="range"
+        min={0}
+        max={100}
+        step={1}
+        value={pct}
+        onChange={(e) => onChange(Number(e.target.value) / 100)}
+        aria-label={ariaLabel}
+        className="w-full h-1.5 rounded-full cursor-pointer"
+        style={{ accentColor }}
+      />
+    </div>
+  );
+};
+
 export const GameModals: React.FC<GameModalsProps> = ({
   hud,
   skin,
@@ -40,9 +87,6 @@ export const GameModals: React.FC<GameModalsProps> = ({
   const { palette } = skin;
 
   if (hud.status === 'paused') {
-    const musicPct = Math.round(musicVolume * 100);
-    const sfxPct = Math.round(sfxVolume * 100);
-
     return (
       <div
         className="fixed inset-0 z-30 flex items-center justify-center p-6 pointer-events-auto"
@@ -75,55 +119,26 @@ export const GameModals: React.FC<GameModalsProps> = ({
             className="mb-4 px-3.5 py-3 rounded-2xl space-y-2.5"
             style={{ backgroundColor: 'rgba(32, 28, 44, 0.045)' }}
           >
-            <div>
-              <div className="flex items-center justify-between text-xs font-semibold mb-1">
-                <label htmlFor="pause-music-vol">Music</label>
-                <span
-                  className="font-mono-tabular text-[11px]"
-                  style={{ color: palette.hudMuted }}
-                >
-                  {musicPct}%
-                </span>
-              </div>
-              <input
-                id="pause-music-vol"
-                data-testid="music-volume-slider"
-                type="range"
-                min={0}
-                max={100}
-                step={1}
-                value={musicPct}
-                onChange={(e) => onChangeMusicVolume(Number(e.target.value) / 100)}
-                aria-label="Music volume"
-                className="w-full h-1.5 rounded-full cursor-pointer"
-                style={{ accentColor: palette.hudAccent }}
-              />
-            </div>
-
-            <div>
-              <div className="flex items-center justify-between text-xs font-semibold mb-1">
-                <label htmlFor="pause-sfx-vol">SFX</label>
-                <span
-                  className="font-mono-tabular text-[11px]"
-                  style={{ color: palette.hudMuted }}
-                >
-                  {sfxPct}%
-                </span>
-              </div>
-              <input
-                id="pause-sfx-vol"
-                data-testid="sfx-volume-slider"
-                type="range"
-                min={0}
-                max={100}
-                step={1}
-                value={sfxPct}
-                onChange={(e) => onChangeSfxVolume(Number(e.target.value) / 100)}
-                aria-label="SFX volume"
-                className="w-full h-1.5 rounded-full cursor-pointer"
-                style={{ accentColor: palette.hudAccent }}
-              />
-            </div>
+            <VolumeSlider
+              id="pause-music-vol"
+              testId="music-volume-slider"
+              label="Music"
+              ariaLabel="Music volume"
+              value={musicVolume}
+              onChange={onChangeMusicVolume}
+              mutedColor={palette.hudMuted}
+              accentColor={palette.hudAccent}
+            />
+            <VolumeSlider
+              id="pause-sfx-vol"
+              testId="sfx-volume-slider"
+              label="SFX"
+              ariaLabel="SFX volume"
+              value={sfxVolume}
+              onChange={onChangeSfxVolume}
+              mutedColor={palette.hudMuted}
+              accentColor={palette.hudAccent}
+            />
 
             {(onToggleReducedMotion || onTogglePatternMode) && (
               <div className="pt-2 border-t border-[#201c2c]/10 flex flex-col gap-1.5">
@@ -233,7 +248,6 @@ export const GameModals: React.FC<GameModalsProps> = ({
             border: `2px solid ${palette.boardFrame}`,
           }}
         >
-          {/* Welcoming 2x2 Tile Crest */}
           <div className="flex justify-center mb-3">
             <svg
               width="48"
@@ -294,7 +308,6 @@ export const GameModals: React.FC<GameModalsProps> = ({
             </p>
           )}
 
-          {/* Hero Score */}
           <div className="mt-5 mb-5">
             {isNewBest && (
               <div
@@ -317,7 +330,6 @@ export const GameModals: React.FC<GameModalsProps> = ({
             </div>
           </div>
 
-          {/* 3 Clean Game Highlights (No SaaS Spreadsheet Boxes) */}
           <div
             className="grid grid-cols-3 gap-2 py-4 border-t border-b border-[#201c2c]/10 mb-6"
             data-testid="postgame-breakdown"
@@ -348,7 +360,6 @@ export const GameModals: React.FC<GameModalsProps> = ({
             </div>
           </div>
 
-          {/* Action Buttons */}
           <div className="flex gap-2.5">
             {hud.isVictory && hud.hasNextStage && onNextStage && (
               <button

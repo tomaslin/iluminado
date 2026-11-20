@@ -146,10 +146,6 @@ export const MISSION_LEVELS: MissionLevel[] = [
   },
 ];
 
-/**
- * Checks whether the target silhouette pattern exists anywhere on the board,
- * cleanly framed (any '#' matches targetColor, any '.' is either empty or the opposite color).
- */
 export function checkPuzzlePatternMatch(
   grid: (Cell | null)[][],
   puzzle: PuzzleLevel
@@ -173,7 +169,6 @@ export function checkPuzzlePatternMatch(
               break;
             }
           } else {
-            // '.' must NOT be targetColor (either empty, obstacle, or opposite color)
             if (cell && !cell.isObstacle && cell.color === puzzle.targetColor) {
               matches = false;
               break;
@@ -182,8 +177,6 @@ export function checkPuzzlePatternMatch(
         }
       }
       if (matches) {
-        // Also ensure adjacent border around the pattern doesn't bleed targetColor seamlessly
-        // so the silhouette is distinct! Check top/bottom/left/right outer ring.
         let distinct = true;
         for (let pr = 0; pr < pRows && distinct; pr++) {
           const leftCell = startC > 0 ? grid[startR + pr][startC - 1] : null;
@@ -272,7 +265,6 @@ export function buildMissionPresetGrid(
     grid[rows - 2][cx(6)] = makeCell(0);
     grid[rows - 2][cx(9)] = makeCell(0);
   } else if (preset === 'tower') {
-    // 2x4 stack ready to clear cleanly
     for (let c = 6; c <= 9; c++) {
       grid[rows - 1][cx(c)] = makeCell(0);
       grid[rows - 2][cx(c)] = makeCell(1);
@@ -296,13 +288,39 @@ export function buildMissionPresetGrid(
 export interface CpuTargetPlan {
   targetX: number;
   targetY?: number;
-  targetRotations: number; // 0..3 CW rotations
+  targetRotations: number;
 }
 
-/**
- * Computes a smart placement (targetX, targetY, targetRotations) for the CPU opponent
- * by simulating drops on a cloned grid across all 4 gravity directions.
- */
+function toSimCell(pCell: NonNullable<Piece['cells'][number][number]>): Cell {
+  return pCell.isBlocked
+    ? {
+        id: 0,
+        color: 0,
+        isChain: false,
+        isObstacle: true,
+        obstacleFixed: false,
+        obstacleStyle: 'blocked',
+        chainMarked: false,
+        inSquare: false,
+        pendingClear: false,
+        sweptCol: false,
+        fallOffset: 0,
+        landFlash: 0,
+      }
+    : {
+        id: 0,
+        color: pCell.color,
+        isChain: pCell.isChain,
+        ...(pCell.isWild ? { isWild: true } : {}),
+        chainMarked: false,
+        inSquare: false,
+        pendingClear: false,
+        sweptCol: false,
+        fallOffset: 0,
+        landFlash: 0,
+      };
+}
+
 export function computeCpuBestMove(state: BoardState): CpuTargetPlan {
   const rows = state.grid.length;
   const cols = state.grid[0]?.length ?? state.cols ?? BOARD_COLS;
@@ -319,36 +337,70 @@ export function computeCpuBestMove(state: BoardState): CpuTargetPlan {
     targetRotations: 0,
   };
 
-  const minCol = state.lockedColumnsLeft;
-  const toSimCell = (pCell: NonNullable<Piece['cells'][number][number]>): Cell =>
-    pCell.isBlocked
-      ? {
-          id: 0,
-          color: 0,
-          isChain: false,
-          isObstacle: true,
-          obstacleFixed: false,
-          obstacleStyle: 'blocked',
-          chainMarked: false,
-          inSquare: false,
-          pendingClear: false,
-          sweptCol: false,
-          fallOffset: 0,
-          landFlash: 0,
-        }
-      : {
-          id: 0,
-          color: pCell.color,
-          isChain: pCell.isChain,
-          ...(pCell.isWild ? { isWild: true } : {}),
-          chainMarked: false,
-          inSquare: false,
-          pendingClear: false,
-          sweptCol: false,
-          fallOffset: 0,
-          landFlash: 0,
-        };
+  const simGrid: (Cell | null)[][] = state.grid.map((row) =>
+    row.map((c) => (c ? { ...c } : null))
+  );
+  const undoRows: number[] = [];
+  const undoCols: number[] = [];
+  const undoCells: (Cell | null)[] = [];
 
+  const placeSimCell = (r: number, c: number, cell: Cell) => {
+    undoRows.push(r);
+    undoCols.push(c);
+    undoCells.push(simGrid[r][c]);
+    simGrid[r][c] = cell;
+  };
+
+  const restoreSimGrid = () => {
+    for (let i = undoRows.length - 1; i >= 0; i--) {
+      simGrid[undoRows[i]][undoCols[i]] = undoCells[i];
+    }
+    undoRows.length = 0;
+    undoCols.length = 0;
+    undoCells.length = 0;
+  };
+
+  const scoreCandidate = (
+    placedCount: number,
+    overflowed: boolean,
+    centerDist: number
+  ): number => {
+    const squares = detectBoardMarks(simGrid);
+    let maxDepth = 0;
+    let chainCount = 0;
+    let sameAdj = 0;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const cell = simGrid[r][c];
+        if (!cell || cell.isObstacle) continue;
+        const depth =
+          dir === 'down'
+            ? rows - r
+            : dir === 'up'
+            ? r + 1
+            : dir === 'right'
+            ? cols - c
+            : c + 1;
+        if (depth > maxDepth) maxDepth = depth;
+        if (cell.chainMarked) chainCount++;
+        const right = c + 1 < cols ? simGrid[r][c + 1] : null;
+        if (right && !right.isObstacle && right.color === cell.color) sameAdj++;
+        const down = r + 1 < rows ? simGrid[r + 1][c] : null;
+        if (down && !down.isObstacle && down.color === cell.color) sameAdj++;
+      }
+    }
+
+    return (
+      (placedCount === 0 ? -10000 : overflowed ? -80 : 0) +
+      squares.length * 140 +
+      chainCount * 35 +
+      sameAdj * 4 -
+      maxDepth * 12 -
+      centerDist * 0.5
+    );
+  };
+
+  const minCol = state.lockedColumnsLeft;
   let testPiece: Piece = {
     ...piece,
     cells: piece.cells.map((row) =>
@@ -366,9 +418,6 @@ export function computeCpuBestMove(state: BoardState): CpuTargetPlan {
         const candidate: Piece = { ...testPiece, x: col, y: piece.y };
         if (!canPlacePiece(state, candidate, 0, 0)) continue;
 
-        const simGrid: (Cell | null)[][] = state.grid.map((row) =>
-          row.map((c) => (c ? { ...c } : null))
-        );
         let overflowed = false;
         let placedCount = 0;
 
@@ -401,7 +450,7 @@ export function computeCpuBestMove(state: BoardState): CpuTargetPlan {
                 overflowed = true;
                 continue;
               }
-              simGrid[writeRow][gx] = toSimCell(pCell);
+              placeSimCell(writeRow, gx, toSimCell(pCell));
               placedCount++;
               writeRow--;
             }
@@ -430,36 +479,15 @@ export function computeCpuBestMove(state: BoardState): CpuTargetPlan {
                 overflowed = true;
                 continue;
               }
-              simGrid[writeRow][gx] = toSimCell(pCell);
+              placeSimCell(writeRow, gx, toSimCell(pCell));
               placedCount++;
               writeRow++;
             }
           }
         }
 
-        const squares = detectBoardMarks(simGrid);
-        let maxDepth = 0;
-        let chainCount = 0;
-        let sameAdj = 0;
-        for (let r = 0; r < rows; r++) {
-          for (let c = 0; c < cols; c++) {
-            const cell = simGrid[r][c];
-            if (cell && !cell.isObstacle) {
-              maxDepth = Math.max(maxDepth, dir === 'down' ? rows - r : r + 1);
-              if (cell.chainMarked) chainCount++;
-              if (c + 1 < cols && simGrid[r][c + 1] && !simGrid[r][c + 1]!.isObstacle && simGrid[r][c + 1]!.color === cell.color) sameAdj++;
-              if (r + 1 < rows && simGrid[r + 1][c] && !simGrid[r + 1][c]!.isObstacle && simGrid[r + 1][c]!.color === cell.color) sameAdj++;
-            }
-          }
-        }
-
-        const heuristic =
-          (placedCount === 0 ? -10000 : overflowed ? -80 : 0) +
-          squares.length * 140 +
-          chainCount * 35 +
-          sameAdj * 4 -
-          maxDepth * 12 -
-          Math.abs(col - centerX) * 0.5;
+        const heuristic = scoreCandidate(placedCount, overflowed, Math.abs(col - centerX));
+        restoreSimGrid();
 
         if (heuristic > bestScore) {
           bestScore = heuristic;
@@ -467,15 +495,11 @@ export function computeCpuBestMove(state: BoardState): CpuTargetPlan {
         }
       }
     } else {
-      // Horizontal gravity ('right' or 'left'): steer vertically by row
       const maxRow = Math.max(0, rows - pieceRows);
       for (let row = 0; row <= maxRow; row++) {
         const candidate: Piece = { ...testPiece, x: piece.x, y: row };
         if (!canPlacePiece(state, candidate, 0, 0)) continue;
 
-        const simGrid: (Cell | null)[][] = state.grid.map((gr) =>
-          gr.map((c) => (c ? { ...c } : null))
-        );
         let overflowed = false;
         let placedCount = 0;
 
@@ -508,7 +532,7 @@ export function computeCpuBestMove(state: BoardState): CpuTargetPlan {
                 overflowed = true;
                 continue;
               }
-              simGrid[gy][writeCol] = toSimCell(pCell);
+              placeSimCell(gy, writeCol, toSimCell(pCell));
               placedCount++;
               writeCol--;
             }
@@ -537,36 +561,15 @@ export function computeCpuBestMove(state: BoardState): CpuTargetPlan {
                 overflowed = true;
                 continue;
               }
-              simGrid[gy][writeCol] = toSimCell(pCell);
+              placeSimCell(gy, writeCol, toSimCell(pCell));
               placedCount++;
               writeCol++;
             }
           }
         }
 
-        const squares = detectBoardMarks(simGrid);
-        let maxDepth = 0;
-        let chainCount = 0;
-        let sameAdj = 0;
-        for (let r = 0; r < rows; r++) {
-          for (let c = 0; c < cols; c++) {
-            const cell = simGrid[r][c];
-            if (cell && !cell.isObstacle) {
-              maxDepth = Math.max(maxDepth, dir === 'right' ? cols - c : c + 1);
-              if (cell.chainMarked) chainCount++;
-              if (c + 1 < cols && simGrid[r][c + 1] && !simGrid[r][c + 1]!.isObstacle && simGrid[r][c + 1]!.color === cell.color) sameAdj++;
-              if (r + 1 < rows && simGrid[r + 1][c] && !simGrid[r + 1][c]!.isObstacle && simGrid[r + 1][c]!.color === cell.color) sameAdj++;
-            }
-          }
-        }
-
-        const heuristic =
-          (placedCount === 0 ? -10000 : overflowed ? -80 : 0) +
-          squares.length * 140 +
-          chainCount * 35 +
-          sameAdj * 4 -
-          maxDepth * 12 -
-          Math.abs(row - centerY) * 0.5;
+        const heuristic = scoreCandidate(placedCount, overflowed, Math.abs(row - centerY));
+        restoreSimGrid();
 
         if (heuristic > bestScore) {
           bestScore = heuristic;

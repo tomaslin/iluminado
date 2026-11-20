@@ -175,10 +175,8 @@ export function createPieceFromPattern(
 }
 
 const PIECE_PATTERNS: Array<{ pattern: [CellColor, CellColor, CellColor, CellColor]; weight: number }> = [
-  // Solid (4 of same)
   { pattern: [0, 0, 0, 0], weight: 6 },
   { pattern: [1, 1, 1, 1], weight: 6 },
-  // 3 + 1
   { pattern: [0, 0, 0, 1], weight: 7 },
   { pattern: [0, 0, 1, 0], weight: 7 },
   { pattern: [0, 1, 0, 0], weight: 7 },
@@ -187,13 +185,10 @@ const PIECE_PATTERNS: Array<{ pattern: [CellColor, CellColor, CellColor, CellCol
   { pattern: [1, 1, 0, 1], weight: 7 },
   { pattern: [1, 0, 1, 1], weight: 7 },
   { pattern: [0, 1, 1, 1], weight: 7 },
-  // 2 + 2 horizontal
   { pattern: [0, 0, 1, 1], weight: 9 },
   { pattern: [1, 1, 0, 0], weight: 9 },
-  // 2 + 2 vertical
   { pattern: [0, 1, 0, 1], weight: 9 },
   { pattern: [1, 0, 1, 0], weight: 9 },
-  // Diagonal
   { pattern: [0, 1, 1, 0], weight: 6 },
   { pattern: [1, 0, 0, 1], weight: 6 },
 ];
@@ -315,7 +310,6 @@ export function generateRandomPiece(
   }
 
   if (shapeMode === 'rect_3x2') {
-    // 2 rows x 3 cols brick with balanced paired clusters so 2x2 squares form smoothly
     const cMain = pickPieceColor(colorCount, rng);
     const cAlt = pickPieceColor(colorCount, rng);
     const cThird = colorCount === 3 && rng() < 0.5 ? (2 as CellColor) : pickPieceColor(colorCount, rng);
@@ -415,7 +409,6 @@ export function generateRandomPiece(
     };
   }
 
-  // Standard 2x2, blocked_2x2, or prism_wild_2x2 piece
   if (shapeMode === 'prism_wild_2x2') {
     let roll = rng() * TOTAL_PATTERN_WEIGHT;
     let chosen = PIECE_PATTERNS[0].pattern;
@@ -494,7 +487,6 @@ export function generateRandomPiece(
       basePat[2] === 0 ? cA : cB,
       basePat[3] === 0 ? cA : cB,
     ];
-    // Occasionally introduce all 3 colors in a single 2x2 brick
     if (rng() < 0.22) {
       const cC = (3 - cA - cB) as CellColor;
       if (cC === 0 || cC === 1 || cC === 2) {
@@ -556,7 +548,6 @@ export function refreshQueueForBoardRules(
     const pos = getPieceInitialPos(state, p);
     return { ...p, x: pos.x, y: pos.y };
   });
-  // If current activePiece has not entered the main board yet (still hovering in staging), smoothly upgrade it too
   if (state.activePiece && isPieceInStaging(state, state.activePiece)) {
     const candidate = generateRandomPiece(chainFrequency, rng, spawnX, {
       ...opts,
@@ -712,7 +703,6 @@ export function canPlacePiece(
         if (gx > maxCol) return false;
         if (gx >= minCol && state.grid[gy][gx] !== null) return false;
       } else {
-        // dir === 'left'
         if (gy < 0 || gy >= rows) return false;
         if (gx < minCol) return false;
         if (gx <= maxCol && state.grid[gy][gx] !== null) return false;
@@ -893,7 +883,6 @@ export function getPieceLandingColumns(
     };
   }
 
-  // Horizontal gravity: 'right' or 'left'
   const rowStopCols: number[] = [];
   const relativeOffsets: number[] = [];
   for (let py = 0; py < pieceRows; py++) {
@@ -1085,8 +1074,8 @@ export function rotateActivePiece(state: BoardState, direction: 'cw' | 'ccw' = '
       ? rotatePieceCellsCW(state.activePiece)
       : rotatePieceCellsCCW(state.activePiece);
   const { gx, gy } = getGravityVector(state.gravityDirection);
-  const px = Math.abs(gy); // 1 when vertical gravity, 0 when horizontal
-  const py = Math.abs(gx); // 0 when vertical gravity, 1 when horizontal
+  const px = Math.abs(gy);
+  const py = Math.abs(gx);
   const kickOffsets: Array<[number, number]> = [
     [0, 0],
     [-px, -py],
@@ -1211,7 +1200,6 @@ export function settleBoardForDirection(
     return moved;
   }
 
-  // dir === 'right'
   for (let row = 0; row < rows; row++) {
     let writeCol = cols - 1;
     for (let col = cols - 1; col >= 0; col--) {
@@ -1258,7 +1246,6 @@ export function detectBoardMarks(grid: (Cell | null)[][]): SquareCoord[] {
   }
   bfsVisited.fill(0, 0, total);
 
-  // Reset non-pending marks
   for (let r = 0; r < rows; r++) {
     const rowArr = grid[r];
     for (let c = 0; c < cols; c++) {
@@ -1270,7 +1257,6 @@ export function detectBoardMarks(grid: (Cell | null)[][]): SquareCoord[] {
     }
   }
 
-  // 1. Chain Block detection (zero-alloc flat typed-array 4-directional orthogonal BFS)
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const start = grid[r][c];
@@ -1358,7 +1344,6 @@ export function detectBoardMarks(grid: (Cell | null)[][]): SquareCoord[] {
     }
   }
 
-  // 2. Monochromatic 2x2 square detection (supports chromatic Wild tiles; chain-marked & obstacles excluded)
   const squares: SquareCoord[] = [];
   for (let r = 0; r < rows - 1; r++) {
     const row0 = grid[r];
@@ -1412,10 +1397,6 @@ export function detectBoardMarks(grid: (Cell | null)[][]): SquareCoord[] {
   return squares;
 }
 
-/**
- * Gently trims upper rows when a stack overflows in Zen Flow mode so play continues
- * smoothly without a Game Over screen.
- */
 export function trimOverflowForZenFlow(state: BoardState): number {
   const rows = state.grid.length;
   const cols = state.grid[0]?.length ?? state.cols ?? BOARD_COLS;
@@ -1458,7 +1439,6 @@ export function trimOverflowForZenFlow(state: BoardState): number {
       }
     }
   } else {
-    // 'left'
     for (let r = 0; r < rows; r++) {
       const depth = r === spawnY || r === spawnY + 1 ? 3 : 2;
       for (let c = Math.max(0, cols - depth); c < cols; c++) {
@@ -1531,7 +1511,6 @@ export function lockActivePiece(
   const pieceCols = piece.cells[0]?.length ?? 0;
   const dir = state.gravityDirection ?? 'down';
 
-  // Compact existing rows/columns along active gravity vector first
   settleBoardForDirection(state.grid, dir);
 
   let totalPieceCells = 0;
@@ -1685,7 +1664,6 @@ export function lockActivePiece(
       }
     }
   } else {
-    // dir === 'left'
     for (let py = 0; py < pieceRows; py++) {
       const gy = piece.y + py;
       if (gy < 0 || gy >= rows) continue;
@@ -1875,7 +1853,6 @@ export function lockActivePiece(
     row.some((c) => c !== null && c.chainMarked)
   );
 
-  // Advance queue respecting active pieceShapeMode, colorCount & gravityDirection
   const genOpts: GeneratePieceOptions = {
     colorCount: state.colorCount,
     shapeMode: state.pieceShapeMode,
@@ -2152,7 +2129,6 @@ export function stepPassiveGravity(
     state.gravityAccum = Math.max(state.gravityAccum, 1) + leftoverDt * gravitySpeed;
   }
 
-  // If grounded
   const canContinueMoving = () => {
     if (!state.activePiece) return false;
     return canPlacePiece(state, state.activePiece, gx, gy);
@@ -2224,12 +2200,6 @@ export function stepPassiveGravity(
   };
 }
 
-/**
- * Iluminado scoring formula:
- * Base = squareCount * 40
- * If squareCount < 4 -> base (no multiplier)
- * If squareCount >= 4 -> super-linear size bonus + combo multiplier
- */
 export function calculateSweepScore(squareCount: number, comboLevel: number): number {
   const base = squareCount * 40;
   if (squareCount < 4) {
@@ -2241,21 +2211,36 @@ export function calculateSweepScore(squareCount: number, comboLevel: number): nu
   return (base + sizeBonus) * multiplier;
 }
 
+const SHATTER_DIRS: ReadonlyArray<readonly [number, number]> = [
+  [0, 1],
+  [0, -1],
+  [1, 0],
+  [-1, 0],
+];
+
 function flushPendingClearCells(state: BoardState): {
   cellsRemoved: number;
   clearedPositions: Array<{ x: number; y: number; color: CellColor }>;
 } {
   const rows = state.grid.length;
   const cols = state.grid[0]?.length ?? state.cols ?? BOARD_COLS;
+  const total = rows * cols;
+  if (total > bfsVisited.length) {
+    const nextCap = Math.max(total, bfsVisited.length * 2);
+    bfsVisited = new Uint8Array(nextCap);
+    bfsQueue = new Int32Array(nextCap);
+  }
+  bfsVisited.fill(0, 0, total);
+
   let cellsRemoved = 0;
   const clearedPositions: Array<{ x: number; y: number; color: CellColor }> = [];
-  const pendingCoords: Array<[number, number]> = [];
-  const bfsExpandQueue: Array<[number, number, CellColor]> = [];
-  const seen = new Set<string>();
+  const pendingIndices: number[] = [];
+  let qTail = 0;
 
   for (let r = 0; r < rows; r++) {
+    const rowArr = state.grid[r];
     for (let c = 0; c < cols; c++) {
-      const cell = state.grid[r][c];
+      const cell = rowArr[c];
       if (cell && cell.pendingClear) {
         if ((cell.frostHp ?? 0) > 1) {
           cell.frostHp = 1;
@@ -2263,76 +2248,69 @@ function flushPendingClearCells(state: BoardState): {
           cell.landFlash = 0.95;
           continue;
         }
-        const key = `${r},${c}`;
-        seen.add(key);
-        pendingCoords.push([r, c]);
+        const idx = r * cols + c;
+        bfsVisited[idx] = 1;
+        pendingIndices.push(idx);
         if (cell.isCrashGem) {
-          bfsExpandQueue.push([r, c, cell.color]);
+          bfsQueue[qTail++] = idx;
         }
       }
     }
   }
 
-  const shatterDirs = [
-    [0, 1],
-    [0, -1],
-    [1, 0],
-    [-1, 0],
-  ];
-
-  // Crash Gem flood: purge all orthogonally connected same-color blocks across the board
-  while (bfsExpandQueue.length > 0) {
-    const [cr, cc, targetColor] = bfsExpandQueue.shift()!;
-    for (const [dr, dc] of shatterDirs) {
-      const nr = cr + dr;
-      const nc = cc + dc;
+  let qHead = 0;
+  while (qHead < qTail) {
+    const curIdx = bfsQueue[qHead++];
+    const cr = (curIdx / cols) | 0;
+    const cc = curIdx % cols;
+    const targetColor = state.grid[cr][cc]?.color ?? 0;
+    for (let d = 0; d < 4; d++) {
+      const nr = cr + SHATTER_DIRS[d][0];
+      const nc = cc + SHATTER_DIRS[d][1];
       if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) continue;
-      const key = `${nr},${nc}`;
-      if (seen.has(key)) continue;
+      const nIdx = nr * cols + nc;
+      if (bfsVisited[nIdx]) continue;
       const adj = state.grid[nr][nc];
-      if (
-        adj &&
-        !adj.isObstacle &&
-        (adj.color === targetColor || adj.isWild)
-      ) {
-        seen.add(key);
-        pendingCoords.push([nr, nc]);
-        bfsExpandQueue.push([nr, nc, targetColor]);
+      if (adj && !adj.isObstacle && (adj.color === targetColor || adj.isWild)) {
+        bfsVisited[nIdx] = 1;
+        pendingIndices.push(nIdx);
+        bfsQueue[qTail++] = nIdx;
       }
     }
   }
 
-  // Shatter any orthogonally adjacent gravity-falling 'blocked' obsidian tiles when a square clears
-  for (const [r, c] of pendingCoords) {
+  for (let i = 0; i < pendingIndices.length; i++) {
+    const idx = pendingIndices[i];
+    const r = (idx / cols) | 0;
+    const c = idx % cols;
     const cell = state.grid[r][c];
     if (cell) {
       clearedPositions.push({ x: c, y: r, color: cell.color });
       state.grid[r][c] = null;
       cellsRemoved++;
     }
-    for (const [dr, dc] of shatterDirs) {
-      const nr = r + dr;
-      const nc = c + dc;
-      if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
-        const adj = state.grid[nr][nc];
-        if (adj && adj.isObstacle && adj.obstacleStyle === 'blocked' && !adj.obstacleFixed) {
+    for (let d = 0; d < 4; d++) {
+      const nr = r + SHATTER_DIRS[d][0];
+      const nc = c + SHATTER_DIRS[d][1];
+      if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) continue;
+      const adj = state.grid[nr][nc];
+      if (adj && adj.isObstacle && adj.obstacleStyle === 'blocked' && !adj.obstacleFixed) {
+        clearedPositions.push({ x: nc, y: nr, color: 0 });
+        state.grid[nr][nc] = null;
+      } else if (adj && adj.isObstacle && adj.obstacleStyle === 'crumble') {
+        const nextHp = (adj.crumbleHp ?? 2) - 1;
+        if (nextHp <= 0) {
           clearedPositions.push({ x: nc, y: nr, color: 0 });
           state.grid[nr][nc] = null;
-        } else if (adj && adj.isObstacle && adj.obstacleStyle === 'crumble') {
-          const nextHp = (adj.crumbleHp ?? 2) - 1;
-          if (nextHp <= 0) {
-            clearedPositions.push({ x: nc, y: nr, color: 0 });
-            state.grid[nr][nc] = null;
-          } else {
-            adj.crumbleHp = nextHp;
-            adj.landFlash = 0.85;
-          }
+        } else {
+          adj.crumbleHp = nextHp;
+          adj.landFlash = 0.85;
         }
       }
     }
   }
 
-  if (clearedPositions.length > 0 || pendingCoords.length === 0) {
+  if (clearedPositions.length > 0 || pendingIndices.length === 0) {
     if (clearedPositions.length > 0) {
       settleBoardForDirection(state.grid, state.gravityDirection);
     }
@@ -2380,7 +2358,6 @@ export function stepTimelineColumn(
     return { cellsRemovedNow: 0, clearedPositions: [] };
   }
 
-  // Re-detect marks on non-pending cells before sweeping this column
   state.squares = detectBoardMarks(state.grid);
 
   const isModifiedLineSweep =
@@ -2388,7 +2365,6 @@ export function stepTimelineColumn(
     (state.activeShift === 'split_half_sweep' ||
       state.activeShift === 'diagonal_slant_sweep');
 
-  // Mark swept cells per row (respecting modified beam shapes)
   for (let r = 0; r < rows; r++) {
     const rowCol = isModifiedLineSweep ? getSweepColumnForRow(state, r, col) : col;
     const cell = state.grid[r][rowCol];
@@ -2401,14 +2377,13 @@ export function stepTimelineColumn(
     }
   }
 
-  // Helper returning which row controls a 2x2 square's sweep timing
   const getSquareOwnerRow = (sqY: number): number =>
     state.activeShift === 'diagonal_slant_sweep'
       ? Math.min(rows - 1, sqY + 1)
       : sqY;
 
-  // Count completed squares whose trailing edge matches the active beam column for that square's rows
-  for (const sq of state.squares) {
+  for (let i = 0; i < state.squares.length; i++) {
+    const sq = state.squares[i];
     const sqCol = isModifiedLineSweep
       ? getSweepColumnForRow(state, getSquareOwnerRow(sq.y), col)
       : col;
@@ -2430,26 +2405,31 @@ export function stepTimelineColumn(
     }
   }
 
-  // Check if any square or chain group bridges into the next column along sweep direction
   const minActiveCol = state.lockedColumnsLeft;
   const maxActiveCol = cols - 1 - state.lockedColumnsRight;
   let bridgesNext = false;
 
   if (isModifiedLineSweep) {
-    // Only delay flushing if currently-pending cells touch another un-swept adjacent/overlapping square or chain
-    const hasPendingCells = state.grid.some((row) =>
-      row.some((c) => c !== null && c.pendingClear)
-    );
+    let hasPendingCells = false;
+    for (let r = 0; r < rows && !hasPendingCells; r++) {
+      const rowArr = state.grid[r];
+      for (let c = 0; c < cols; c++) {
+        if (rowArr[c]?.pendingClear) {
+          hasPendingCells = true;
+          break;
+        }
+      }
+    }
     if (hasPendingCells) {
-      for (const sq of state.squares) {
+      for (let i = 0; i < state.squares.length; i++) {
+        const sq = state.squares[i];
         const c00 = state.grid[sq.y][sq.x];
         const c01 = state.grid[sq.y][sq.x + 1];
         const c10 = state.grid[sq.y + 1][sq.x];
         const c11 = state.grid[sq.y + 1][sq.x + 1];
-        const allPending = Boolean(
-          c00?.pendingClear && c01?.pendingClear && c10?.pendingClear && c11?.pendingClear
-        );
-        if (allPending) continue;
+        if (c00?.pendingClear && c01?.pendingClear && c10?.pendingClear && c11?.pendingClear) {
+          continue;
+        }
         const touchesPending = Boolean(
           c00?.pendingClear || c01?.pendingClear || c10?.pendingClear || c11?.pendingClear
         );
@@ -2488,8 +2468,11 @@ export function stepTimelineColumn(
     }
   } else if (direction === 'rtl') {
     if (col > minActiveCol) {
-      if (state.squares.some((sq) => sq.x + 1 === col)) {
-        bridgesNext = true;
+      for (let i = 0; i < state.squares.length; i++) {
+        if (state.squares[i].x + 1 === col) {
+          bridgesNext = true;
+          break;
+        }
       }
       if (!bridgesNext) {
         for (let r = 0; r < rows; r++) {
@@ -2509,8 +2492,11 @@ export function stepTimelineColumn(
       }
     }
   } else if (col < maxActiveCol) {
-    if (state.squares.some((sq) => sq.x === col)) {
-      bridgesNext = true;
+    for (let i = 0; i < state.squares.length; i++) {
+      if (state.squares[i].x === col) {
+        bridgesNext = true;
+        break;
+      }
     }
     if (!bridgesNext) {
       for (let r = 0; r < rows; r++) {
@@ -2558,10 +2544,10 @@ export function finalizeSweep(state: BoardState, hadClearsDuringSweep: boolean):
     totalSquares > 0 ||
     totalChainCells > 0;
 
-  // Reset sweptCol flags
   for (let r = 0; r < rows; r++) {
+    const rowArr = state.grid[r];
     for (let c = 0; c < cols; c++) {
-      const cell = state.grid[r][c];
+      const cell = rowArr[c];
       if (cell) {
         cell.sweptCol = false;
       }
@@ -2590,15 +2576,16 @@ export function finalizeSweep(state: BoardState, hadClearsDuringSweep: boolean):
   if (anyCleared) {
     let remaining = 0;
     let remainingViruses = 0;
-    const seenColors = new Set<CellColor>();
+    let colorMask = 0;
     for (let r = 0; r < rows; r++) {
+      const rowArr = state.grid[r];
       for (let c = 0; c < cols; c++) {
-        const cell = state.grid[r][c];
+        const cell = rowArr[c];
         if (cell && !cell.isObstacle) {
           remaining++;
           if (cell.isVirus) remainingViruses++;
           if (!cell.isWild) {
-            seenColors.add(cell.color);
+            colorMask |= 1 << cell.color;
           }
         }
       }
@@ -2611,7 +2598,7 @@ export function finalizeSweep(state: BoardState, hadClearsDuringSweep: boolean):
     if (remaining === 0) {
       allDeletedBonus = true;
       bonusPoints += 10000;
-    } else if (seenColors.size <= 1) {
+    } else if (colorMask === 0 || (colorMask & (colorMask - 1)) === 0) {
       singleColorBonus = true;
       bonusPoints += 1000;
     }
@@ -2643,9 +2630,6 @@ export function finalizeSweep(state: BoardState, hadClearsDuringSweep: boolean):
   };
 }
 
-/**
- * Stash / Hold swap: swaps activePiece with state.heldPiece once per piece drop when stash_hold is active.
- */
 export function swapHeldPiece(
   state: BoardState,
   chainFrequency: number = 0.05,
@@ -2704,11 +2688,6 @@ export function swapHeldPiece(
   return true;
 }
 
-/**
- * Rising Tide per-sweep surge:
- * - Sweeps with < 4 squares surge +1 alternating tide row from the bottom (max 3 rows, pushing stacks safely up).
- * - Sweeps with >= 4 squares push the tide back down by 1 row.
- */
 export function stepRisingTideSweep(
   state: BoardState,
   squaresThisSweep: number,
@@ -2721,7 +2700,6 @@ export function stepRisingTideSweep(
 
   if (squaresThisSweep >= 4) {
     if (currTide <= 0) return false;
-    // Remove bottom row and settle down
     for (let r = rows - 1; r > 0; r--) {
       for (let c = 0; c < cols; c++) {
         state.grid[r][c] = state.grid[r - 1][c];
@@ -2737,14 +2715,12 @@ export function stepRisingTideSweep(
   }
 
   if (currTide >= 3) return false;
-  // Don't surge if top 2 rows are already occupied in spawn chute
   const spawnX = getSpawnColForWidth(cols, 2);
   for (let c = spawnX; c <= Math.min(cols - 1, spawnX + 1); c++) {
     if (state.grid[0][c] !== null || state.grid[1][c] !== null) {
       return false;
     }
   }
-  // Shift grid up 1 row
   for (let r = 0; r < rows - 1; r++) {
     for (let c = 0; c < cols; c++) {
       const movedCell = state.grid[r + 1][c];
@@ -2776,11 +2752,6 @@ export function stepRisingTideSweep(
   return true;
 }
 
-/**
- * Ceiling Press per-sweep shutter:
- * - Sweeps with < 4 squares lower ceiling flank shutters by 1 row (max 3), keeping the central spawn chute open.
- * - Sweeps with >= 4 squares raise ceiling shutters back up by 1 row.
- */
 export function stepCeilingPressSweep(
   state: BoardState,
   squaresThisSweep: number
@@ -2799,7 +2770,6 @@ export function stepCeilingPressSweep(
   }
   if (nextLock === currLock) return false;
 
-  // Clear previous ceiling shutter stones in top rows
   for (let r = 0; r < Math.min(rows, 4); r++) {
     for (let c = 0; c < cols; c++) {
       const cell = state.grid[r][c];
@@ -2809,13 +2779,11 @@ export function stepCeilingPressSweep(
     }
   }
 
-  // Place new shutters outside spawn chute
   for (let r = 0; r < nextLock; r++) {
     for (let c = 0; c < cols; c++) {
       if (c === spawnX || c === spawnX + 1) continue;
       const existing = state.grid[r][c];
       if (existing && !existing.isObstacle) {
-        // Nudge downward safely to lowest open cell below shutter if possible
         for (let dr = nextLock; dr < rows; dr++) {
           if (state.grid[dr][c] === null) {
             state.grid[dr][c] = existing;
@@ -2845,10 +2813,6 @@ export function stepCeilingPressSweep(
   return true;
 }
 
-/**
- * Metronome Charge: locking a piece within the beat window (near beatPhase 0 or 1) awards bonus points
- * and charges Veto Tokens every 3 on-beat locks.
- */
 export function applyMetronomeChargeBonus(
   state: BoardState,
   beatPhase: number
@@ -2894,7 +2858,6 @@ export function applyGarbageToBoard(
     }
     if (openCols.length === 0) break;
     const col = openCols[Math.floor(rng() * openCols.length)];
-    // Prefer alternating color from top cell below to create real pressure rather than free squares
     let topExisting: CellColor | null = null;
     for (let r = 1; r < rows; r++) {
       const existing = state.grid[r][col];
@@ -2926,10 +2889,6 @@ export function applyGarbageToBoard(
   state.squares = detectBoardMarks(state.grid);
 }
 
-/**
- * Resolves outgoing VS battle pressure with counter-play:
- * first cancels incoming pendingGarbage on the attacker, then queues remaining blocks onto defender.
- */
 export function resolveBattleGarbageSwap(
   attacker: BoardState,
   defender: BoardState,
@@ -2969,13 +2928,6 @@ export function countBoardCells(grid: (Cell | null)[][]): number {
   return count;
 }
 
-/**
- * Translates board layout smoothly between Landscape (16x10) and Portrait (10x14):
- * - Preserves the central masonry silhouette, formed 2x2 squares, and chains.
- * - Portrait -> Landscape: lifts upper/overflowing tower stones out onto the newly revealed left/right wings.
- * - Landscape -> Portrait: folds wing columns upward and inward onto non-spawn flanks.
- * - Guarantees open spawn headroom and grants a brief gravity grace period so flipping never causes instant Game Over.
- */
 export function transformBoardForOrientation(
   state: BoardState,
   targetOrientation: BoardOrientation,
@@ -2993,8 +2945,8 @@ export function transformBoardForOrientation(
   }
 
   const newGrid = createEmptyGrid(newCols, newRows);
-  const centerShift = Math.floor((newCols - oldCols) / 2); // +3 (10->16) or -3 (16->10)
-  const rowDelta = newRows - oldRows; // -4 (14->10) or +4 (10->14)
+  const centerShift = Math.floor((newCols - oldCols) / 2);
+  const rowDelta = newRows - oldRows;
   const newSpawnX = getSpawnColForWidth(newCols);
 
   const isSpawnCol = (c: number) => c === newSpawnX || c === newSpawnX + 1;
@@ -3006,17 +2958,13 @@ export function transformBoardForOrientation(
     side: -1 | 1;
   }
   const overflowPool: OverflowEntry[] = [];
-
-  // Track write row (next empty row from bottom) per column in newGrid
   const colWriteRow = Array<number>(newCols).fill(newRows - 1);
 
-  // Pass 1: Translate the central columns directly, retaining formed blocks & silhouette (strip transient obstacles)
   for (let oldC = 0; oldC < oldCols; oldC++) {
     const dstC = oldC + centerShift;
     const isOuterWing = dstC < 0 || dstC >= newCols;
     const side: -1 | 1 = oldC < oldCols / 2 ? -1 : 1;
 
-    // Collect non-null player cells in this column from bottom to top
     const colEntries: Array<{ cell: Cell; oldR: number }> = [];
     for (let oldR = oldRows - 1; oldR >= 0; oldR--) {
       const cell = state.grid[oldR][oldC];
@@ -3026,7 +2974,6 @@ export function transformBoardForOrientation(
     }
 
     if (isOuterWing) {
-      // Landscape -> Portrait: fold outer wing blocks inward & upward onto flanks
       for (const entry of colEntries) {
         overflowPool.push({
           cell: entry.cell,
@@ -3038,7 +2985,6 @@ export function transformBoardForOrientation(
       continue;
     }
 
-    // Reserve safe top clearance in target grid so flipping never tops out
     const minTopRow = isSpawnCol(dstC) ? 4 : 2;
     const maxCentralHeight = Math.max(2, newRows - minTopRow);
 
@@ -3056,7 +3002,6 @@ export function transformBoardForOrientation(
         }
         newGrid[dstR][dstC] = cell;
       } else {
-        // Excess upper stack blocks spill/rise into safe wing columns
         overflowPool.push({
           cell,
           srcCol: oldC,
@@ -3067,7 +3012,6 @@ export function transformBoardForOrientation(
     });
   }
 
-  // Pass 2: Place displaced upper/wing blocks onto non-spawn side terraces (lowest stack first)
   const leftTargets =
     targetOrientation === 'landscape'
       ? [2, 1, 0, 3, 4]
@@ -3083,13 +3027,11 @@ export function transformBoardForOrientation(
     const fallbackList = item.side === -1 ? rightTargets : leftTargets;
     const candidateCols = [...primaryList, ...fallbackList];
 
-    // Pick candidate column with largest remaining room (highest colWriteRow index) respecting ceiling headroom
     let chosenCol = -1;
     let bestWriteRow = -1;
     for (const c of candidateCols) {
       if (c < 0 || c >= newCols || isSpawnCol(c)) continue;
-      const minTop = 2;
-      if (colWriteRow[c] >= minTop && colWriteRow[c] > bestWriteRow) {
+      if (colWriteRow[c] >= 2 && colWriteRow[c] > bestWriteRow) {
         bestWriteRow = colWriteRow[c];
         chosenCol = c;
       }
@@ -3108,7 +3050,6 @@ export function transformBoardForOrientation(
       }
       newGrid[dstR][chosenCol] = item.cell;
     } else {
-      // Board completely saturated everywhere except spawn safety -> crystallize into harmony bonus
       displacedBonusPoints += 40;
     }
   }
@@ -3126,14 +3067,12 @@ export function transformBoardForOrientation(
   state.score += displacedBonusPoints;
   state.isGameOver = false;
 
-  // Clamp VS locked wing columns proportionally so at least 6 central lanes remain playable
   const maxEachSide = Math.max(0, Math.floor((newCols - 6) / 2));
   state.lockedColumnsLeft = Math.min(state.lockedColumnsLeft, maxEachSide);
   state.lockedColumnsRight = Math.min(state.lockedColumnsRight, maxEachSide);
 
   state.squares = detectBoardMarks(state.grid);
 
-  // Remap mid-sweep state cleanly to shifted square coordinates
   if (state.sweepState.lastCol >= 0) {
     state.sweepState.lastCol = Math.min(
       newCols - 1,
@@ -3151,7 +3090,6 @@ export function transformBoardForOrientation(
   }
   state.sweepState.countedSquareKeys = shiftedKeys;
 
-  // Reposition & lift active piece into clean upper headroom, plus pause gravity briefly
   if (state.activePiece) {
     const pieceDim = getPieceDimensions(state.activePiece);
     const minPlayCol = state.lockedColumnsLeft;
@@ -3199,10 +3137,6 @@ export function transformBoardForOrientation(
   return { transformed: true, displacedBonusPoints };
 }
 
-/**
- * Rotates the entire board 90 degrees (swapping cols and rows, e.g. 16x10 <-> 10x16
- * or 10x14 <-> 14x10) and settles all bricks down to the new bottom under gravity.
- */
 export function rotateBoard90(
   state: BoardState,
   direction: 'cw' | 'ccw' = 'cw',
@@ -3236,7 +3170,6 @@ export function rotateBoard90(
     }
   }
 
-  // Drop all unsupported bricks down to the new bottom; settleBoard records exact fallOffset per cell
   const settled = settleBoard(newGrid);
   let settledMoves = 0;
   for (let r = 0; r < newRows; r++) {
@@ -3316,15 +3249,6 @@ export interface StageProgressionResult {
   shouldTransitionSkin: boolean;
 }
 
-/**
- * Beat-sweep stage progression:
- * - Every skin has a hidden `squaresPerLevel` threshold (e.g., 16-22 squares).
- * - Reaching the threshold increments Level by 1 and DISCARDS any excess squares cleared in that sweep
- *   (no overflow carry-over into the next level).
- * - Normal skins transition every 3 levels (`levelsPerSkin`), totaling ~48-66 squares.
- * - A final timed stage (`finalStageTimerSec`) ignores square count for transitioning and instead
- *   advances/finishes via `advanceTimedStageProgression` on a flat timer.
- */
 export function advanceSweepStageProgression(
   prog: StageProgressionState,
   squaresClearedInSweep: number,
@@ -3339,7 +3263,6 @@ export function advanceSweepStageProgression(
     const req = Math.max(1, skin.squaresPerLevel);
     if (prog.levelSquaresCleared >= req) {
       prog.level += 1;
-      // Discard any excess squares above the threshold
       prog.levelSquaresCleared = 0;
       leveledUp = true;
 
@@ -3444,10 +3367,6 @@ export function computeTimeAttackPaceDelta(
   };
 }
 
-/**
- * Computes 0..1 proximity falloff for a tile based on how close the active sweep beam(s)
- * are ahead of or passing through the tile's column.
- */
 export function computeBeamProximity(
   col: number,
   beamCols: number[],
@@ -3470,10 +3389,6 @@ export function computeBeamProximity(
   return Math.max(0, Math.min(1, best));
 }
 
-/**
- * Counts marked (inSquare / chainMarked / pendingClear) cells within the next `lookaheadCols`
- * columns ahead of `beamCol` in the sweep direction.
- */
 export function countMarkedAheadOfBeam(
   grid: (Cell | null)[][],
   beamCol: number,

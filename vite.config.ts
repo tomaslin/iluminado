@@ -80,7 +80,7 @@ export default defineConfig(() => {
           globIgnores: ['music/**', 'assets/aistudio/**'],
           runtimeCaching: [
             {
-              urlPattern: /\/music\/world\d+\.mp3/i,
+              urlPattern: /\/music\/world\d+\.ogg/i,
               handler: 'CacheFirst',
               options: {
                 cacheName: 'iluminado-soundtracks-v1',

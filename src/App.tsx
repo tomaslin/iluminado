@@ -78,6 +78,7 @@ import {
 import {
   BoardOrientation,
   BoardState,
+  Cell,
   CellColor,
   ChallengeVariant,
   DailyChallengeSpec,
@@ -169,6 +170,38 @@ function extractPieceColumnColors(piece: Piece): (CellColor | null)[] {
   return colors;
 }
 
+interface DasState {
+  dir: -1 | 0 | 1;
+  hold: number;
+  repeat: number;
+}
+
+function stepDasControl(
+  das: DasState,
+  dir: -1 | 0 | 1,
+  dt: number,
+  board: BoardState,
+  onMove?: (moveDir: -1 | 1) => void
+): void {
+  if (dir === 0 || dir !== das.dir) {
+    das.dir = dir;
+    das.hold = 0;
+    das.repeat = 0;
+    return;
+  }
+  das.hold += dt;
+  if (das.hold < 0.145) return;
+  das.repeat += dt;
+  while (das.repeat >= 0.042) {
+    das.repeat -= 0.042;
+    if (steerPiece(board, dir)) {
+      onMove?.(dir);
+    } else {
+      break;
+    }
+  }
+}
+
 export default function App() {
   const mountRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -182,7 +215,6 @@ export default function App() {
   const progressRef = useRef<SavedProgress>(progress);
   progressRef.current = progress;
 
-  // Title-screen configuration state
   const [selectedMode, setSelectedMode] = useState<GameMode>('challenge');
   const [challengeVariant, setChallengeVariant] = useState<ChallengeVariant>('basic');
   const [timeAttackDuration, setTimeAttackDuration] = useState<60 | 180 | 300>(180);
@@ -225,7 +257,6 @@ export default function App() {
     [dailyDateKey]
   );
 
-  // Automatically roll over daily seed if midnight crosses while on the title screen
   useEffect(() => {
     const id = window.setInterval(() => {
       const nextKey = getDailyDateKey();
@@ -234,7 +265,6 @@ export default function App() {
     return () => window.clearInterval(id);
   }, []);
 
-  // Preload current preview world and immediate neighbors while browsing the title screen (strict 3-buffer cap)
   useEffect(() => {
     const total = SKINS.length;
     const urls = [0, 1, -1].map(
@@ -244,7 +274,6 @@ export default function App() {
     audioRef.current.preloadTracks(urls);
   }, [previewSkinIdx]);
 
-  // Keep AudioEngine volume, mute & renderer accessibility state synced on mount
   useEffect(() => {
     audioRef.current.setMuted(progressRef.current.muted);
     audioRef.current.setHapticsEnabled(progressRef.current.hapticsEnabled);
@@ -309,16 +338,8 @@ export default function App() {
   });
 
   const heldKeysRef = useRef<Set<string>>(new Set());
-  const p1DasRef = useRef<{ dir: -1 | 0 | 1; hold: number; repeat: number }>({
-    dir: 0,
-    hold: 0,
-    repeat: 0,
-  });
-  const p2DasRef = useRef<{ dir: -1 | 0 | 1; hold: number; repeat: number }>({
-    dir: 0,
-    hold: 0,
-    repeat: 0,
-  });
+  const p1DasRef = useRef<DasState>({ dir: 0, hold: 0, repeat: 0 });
+  const p2DasRef = useRef<DasState>({ dir: 0, hold: 0, repeat: 0 });
   const bufferClockSyncRef = useRef<{
     trackUrl: string | null;
     lastRawBufBeat: number;
@@ -472,49 +493,50 @@ export default function App() {
     buildHudSnapshot(simRef.current)
   );
 
-  const handleChangeEnabledShifts = useCallback(
-    (nextShifts: ShiftType[]) => {
-      const updated: SavedProgress = {
-        ...progressRef.current,
-        enabledShifts: nextShifts,
-      };
-      progressRef.current = updated;
-      saveProgress(updated);
-      setProgress(updated);
-      setHud(buildHudSnapshot(simRef.current));
+  const updateProgress = useCallback(
+    (
+      updater: (prev: SavedProgress) => SavedProgress,
+      syncHud: boolean = false
+    ) => {
+      const next = updater(progressRef.current);
+      progressRef.current = next;
+      saveProgress(next);
+      setProgress(next);
+      if (syncHud) {
+        setHud(buildHudSnapshot(simRef.current));
+      }
     },
     [buildHudSnapshot]
   );
 
+  const handleChangeEnabledShifts = useCallback(
+    (nextShifts: ShiftType[]) => {
+      updateProgress((prev) => ({ ...prev, enabledShifts: nextShifts }), true);
+    },
+    [updateProgress]
+  );
+
   const toggleReducedMotion = useCallback(() => {
-    setProgress((prev) => {
+    updateProgress((prev) => {
       const nextVal = !prev.reducedMotion;
-      const next: SavedProgress = { ...prev, reducedMotion: nextVal };
-      progressRef.current = next;
-      saveProgress(next);
       rendererRef.current.setAccessibility({
         reducedMotion: nextVal,
-        patternMode: Boolean(next.patternMode),
+        patternMode: Boolean(prev.patternMode),
       });
-      setHud(buildHudSnapshot(simRef.current));
-      return next;
-    });
-  }, [buildHudSnapshot]);
+      return { ...prev, reducedMotion: nextVal };
+    }, true);
+  }, [updateProgress]);
 
   const togglePatternMode = useCallback(() => {
-    setProgress((prev) => {
+    updateProgress((prev) => {
       const nextVal = !prev.patternMode;
-      const next: SavedProgress = { ...prev, patternMode: nextVal };
-      progressRef.current = next;
-      saveProgress(next);
       rendererRef.current.setAccessibility({
-        reducedMotion: Boolean(next.reducedMotion),
+        reducedMotion: Boolean(prev.reducedMotion),
         patternMode: nextVal,
       });
-      setHud(buildHudSnapshot(simRef.current));
-      return next;
-    });
-  }, [buildHudSnapshot]);
+      return { ...prev, patternMode: nextVal };
+    }, true);
+  }, [updateProgress]);
 
   const syncBodyState = useCallback((status: GameStatus) => {
     document.body.dataset.state = status;
@@ -687,7 +709,6 @@ export default function App() {
           startSkinIndex = pickRandomSkinIndex(pool, lastStartedSkinRef.current);
           startDeck = createShuffledSkinDeck(SKINS.length, lastStartedSkinRef.current);
         } else if (lastStartedSkinRef.current === null) {
-          // On initial launch from title, preserve the randomized title preview skin as stage 1 of the shuffled deck
           const idxInDeck = startDeck.indexOf(previewSkinIdx);
           if (idxInDeck > 0) {
             const tmp = startDeck[0];
@@ -697,7 +718,6 @@ export default function App() {
           startSkinIndex = startDeck[0] ?? previewSkinIdx;
         }
       } else {
-        // Time Attack, Puzzle, Mission, VS CPU, 2P Battle all randomize starting worlds across plays
         startSkinIndex =
           lastStartedSkinRef.current === null
             ? previewSkinIdx
@@ -742,7 +762,6 @@ export default function App() {
           board.squares = detectBoardMarks(board.grid);
         }
         if (mission.type === 'chain_cells' && board.activePiece) {
-          // Ensure player gets a Chain Block early for Chain Sanctuary mission
           injectStarterChainCell(board.activePiece);
         }
       } else if (mode === 'daily' && activeDailySpec) {
@@ -896,7 +915,6 @@ export default function App() {
     }
   }, [startNewGame]);
 
-  // Support ?autostart=1, ?autostart=daily, or ?autostart=vs_cpu on load
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const auto = params.get('autostart');
@@ -915,7 +933,7 @@ export default function App() {
   }, []);
 
   const toggleMute = useCallback(() => {
-    setProgress((prev) => {
+    updateProgress((prev) => {
       const nextMuted = !prev.muted;
       audioRef.current.setMuted(nextMuted);
       if (!nextMuted) {
@@ -925,36 +943,29 @@ export default function App() {
           audioRef.current.syncWorldMusic(getSkinByIndex(sim.skinIndex), sim.status);
         }
       }
-      const next = { ...prev, muted: nextMuted };
-      progressRef.current = next;
-      saveProgress(next);
-      return next;
+      return { ...prev, muted: nextMuted };
     });
-  }, []);
+  }, [updateProgress]);
 
-  const handleChangeMusicVolume = useCallback((volume: number) => {
-    const clamped = Math.max(0, Math.min(1, Math.round(volume * 100) / 100));
-    audioRef.current.unlock();
-    audioRef.current.setMusicVolume(clamped);
-    setProgress((prev) => {
-      const next = { ...prev, musicVolume: clamped };
-      progressRef.current = next;
-      saveProgress(next);
-      return next;
-    });
-  }, []);
+  const handleChangeMusicVolume = useCallback(
+    (volume: number) => {
+      const clamped = Math.max(0, Math.min(1, Math.round(volume * 100) / 100));
+      audioRef.current.unlock();
+      audioRef.current.setMusicVolume(clamped);
+      updateProgress((prev) => ({ ...prev, musicVolume: clamped }));
+    },
+    [updateProgress]
+  );
 
-  const handleChangeSfxVolume = useCallback((volume: number) => {
-    const clamped = Math.max(0, Math.min(1, Math.round(volume * 100) / 100));
-    audioRef.current.unlock();
-    audioRef.current.setSfxVolume(clamped);
-    setProgress((prev) => {
-      const next = { ...prev, sfxVolume: clamped };
-      progressRef.current = next;
-      saveProgress(next);
-      return next;
-    });
-  }, []);
+  const handleChangeSfxVolume = useCallback(
+    (volume: number) => {
+      const clamped = Math.max(0, Math.min(1, Math.round(volume * 100) / 100));
+      audioRef.current.unlock();
+      audioRef.current.setSfxVolume(clamped);
+      updateProgress((prev) => ({ ...prev, sfxVolume: clamped }));
+    },
+    [updateProgress]
+  );
 
   const togglePause = useCallback(() => {
     const sim = simRef.current;
@@ -1069,6 +1080,87 @@ export default function App() {
     []
   );
 
+  const emitLandingFeedback = useCallback(
+    (
+      sim: SimState,
+      boardIdx: 0 | 1,
+      targetBoard: BoardState,
+      res: {
+        rowsDropped?: number;
+        squaresFormed: number;
+        chainActivated: boolean;
+        zenTrimmed: boolean;
+        finalPieceX?: number;
+        finalPieceY?: number;
+      },
+      preX: number,
+      preY: number,
+      skin: SkinConfig,
+      effectiveBpm: number,
+      dropBeam?: {
+        piece: Piece;
+        colBottomRows: number[];
+      }
+    ) => {
+      const gravDir = targetBoard.gravityDirection ?? 'down';
+      const landCol =
+        gravDir === 'left' || gravDir === 'right'
+          ? res.finalPieceX ?? preX
+          : (res.finalPieceX ?? preX) + 0.5;
+      const landRow =
+        gravDir === 'down' || gravDir === 'up'
+          ? res.finalPieceY ??
+            Math.min(
+              targetBoard.rows - 1,
+              Math.max(0, preY + (res.rowsDropped ?? 1) + 1)
+            )
+          : (res.finalPieceY ?? preY) + 0.5;
+      if (dropBeam) {
+        rendererRef.current.triggerHardDropBeam(
+          boardIdx,
+          preX,
+          Math.max(0, preY),
+          dropBeam.colBottomRows,
+          extractPieceColumnColors(dropBeam.piece),
+          gravDir
+        );
+      }
+      rendererRef.current.triggerLandRipple(boardIdx, landCol, landRow);
+      audioRef.current.playLand(skin, effectiveBpm, sim.beatAccum);
+      const met = applyMetronomeChargeBonus(
+        targetBoard,
+        ((sim.beatAccum % 1) + 1) % 1
+      );
+      if (met.onBeat) {
+        rendererRef.current.spawnScorePopup(
+          boardIdx,
+          `+${met.bonusPoints}`,
+          met.tokenGranted ? 'BEAT VETO TOKEN!' : 'ON-BEAT CHARGE',
+          skin.palette.hudAccent
+        );
+      }
+      if (res.squaresFormed > 0) {
+        audioRef.current.playSquareFormed(
+          skin,
+          targetBoard.squares.length,
+          res.chainActivated ? 2 : 0,
+          effectiveBpm,
+          sim.beatAccum
+        );
+      }
+      if (res.chainActivated) audioRef.current.playChainTrigger(skin);
+      if (res.zenTrimmed) {
+        rendererRef.current.spawnScorePopup(
+          boardIdx,
+          'ZEN FLOW',
+          'ROWS TRIMMED',
+          skin.palette.hudAccent
+        );
+      }
+    },
+    []
+  );
+
   const handlePlayerAction = useCallback(
     (player: 1 | 2, action: 'left' | 'right' | 'rotate' | 'rotate_ccw' | 'hard_drop' | 'hold') => {
       const sim = simRef.current;
@@ -1107,7 +1199,6 @@ export default function App() {
           setHud(buildHudSnapshot(sim));
         }
       } else if (action === 'hard_drop') {
-        const gravDir = targetBoard.gravityDirection ?? 'down';
         const pieceRng =
           player === 1 && sim.mode === 'daily' && sim.dailyRng
             ? sim.dailyRng
@@ -1129,71 +1220,31 @@ export default function App() {
           }
         }
         if (res.landed) {
-          const landCol =
-            gravDir === 'left' || gravDir === 'right'
-              ? res.finalPieceX ?? preX
-              : (res.finalPieceX ?? preX) + 0.5;
-          const landRow =
-            gravDir === 'down' || gravDir === 'up'
-              ? res.finalPieceY ??
-                Math.min(
-                  targetBoard.rows - 1,
-                  Math.max(0, preY + res.rowsDropped + 1)
-                )
-              : (res.finalPieceY ?? preY) + 0.5;
-          if (activePieceSnapshot && landingInfo) {
-            rendererRef.current.triggerHardDropBeam(
-              boardIdx,
-              preX,
-              Math.max(0, preY),
-              landingInfo.colBottomRows,
-              extractPieceColumnColors(activePieceSnapshot),
-              gravDir
-            );
-          }
-          const effectiveDropBpm = skin.bpm + sim.encoreBonusBpm;
-          rendererRef.current.triggerLandRipple(boardIdx, landCol, landRow);
-          audioRef.current.playLand(skin, effectiveDropBpm, sim.beatAccum);
-          const met = applyMetronomeChargeBonus(
+          emitLandingFeedback(
+            sim,
+            boardIdx,
             targetBoard,
-            ((sim.beatAccum % 1) + 1) % 1
+            res,
+            preX,
+            preY,
+            skin,
+            skin.bpm + sim.encoreBonusBpm,
+            activePieceSnapshot && landingInfo
+              ? {
+                  piece: activePieceSnapshot,
+                  colBottomRows: landingInfo.colBottomRows,
+                }
+              : undefined
           );
-          if (met.onBeat) {
-            rendererRef.current.spawnScorePopup(
-              boardIdx,
-              `+${met.bonusPoints}`,
-              met.tokenGranted ? 'BEAT VETO TOKEN!' : 'ON-BEAT CHARGE',
-              skin.palette.hudAccent
-            );
-          }
-          if (res.squaresFormed > 0) {
-            audioRef.current.playSquareFormed(
-              skin,
-              targetBoard.squares.length,
-              res.chainActivated ? 2 : 0,
-              effectiveDropBpm,
-              sim.beatAccum
-            );
-          }
-          if (res.chainActivated) audioRef.current.playChainTrigger(skin);
-          if (res.zenTrimmed) {
-            rendererRef.current.spawnScorePopup(
-              boardIdx,
-              'ZEN FLOW',
-              'ROWS TRIMMED',
-              skin.palette.hudAccent
-            );
-          }
           setHud(buildHudSnapshot(sim));
         } else if (res.bouncePositions?.length) {
           setHud(buildHudSnapshot(sim));
         }
       }
     },
-    [buildHudSnapshot]
+    [buildHudSnapshot, emitLandingFeedback]
   );
 
-  // Keyboard bindings
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (isShiftSettingsOpenRef.current) return;
@@ -1255,7 +1306,6 @@ export default function App() {
       heldKeysRef.current.add(e.code);
 
       if (sim.mode === 'battle_2p') {
-        // Player 1: WASD + Q CCW + Left Shift Slam
         if (e.code === 'KeyA') {
           e.preventDefault();
           if (!e.repeat) handlePlayerAction(1, 'left');
@@ -1272,7 +1322,6 @@ export default function App() {
           e.preventDefault();
           if (!e.repeat) handlePlayerAction(1, 'hard_drop');
         }
-        // Player 2: Arrow keys + Right Shift / Slash Slam
         if (e.code === 'ArrowLeft') {
           e.preventDefault();
           if (!e.repeat) handlePlayerAction(2, 'left');
@@ -1287,7 +1336,6 @@ export default function App() {
           if (!e.repeat) handlePlayerAction(2, 'hard_drop');
         }
       } else {
-        // Single-player / VS CPU: Left/Right + Rotate + Slam
         if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
           e.preventDefault();
           if (!e.repeat) handlePlayerAction(1, 'left');
@@ -1378,7 +1426,6 @@ export default function App() {
     };
   }, [handleNextStage, handlePlayerAction, returnToTitle, startNewGame, toggleMute, togglePause]);
 
-  // Mount Canvas once and drive 60Hz simulation & rendering loop
   useEffect(() => {
     const container = mountRef.current;
     if (!container) return;
@@ -1420,7 +1467,6 @@ export default function App() {
       orientationRef.current = nextOrientation;
       lastViewportOrientationRef.current = nextOrientation;
 
-      // Live in-game orientation pivot only when the actual viewport orientation flips
       const sim = simRef.current;
       if (
         prevViewportOrientation !== nextOrientation &&
@@ -1477,7 +1523,6 @@ export default function App() {
       const prevSkin =
         sim.prevSkinIndex !== null ? getSkinByIndex(sim.prevSkinIndex) : null;
 
-      // Gradual ~9s organic world crossfade (unhurried soundtrack progression)
       if (sim.transitionAlpha < 1) {
         sim.transitionAlpha = Math.min(1, sim.transitionAlpha + dt * 0.11);
         if (sim.transitionAlpha >= 1) {
@@ -1500,7 +1545,6 @@ export default function App() {
       } else if (sim.status === 'playing' && sim.board) {
         sim.timeElapsed += dt;
 
-        // Timer countdown for Time Attack / Puzzle / Mission
         if (sim.timeRemaining !== null) {
           sim.timeRemaining = Math.max(0, sim.timeRemaining - dt);
           if (sim.timeRemaining <= 0) {
@@ -1549,7 +1593,6 @@ export default function App() {
             effectiveBpm / Math.max(1, skin.bpm)
           );
 
-          // Preload the next two worlds' MP3s early so transitions stay instantaneous
           if (sim.mode === 'challenge' || sim.mode === 'skin_edit') {
             const { stageSquares, stageGoal } = computeStageProgressMetrics(
               sim.progression,
@@ -1601,6 +1644,7 @@ export default function App() {
           const activeTrackUrl = skin.music.audioTrackUrl ?? null;
           const rawBufBeat = audioRef.current.getBufferBeatPosition();
           const syncState = bufferClockSyncRef.current;
+          let beatDelta = 0;
 
           if (rawBufBeat !== null && activeTrackUrl) {
             if (
@@ -1609,23 +1653,29 @@ export default function App() {
               rawBufBeat - syncState.lastRawBufBeat <= 0.75
             ) {
               const deltaBeat = rawBufBeat - syncState.lastRawBufBeat;
-              sim.beatAccum += Math.min(0.12, deltaBeat);
+              beatDelta = Math.min(0.35, deltaBeat);
+              sim.beatAccum += beatDelta;
               syncState.lastRawBufBeat = rawBufBeat;
             } else {
+              beatDelta = Math.min(0.12, dt * (effectiveBpm / 60));
+              if (syncState.trackUrl === null && sim.beatAccum === 0 && rawBufBeat > 0) {
+                const phaseFrac = ((rawBufBeat % 1) + 1) % 1;
+                sim.beatAccum = phaseFrac + beatDelta;
+              } else {
+                sim.beatAccum += beatDelta;
+              }
               syncState.trackUrl = activeTrackUrl;
               syncState.lastRawBufBeat = rawBufBeat;
-              sim.beatAccum += Math.min(0.08, dt * (effectiveBpm / 60));
             }
           } else {
             syncState.trackUrl = null;
-            sim.beatAccum += audioRef.current.consumeTimelineBeatDelta(dt, effectiveBpm);
+            beatDelta = audioRef.current.consumeTimelineBeatDelta(dt, effectiveBpm);
+            sim.beatAccum += beatDelta;
           }
 
-          const beatDelta = Math.max(0, sim.beatAccum - prevBeat);
           const sweepBeats = getSweepBeatsForShift(sim.board.activeShift);
           sim.sweepPhase += beatDelta / sweepBeats;
 
-          // Beat-synced movement for patrolling 2x2 bumper & conveyor floor (steps every 2 beats)
           if (Math.floor(sim.beatAccum / 2) > Math.floor(prevBeat / 2)) {
             if (sim.board?.activeShift === 'patrolling_bumper') {
               stepPatrollingBumper(sim.board);
@@ -1650,7 +1700,6 @@ export default function App() {
             : Math.floor(timelineNorm * liveCols) % liveCols;
           const twinOffset = Math.floor(liveCols / 2);
 
-          // DJ-style Shift riser + Telegraph upcoming shift during the final sweep before trigger
           if (sim.mode !== 'puzzle' && !skin.finalStageTimerSec) {
             const pendingSquares = Math.max(
               sim.board.squares.length,
@@ -1679,7 +1728,6 @@ export default function App() {
             audioRef.current.updateShiftRiser(0);
           }
 
-          // Step through every column crossed since last frame
           const processColumn = (col: number) => {
             if (!sim.board) return;
             const stems = computeStemLevels(sim.board, skin);
@@ -1830,7 +1878,6 @@ export default function App() {
                 rendererRef.current.spawnClearBurst(1, ev2.clearedPositions, skin);
               }
 
-              // VS Counter-play: 4+ squares first cancel pending incoming garbage, then queue net pressure for the next sweep
               const p1Out = ev1 && ev1.squaresCleared >= 4 ? ev1.squaresCleared : 0;
               const p2Out = ev2 && ev2.squaresCleared >= 4 ? ev2.squaresCleared : 0;
               const p1Countered = Math.min(sim.board.pendingGarbage, p1Out);
@@ -1967,7 +2014,6 @@ export default function App() {
               applyNextSkinIndex(nextIdx, preloadIdx);
             };
 
-            // Beat-sweep level-up (excess sweep overflow discarded) + multi-level skin transition
             const allowSkinTransition = sim.mode === 'challenge' || sim.mode === 'skin_edit';
             const progRes = advanceSweepStageProgression(
               sim.progression,
@@ -2048,7 +2094,6 @@ export default function App() {
             setHud(buildHudSnapshot(sim));
           };
 
-          // Final stage timed exception (flat timer transitions final stage instead of square quota)
           const allowTimedTransition = sim.mode === 'challenge' || sim.mode === 'skin_edit';
           if (
             advanceTimedStageProgression(
@@ -2118,7 +2163,6 @@ export default function App() {
             sim.lastStepCol = targetCol;
           }
 
-          // Continuous held controls (DAS/ARR directional) & passive gravity + lock delay
           if (sim.status === 'playing' && sim.board) {
             const p1LeftHeld =
               sim.mode === 'battle_2p'
@@ -2130,26 +2174,11 @@ export default function App() {
                 : heldKeysRef.current.has('ArrowRight') || heldKeysRef.current.has('KeyD');
             const p1Dir: -1 | 0 | 1 =
               p1LeftHeld && !p1RightHeld ? -1 : p1RightHeld && !p1LeftHeld ? 1 : 0;
+            stepDasControl(p1DasRef.current, p1Dir, dt, sim.board, (moveDir) => {
+              audioRef.current.playMove(skin);
+              rendererRef.current.triggerMoveShift(moveDir);
+            });
 
-            if (p1Dir !== 0 && p1Dir === p1DasRef.current.dir) {
-              p1DasRef.current.hold += dt;
-              if (p1DasRef.current.hold >= 0.145) {
-                p1DasRef.current.repeat += dt;
-                while (p1DasRef.current.repeat >= 0.042) {
-                  p1DasRef.current.repeat -= 0.042;
-                  if (steerPiece(sim.board, p1Dir)) {
-                    audioRef.current.playMove(skin);
-                    rendererRef.current.triggerMoveShift(p1Dir);
-                  } else {
-                    break;
-                  }
-                }
-              }
-            } else {
-              p1DasRef.current = { dir: p1Dir, hold: 0, repeat: 0 };
-            }
-
-            // Passive gravity & lock delay for Player 1
             if (sim.board.activePiece && !sim.board.isGameOver) {
               const pieceRng =
                 sim.mode === 'daily' && sim.dailyRng ? sim.dailyRng : Math.random;
@@ -2172,71 +2201,18 @@ export default function App() {
                 }
               }
               if (res.landed) {
-                const gravDir = sim.board.gravityDirection ?? 'down';
-                const landCol =
-                  gravDir === 'left' || gravDir === 'right'
-                    ? res.finalPieceX ?? preX
-                    : (res.finalPieceX ?? preX) + 0.5;
-                const landRow =
-                  gravDir === 'down' || gravDir === 'up'
-                    ? res.finalPieceY ??
-                      Math.min(sim.board.rows - 1, Math.max(0, preY + 1))
-                    : (res.finalPieceY ?? preY) + 0.5;
-                rendererRef.current.triggerLandRipple(0, landCol, landRow);
-                audioRef.current.playLand(skin, effectiveBpm, sim.beatAccum);
-                const met = applyMetronomeChargeBonus(
-                  sim.board,
-                  ((sim.beatAccum % 1) + 1) % 1
-                );
-                if (met.onBeat) {
-                  rendererRef.current.spawnScorePopup(
-                    0,
-                    `+${met.bonusPoints}`,
-                    met.tokenGranted ? 'BEAT VETO TOKEN!' : 'ON-BEAT CHARGE',
-                    skin.palette.hudAccent
-                  );
-                }
-                if (res.squaresFormed > 0) {
-                  audioRef.current.playSquareFormed(
-                    skin,
-                    sim.board.squares.length,
-                    res.chainActivated ? 2 : 0,
-                    effectiveBpm,
-                    sim.beatAccum
-                  );
-                }
-                if (res.chainActivated) audioRef.current.playChainTrigger(skin);
-                if (res.zenTrimmed) {
-                  rendererRef.current.spawnScorePopup(
-                    0,
-                    'ZEN FLOW',
-                    'ROWS TRIMMED',
-                    skin.palette.hudAccent
-                  );
-                }
+                emitLandingFeedback(sim, 0, sim.board, res, preX, preY, skin, effectiveBpm);
                 setHud(buildHudSnapshot(sim));
               }
             }
 
-            // Player 2 or CPU board update
             if (sim.board2 && !sim.board2.isGameOver) {
               if (sim.mode === 'battle_2p') {
                 const p2Left = heldKeysRef.current.has('ArrowLeft');
                 const p2Right = heldKeysRef.current.has('ArrowRight');
                 const p2Dir: -1 | 0 | 1 =
                   p2Left && !p2Right ? -1 : p2Right && !p2Left ? 1 : 0;
-                if (p2Dir !== 0 && p2Dir === p2DasRef.current.dir) {
-                  p2DasRef.current.hold += dt;
-                  if (p2DasRef.current.hold >= 0.145) {
-                    p2DasRef.current.repeat += dt;
-                    while (p2DasRef.current.repeat >= 0.042) {
-                      p2DasRef.current.repeat -= 0.042;
-                      if (!steerPiece(sim.board2, p2Dir)) break;
-                    }
-                  }
-                } else {
-                  p2DasRef.current = { dir: p2Dir, hold: 0, repeat: 0 };
-                }
+                stepDasControl(p2DasRef.current, p2Dir, dt, sim.board2);
               } else if (sim.mode === 'vs_cpu' && sim.board2.activePiece) {
                 if (!sim.cpuPlan) {
                   sim.cpuPlan = computeCpuBestMove(sim.board2);
@@ -2277,7 +2253,6 @@ export default function App() {
                 }
               }
 
-              // Passive gravity & lock delay for board2
               if (sim.board2.activePiece && !sim.board2.isGameOver) {
                 const res = stepPassiveGravity(
                   sim.board2,
@@ -2293,7 +2268,6 @@ export default function App() {
               }
             }
 
-            // Check win / loss conditions
             if (sim.board.isGameOver) {
               if (sim.mode === 'vs_cpu') {
                 finishRun('CPU Prevails', 'Your stack reached the top.', false);
@@ -2376,19 +2350,13 @@ export default function App() {
         }
       }
 
-      // Update visual particles, shift visual seams & cell settling interpolation
       tickShiftEffects(sim.board, dt);
       tickShiftEffects(sim.board2, dt);
-      const activeGrids: ((typeof sim.board) extends infer B
-        ? B extends { grid: infer G }
-          ? G
-          : never
-        : never)[] = [];
+      const activeGrids: (Cell | null)[][][] = [];
       if (sim.board) activeGrids.push(sim.board.grid);
       if (sim.board2) activeGrids.push(sim.board2.grid);
       rendererRef.current.updateEffects(dt, activeGrids);
 
-      // Render Canvas
       if (ctx) {
         const beatPhase = ((sim.beatAccum % 1) + 1) % 1;
         const timelineNorm = ((sim.sweepPhase % 1) + 1) % 1;
@@ -2409,7 +2377,6 @@ export default function App() {
         });
       }
 
-      // Throttled HUD sync: only re-render React HUD when discrete visible values change
       hudSyncAccum += dt;
       if (hudSyncAccum >= 0.12 && sim.status === 'playing') {
         hudSyncAccum = 0;
@@ -2435,13 +2402,12 @@ export default function App() {
       window.removeEventListener('orientationchange', updateSize);
       audioRef.current.dispose();
     };
-  }, [buildHudSnapshot, commitHighScoreAndUnlocks, finishRun]);
+  }, [buildHudSnapshot, commitHighScoreAndUnlocks, emitLandingFeedback, finishRun]);
 
   const activeSkin = getSkinByIndex(hud.skinIndex);
 
   return (
     <div className="relative w-full h-full overflow-hidden">
-      {/* Isolated Canvas Mount */}
       <div ref={mountRef} className="fixed inset-0 z-0" />
 
       {hud.status === 'title' && (

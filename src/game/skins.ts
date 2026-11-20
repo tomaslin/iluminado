@@ -84,7 +84,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'ambient',
       genreLabel: 'Ambient',
-      audioTrackUrl: 'music/world1.mp3',
+      audioTrackUrl: 'music/world1.ogg',
       firstBeatSec: 0.742,
       loopSweeps: 28,
       loopEndSec: 168.742,
@@ -180,7 +180,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'jazz_fusion',
       genreLabel: 'Jazz Fusion',
-      audioTrackUrl: 'music/world2.mp3',
+      audioTrackUrl: 'music/world2.ogg',
       firstBeatSec: 0.643,
       loopSweeps: 50,
       loopEndSec: 172.072,
@@ -276,7 +276,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'trip_hop',
       genreLabel: 'Downtempo',
-      audioTrackUrl: 'music/world3.mp3',
+      audioTrackUrl: 'music/world3.ogg',
       firstBeatSec: 1.464,
       loopSweeps: 32,
       loopEndSec: 172.131,
@@ -372,7 +372,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'dark_zouk',
       genreLabel: 'Dark Zouk',
-      audioTrackUrl: 'music/world4.mp3',
+      audioTrackUrl: 'music/world4.ogg',
       firstBeatSec: 0.497,
       loopSweeps: 31,
       loopEndSec: 175.556,
@@ -468,7 +468,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'bossa_nova',
       genreLabel: 'Bossa Nova',
-      audioTrackUrl: 'music/world5.mp3',
+      audioTrackUrl: 'music/world5.ogg',
       firstBeatSec: 0.331,
       loopSweeps: 26,
       loopEndSec: 113.786,
@@ -564,7 +564,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'country',
       genreLabel: 'Country',
-      audioTrackUrl: 'music/world6.mp3',
+      audioTrackUrl: 'music/world6.ogg',
       firstBeatSec: 1.915,
       loopSweeps: 27,
       loopEndSec: 114.611,
@@ -660,7 +660,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'salsa',
       genreLabel: 'Salsa',
-      audioTrackUrl: 'music/world7.mp3',
+      audioTrackUrl: 'music/world7.ogg',
       firstBeatSec: 0.798,
       loopSweeps: 59,
       loopEndSec: 163.557,
@@ -756,7 +756,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'synthwave',
       genreLabel: 'Synthwave',
-      audioTrackUrl: 'music/world8.mp3',
+      audioTrackUrl: 'music/world8.ogg',
       firstBeatSec: 0.573,
       loopSweeps: 29,
       loopEndSec: 151.877,
@@ -852,7 +852,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'swing',
       genreLabel: 'Swing',
-      audioTrackUrl: 'music/world9.mp3',
+      audioTrackUrl: 'music/world9.ogg',
       firstBeatSec: 0.231,
       loopSweeps: 48,
       loopEndSec: 156.966,
@@ -948,7 +948,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'blues_rock',
       genreLabel: 'Country Blues Rock',
-      audioTrackUrl: 'music/world10.mp3',
+      audioTrackUrl: 'music/world10.ogg',
       firstBeatSec: 0.449,
       loopSweeps: 34,
       loopEndSec: 155.878,
@@ -1044,7 +1044,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'dark_ambient',
       genreLabel: 'Dark Ambient',
-      audioTrackUrl: 'music/world11.mp3',
+      audioTrackUrl: 'music/world11.ogg',
       firstBeatSec: 0.086,
       loopSweeps: 29,
       loopEndSec: 174.086,
@@ -1140,7 +1140,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'funk_fusion',
       genreLabel: 'Electric Fusion',
-      audioTrackUrl: 'music/world12.mp3',
+      audioTrackUrl: 'music/world12.ogg',
       firstBeatSec: 0.547,
       loopSweeps: 43,
       loopEndSec: 164.357,
@@ -1236,7 +1236,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'trap',
       genreLabel: 'Trap',
-      audioTrackUrl: 'music/world13.mp3',
+      audioTrackUrl: 'music/world13.ogg',
       firstBeatSec: 0.069,
       loopSweeps: 53,
       loopEndSec: 174.316,
@@ -1332,7 +1332,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'chiptune_funk',
       genreLabel: 'Chiptune Funk',
-      audioTrackUrl: 'music/world14.mp3',
+      audioTrackUrl: 'music/world14.ogg',
       firstBeatSec: 0.579,
       loopSweeps: 38,
       loopEndSec: 145.341,
@@ -1428,7 +1428,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'alt_rock',
       genreLabel: 'Alt Rock',
-      audioTrackUrl: 'music/world15.mp3',
+      audioTrackUrl: 'music/world15.ogg',
       firstBeatSec: 0.018,
       loopSweeps: 45,
       loopEndSec: 166.172,
@@ -1524,7 +1524,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'bachata',
       genreLabel: 'Bachata',
-      audioTrackUrl: 'music/world16.mp3',
+      audioTrackUrl: 'music/world16.ogg',
       firstBeatSec: 1.997,
       loopSweeps: 38,
       loopEndSec: 145.619,
@@ -1620,7 +1620,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'kizomba',
       genreLabel: 'Kizomba',
-      audioTrackUrl: 'music/world17.mp3',
+      audioTrackUrl: 'music/world17.ogg',
       firstBeatSec: 0.529,
       loopSweeps: 32,
       loopEndSec: 171.196,
@@ -1716,7 +1716,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'reggaeton',
       genreLabel: 'Reggaeton',
-      audioTrackUrl: 'music/world18.mp3',
+      audioTrackUrl: 'music/world18.ogg',
       firstBeatSec: 0.502,
       loopSweeps: 32,
       loopEndSec: 158.853,
@@ -1812,7 +1812,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'heavy_metal',
       genreLabel: 'Heavy Metal',
-      audioTrackUrl: 'music/world19.mp3',
+      audioTrackUrl: 'music/world19.ogg',
       firstBeatSec: 0.365,
       loopSweeps: 57,
       loopEndSec: 171.365,
@@ -1908,7 +1908,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'liquid_dnb',
       genreLabel: 'Liquid DnB',
-      audioTrackUrl: 'music/world20.mp3',
+      audioTrackUrl: 'music/world20.ogg',
       firstBeatSec: 0.364,
       loopSweeps: 49,
       loopEndSec: 157.164,
@@ -1930,7 +1930,6 @@ export const SKINS: SkinConfig[] = [
       subBassGain: 0.85,
     },
   },
-  // ==================== WORLDS 21 - 30 (FUSION GALLERY SERIES) ====================
   {
     id: 'cityscape-orange',
     index: 20,
@@ -2005,7 +2004,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'afrobeat_jazz',
       genreLabel: 'Afrobeat Jazz',
-      audioTrackUrl: 'music/world21.mp3',
+      audioTrackUrl: 'music/world21.ogg',
       firstBeatSec: 1.277,
       loopSweeps: 50,
       loopEndSec: 165.661,
@@ -2101,7 +2100,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'neo_soul',
       genreLabel: 'Neo Soul',
-      audioTrackUrl: 'music/world22.mp3',
+      audioTrackUrl: 'music/world22.ogg',
       firstBeatSec: 2.522,
       loopSweeps: 29,
       loopEndSec: 172.278,
@@ -2197,7 +2196,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'cumbia_dub',
       genreLabel: 'Cumbia Dub',
-      audioTrackUrl: 'music/world23.mp3',
+      audioTrackUrl: 'music/world23.ogg',
       firstBeatSec: 0.535,
       loopSweeps: 30,
       loopEndSec: 160.535,
@@ -2293,7 +2292,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'flamenco_house',
       genreLabel: 'Flamenco House',
-      audioTrackUrl: 'music/world24.mp3',
+      audioTrackUrl: 'music/world24.ogg',
       firstBeatSec: 0.115,
       loopSweeps: 33,
       loopEndSec: 139.062,
@@ -2389,7 +2388,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'city_pop',
       genreLabel: 'City Pop',
-      audioTrackUrl: 'music/world25.mp3',
+      audioTrackUrl: 'music/world25.ogg',
       firstBeatSec: 0.256,
       loopSweeps: 48,
       loopEndSec: 170.923,
@@ -2485,7 +2484,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'ethio_jazz',
       genreLabel: 'Ethio-Jazz',
-      audioTrackUrl: 'music/world26.mp3',
+      audioTrackUrl: 'music/world26.ogg',
       firstBeatSec: 0.283,
       loopSweeps: 37,
       loopEndSec: 177.883,
@@ -2581,7 +2580,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'dub_techno',
       genreLabel: 'Dub Techno',
-      audioTrackUrl: 'music/world27.mp3',
+      audioTrackUrl: 'music/world27.ogg',
       firstBeatSec: 0.159,
       loopSweeps: 37,
       loopEndSec: 164.603,
@@ -2677,7 +2676,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'tango_nuevo',
       genreLabel: 'Tango Nuevo',
-      audioTrackUrl: 'music/world28.mp3',
+      audioTrackUrl: 'music/world28.ogg',
       firstBeatSec: 0.924,
       loopSweeps: 29,
       loopEndSec: 170.68,
@@ -2773,7 +2772,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'uk_garage',
       genreLabel: 'UK Garage',
-      audioTrackUrl: 'music/world29.mp3',
+      audioTrackUrl: 'music/world29.ogg',
       firstBeatSec: 2.177,
       loopSweeps: 37,
       loopEndSec: 171.32,
@@ -2869,7 +2868,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'post_rock',
       genreLabel: 'Post-Rock',
-      audioTrackUrl: 'music/world30.mp3',
+      audioTrackUrl: 'music/world30.ogg',
       firstBeatSec: 0.406,
       loopSweeps: 44,
       loopEndSec: 176.406,
@@ -2891,7 +2890,6 @@ export const SKINS: SkinConfig[] = [
       subBassGain: 0.68,
     },
   },
-  // ==================== WORLDS 31 - 40 (ART MOVEMENTS, CINEMA & ARCHITECTURE SERIES) ====================
   {
     id: 'sumi-bamboo-ink',
     index: 30,
@@ -2966,7 +2964,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'shamisen_chill',
       genreLabel: 'Shamisen Lo-Fi',
-      audioTrackUrl: 'music/world31.mp3',
+      audioTrackUrl: 'music/world31.ogg',
       firstBeatSec: 0.473,
       loopSweeps: 31,
       loopEndSec: 146.355,
@@ -3062,7 +3060,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'cubist_chamber',
       genreLabel: 'Chamber Groove',
-      audioTrackUrl: 'music/world32.mp3',
+      audioTrackUrl: 'music/world32.ogg',
       firstBeatSec: 0.457,
       loopSweeps: 44,
       loopEndSec: 168.076,
@@ -3158,7 +3156,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'industrial_synth',
       genreLabel: '80s Chrome Electro',
-      audioTrackUrl: 'music/world33.mp3',
+      audioTrackUrl: 'music/world33.ogg',
       firstBeatSec: 0.31,
       loopSweeps: 42,
       loopEndSec: 171.157,
@@ -3254,7 +3252,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'miami_boogie',
       genreLabel: '80s Pastel Boogie',
-      audioTrackUrl: 'music/world34.mp3',
+      audioTrackUrl: 'music/world34.ogg',
       firstBeatSec: 0.547,
       loopSweeps: 35,
       loopEndSec: 173.743,
@@ -3350,7 +3348,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'andean_cumbia',
       genreLabel: 'Andean Electro',
-      audioTrackUrl: 'music/world35.mp3',
+      audioTrackUrl: 'music/world35.ogg',
       firstBeatSec: 0.052,
       loopSweeps: 43,
       loopEndSec: 172.052,
@@ -3446,7 +3444,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'cat_step_jazz',
       genreLabel: 'Whisker Swing',
-      audioTrackUrl: 'music/world36.mp3',
+      audioTrackUrl: 'music/world36.ogg',
       firstBeatSec: 0.023,
       loopSweeps: 59,
       loopEndSec: 172.706,
@@ -3542,7 +3540,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'cathedral_organ',
       genreLabel: 'Baroque Synth',
-      audioTrackUrl: 'music/world37.mp3',
+      audioTrackUrl: 'music/world37.ogg',
       firstBeatSec: 1.966,
       loopSweeps: 44,
       loopEndSec: 175.081,
@@ -3638,7 +3636,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'constructivist_march',
       genreLabel: 'Avant-Garde Motorik',
-      audioTrackUrl: 'music/world38.mp3',
+      audioTrackUrl: 'music/world38.ogg',
       firstBeatSec: 1.625,
       loopSweeps: 44,
       loopEndSec: 177.625,
@@ -3734,7 +3732,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'botanical_waltz',
       genreLabel: 'Chamber Folk',
-      audioTrackUrl: 'music/world39.mp3',
+      audioTrackUrl: 'music/world39.ogg',
       firstBeatSec: 0.145,
       loopSweeps: 49,
       loopEndSec: 174.367,
@@ -3830,7 +3828,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'memphis_electro',
       genreLabel: 'Milano Synth Pop',
-      audioTrackUrl: 'music/world40.mp3',
+      audioTrackUrl: 'music/world40.ogg',
       firstBeatSec: 0.071,
       loopSweeps: 39,
       loopEndSec: 170.253,
@@ -3852,7 +3850,6 @@ export const SKINS: SkinConfig[] = [
       subBassGain: 0.72,
     },
   },
-  // ==================== WORLDS 41 - 50 (DESIGN ARCHETYPES & CINEMA FINALE SERIES) ====================
   {
     id: 'smaland-flatpack',
     index: 40,
@@ -3927,7 +3924,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'nordic_synth',
       genreLabel: 'Nordic Synth Pop',
-      audioTrackUrl: 'music/world41.mp3',
+      audioTrackUrl: 'music/world41.ogg',
       firstBeatSec: 0.53,
       loopSweeps: 48,
       loopEndSec: 172.47,
@@ -4023,7 +4020,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'chamber_waltz',
       genreLabel: 'Alpine Chamber Waltz',
-      audioTrackUrl: 'music/world42.mp3',
+      audioTrackUrl: 'music/world42.ogg',
       firstBeatSec: 1.732,
       loopSweeps: 36,
       loopEndSec: 166.303,
@@ -4119,7 +4116,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'studio_orchestral',
       genreLabel: 'Cinema Orchestral',
-      audioTrackUrl: 'music/world43.mp3',
+      audioTrackUrl: 'music/world43.ogg',
       firstBeatSec: 2.244,
       loopSweeps: 45,
       loopEndSec: 168.398,
@@ -4215,7 +4212,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'de_stijl_minimal',
       genreLabel: 'Minimalist Grid',
-      audioTrackUrl: 'music/world44.mp3',
+      audioTrackUrl: 'music/world44.ogg',
       firstBeatSec: 2.403,
       loopSweeps: 31,
       loopEndSec: 167.736,
@@ -4311,7 +4308,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'koto_taiko',
       genreLabel: 'Koto & Taiko',
-      audioTrackUrl: 'music/world45.mp3',
+      audioTrackUrl: 'music/world45.ogg',
       firstBeatSec: 0.272,
       loopSweeps: 46,
       loopEndSec: 171.435,
@@ -4407,7 +4404,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'analog_funk_70s',
       genreLabel: '70s Analog Funk',
-      audioTrackUrl: 'music/world46.mp3',
+      audioTrackUrl: 'music/world46.ogg',
       firstBeatSec: 0.497,
       loopSweeps: 39,
       loopEndSec: 164.708,
@@ -4503,7 +4500,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'kraut_motorik',
       genreLabel: 'Bauhaus Motorik',
-      audioTrackUrl: 'music/world47.mp3',
+      audioTrackUrl: 'music/world47.ogg',
       firstBeatSec: 2.403,
       loopSweeps: 31,
       loopEndSec: 167.736,
@@ -4599,7 +4596,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'solarpunk_ambient',
       genreLabel: 'Solarpunk Ambient',
-      audioTrackUrl: 'music/world48.mp3',
+      audioTrackUrl: 'music/world48.ogg',
       firstBeatSec: 1.362,
       loopSweeps: 33,
       loopEndSec: 126.086,
@@ -4695,7 +4692,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'tokyo_jazz_kissa',
       genreLabel: 'Tokyo Hi-Fi Jazz',
-      audioTrackUrl: 'music/world49.mp3',
+      audioTrackUrl: 'music/world49.ogg',
       firstBeatSec: 0.335,
       loopSweeps: 36,
       loopEndSec: 161.83,
@@ -4792,7 +4789,7 @@ export const SKINS: SkinConfig[] = [
     music: {
       styleId: 'space_age_lounge',
       genreLabel: 'Space-Age Finale',
-      audioTrackUrl: 'music/world50.mp3',
+      audioTrackUrl: 'music/world50.ogg',
       firstBeatSec: 0.558,
       loopSweeps: 31,
       loopEndSec: 162.297,
@@ -4841,9 +4838,6 @@ export function isPureBlackOrWhite(value: string): boolean {
   );
 }
 
-/**
- * Picks a random skin index from `pool`, avoiding `excludeIdx` whenever >= 2 choices exist.
- */
 export function pickRandomSkinIndex(
   pool?: number[],
   excludeIdx?: number | null,
@@ -4864,10 +4858,6 @@ export function pickRandomSkinIndex(
   return activePool[pick];
 }
 
-/**
- * Generates a Fisher-Yates shuffled permutation of all skin indices so every run
- * starts on a random world and progresses through every world before repeating.
- */
 export function createShuffledSkinDeck(
   totalSkins: number = SKINS.length,
   excludeFirstIdx?: number | null,

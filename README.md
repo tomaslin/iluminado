@@ -61,9 +61,9 @@ Unlike classic two-tone block droppers, Iluminado breaks open the binary color r
 - **Chameleon Rotate (`chameleon_rotate`)**: Rotating a falling brick cycles every tile color forward, letting you paint 2×2 matches mid-air across 2-color or 3-color stages.
 - **Prism Wild Bricks (`prism_wild_bricks`)**: Embeds luminous diamond Prism Wild tiles that bridge and complete squares across any adjacent tile color.
 
-### All 42 Shifts
+### All 52 Shifts
 
-#### Core & Dimension Shifts (9)
+#### Core & Dimension Shifts (13)
 1. **90° Board Rotate** (`rotate_90`): Turns the entire playfield 90° clockwise or counter-clockwise and drops stacks to the new floor.
 2. **Expand / Contract (±2)** (`board_resize`): Grows or shrinks board width and height by up to 2 blocks while preserving your stacks.
 3. **Monochrome Line / Diagonal** (`line_color_shift`): Converts a single horizontal row, vertical column, or diagonal line into one uniform color.
@@ -73,47 +73,57 @@ Unlike classic two-tone block droppers, Iluminado breaks open the binary color r
 7. **Reverse Timeline Sweep** (`reverse_sweep`): Flips the beat-locked timeline beam to sweep from right to left across the playfield.
 8. **Split-Half Timeline** (`split_half_sweep`): Splits the sweep bar horizontally at mid-screen so the top and bottom halves clear 4 beats apart.
 9. **Diagonal Slant Line** (`diagonal_slant_sweep`): Tilts the timeline sweep into a diagonal slash so upper rows clear ahead of lower rows.
+10. **Double-Time Sweep** (`double_time_sweep`): Accelerates the timeline beam to cross the board in 4 beats instead of 8 for rapid-fire clears.
+11. **Half-Time Sweep** (`half_time_sweep`): Stretches the timeline sweep to 16 beats so you can stack huge multi-square sweeps.
+12. **Lantern Spotlight** (`lantern_sweep`): Dims distant columns into monochrome silhouettes while the timeline beam illuminates nearby colors.
+13. **Metronome Beat Charge** (`metronome_charge`): Locking a piece on the beat awards +150 bonus points and charges Veto Tokens every 3 beat-locks.
 
 #### Size & Silhouette Reshapes (8)
-10. **The Split Canyon** (`split_canyon`): Cracks stacks left and right to carve an impassable 2-block-wide stone chasm down the center.
-11. **Hourglass / Funnel Walls** (`hourglass_funnel`): Steps neutral side bumpers inward by 1–2 blocks across middle or lower rows.
-12. **Twin Elevators** (`twin_elevators`): Lifts the left half up +2 blocks and lowers the right stage by 1 block into an asymmetric step.
-13. **Rolling Wave Floor** (`rolling_wave_floor`): Undulates the stone floor into a +0 to +2 sine wave, lifting stacks into rolling hills.
-14. **Octagon Cutoffs** (`octagon_cutoffs`): Locks stepped neutral stone blocks into all four corners to form an octagonal playfield.
-15. **Staircase Terraces** (`staircase_terraces`): Sculpts symmetrical 1–2–3 stone steps rising along both wings, funneling stacks toward the center.
-16. **Twin-Basin Center Spire** (`center_spire`): Raises a central stone monolith in the middle two columns to split play into twin flanking basins.
-17. **Central Dome Pedestal** (`dome_pedestal`): Lifts the center four columns into a vaulted arched mound while keeping outer valleys deep.
+14. **The Split Canyon** (`split_canyon`): Cracks stacks left and right to carve an impassable 2-block-wide stone chasm down the center.
+15. **Hourglass / Funnel Walls** (`hourglass_funnel`): Steps neutral side bumpers inward by 1–2 blocks across middle or lower rows.
+16. **Twin Elevators** (`twin_elevators`): Lifts the left half up +2 blocks and lowers the right stage by 1 block into an asymmetric step.
+17. **Rolling Wave Floor** (`rolling_wave_floor`): Undulates the stone floor into a +0 to +2 sine wave, lifting stacks into rolling hills.
+18. **Octagon Cutoffs** (`octagon_cutoffs`): Locks stepped neutral stone blocks into all four corners to form an octagonal playfield.
+19. **Staircase Terraces** (`staircase_terraces`): Sculpts symmetrical 1–2–3 stone steps rising along both wings, funneling stacks toward the center.
+20. **Twin-Basin Center Spire** (`center_spire`): Raises a central stone monolith in the middle two columns to split play into twin flanking basins.
+21. **Central Dome Pedestal** (`dome_pedestal`): Lifts the center four columns into a vaulted arched mound while keeping outer valleys deep.
 
-#### Obstacles & Multi-Story Mechanics (10)
-18. **Floating Mid-Air Shelf** (`floating_shelf`): Spawns a solid horizontal girder mid-air, turning the board into a two-story bunker.
-19. **Castle Battlements** (`castle_battlements`): Raises 2-block neutral stone pillars every 3rd column from the floor to form narrow trenches.
-20. **Patrolling 2×2 Bumper** (`patrolling_bumper`): Suspends a metallic 2×2 obstacle mid-air that slides left and right on the beat.
-21. **Corner Bastion (4×4)** (`corner_edge_block`): Seals a compact 4×4 stone bastion in one lower corner once per run while keeping main drop lanes open.
-22. **Bottom Plinth (4×3)** (`bottom_edge_block`): Raises a low stone plinth along the bottom edge once per run without blocking central drops.
-23. **Side Margin Ledge (3×4)** (`side_edge_ledge`): Places a stepped stone margin along the left or right wall once per run to narrow the wing gently.
-24. **Springboard Floor** (`spring_bounce`): Mounts amber trampoline pads along the floor that bounce incoming pieces skyward before locking.
-25. **Belt Conveyor Floor** (`conveyor_floor`): Drives a motorized track along the bottom row, shifting settled floor blocks one column every 2 beats.
-26. **Dual Twin Timeline** (`twin_sweep`): Splits the timeline into two synchronized beams sweeping 4 beats apart for double-tempo clears.
-27. **Crumble Crystal Ledges** (`crumble_blocks`): Suspends brittle crystal ledges mid-board; two impacts or adjacent clears crack and shatter them.
+#### Obstacles & Multi-Story Mechanics (14)
+22. **Floating Mid-Air Shelf** (`floating_shelf`): Spawns a solid horizontal girder mid-air, turning the board into a two-story bunker.
+23. **Castle Battlements** (`castle_battlements`): Raises 2-block neutral stone pillars every 3rd column from the floor to form narrow trenches.
+24. **Patrolling 2×2 Bumper** (`patrolling_bumper`): Suspends a metallic 2×2 obstacle mid-air that slides left and right on the beat.
+25. **Corner Bastion (4×4)** (`corner_edge_block`): Seals a compact 4×4 stone bastion in one lower corner once per run while keeping main drop lanes open.
+26. **Bottom Plinth (4×3)** (`bottom_edge_block`): Raises a low stone plinth along the bottom edge once per run without blocking central drops.
+27. **Side Margin Ledge (3×4)** (`side_edge_ledge`): Places a stepped stone margin along the left or right wall once per run to narrow the wing gently.
+28. **Springboard Floor** (`spring_bounce`): Mounts amber trampoline pads along the floor that bounce incoming pieces skyward before locking.
+29. **Belt Conveyor Floor** (`conveyor_floor`): Drives a motorized track along the bottom row, shifting settled floor blocks one column every 2 beats.
+30. **Dual Twin Timeline** (`twin_sweep`): Splits the timeline into two synchronized beams sweeping 4 beats apart for double-tempo clears.
+31. **Crumble Crystal Ledges** (`crumble_blocks`): Suspends brittle crystal ledges mid-board; two impacts or adjacent clears crack and shatter them.
+32. **Anchored Color Nodes** (`anchored_viruses`): Suspends fixed chromatic nodes mid-air that resist gravity until cleared by a 2×2 square or chain (+500 purge).
+33. **Rising Tide Floor** (`rising_tide`): Sweeps with under 4 squares raise a new floor row; 4+ square sweeps push the tide back down.
+34. **Ceiling Press Shutters** (`ceiling_press`): Flank ceiling shutters descend on small sweeps and lift back up whenever you clear 4+ squares.
+35. **Frost-Rimed Surface** (`frost_tiles`): Freezes top-layer tiles in crystal frost that cracks on the first sweep and shatters on the second.
 
-#### Brick Shapes & 3-Color Shifts (9)
-28. **2×1 / 1×2 Domino Bricks** (`brick_2x1`): Transforms incoming falling pieces into nimble 2×1 / 1×2 domino bricks for one turn.
-29. **1×3 / 3×1 Trio Bricks** (`brick_3x1`): Transforms incoming falling pieces into linear 1×3 and 3×1 trio bricks for one turn.
-30. **3×2 / 2×3 Slab Bricks** (`brick_3x2`): Transforms incoming falling pieces into wide 3×2 / 2×3 six-tile slabs for one turn.
-31. **Tetromino Bricks** (`brick_tetromino`): Transforms incoming falling pieces into classic 4-tile I, O, T, S, Z, J, L shapes for one turn.
-32. **Obsidian Blocked Bricks** (`brick_blocked`): Mixes a solid dark obsidian block into occasional 2×2 pieces for one turn; shatters beside clears.
-33. **3-Color Spectrum** (`three_color_mode`): Introduces a third block color onto the board and incoming queue for one turn.
-34. **3-Tile Corner L-Bricks** (`brick_l_trio`): Carves incoming pieces into crisp 3-tile L-trominoes with a missing corner pocket for interlocking fits.
-35. **Chameleon Rotate** (`chameleon_rotate`): Rotating a falling brick cycles every tile color forward, letting you paint matches mid-air.
-36. **Prism Wild Bricks** (`prism_wild_bricks`): Embeds achromatic diamond Prism Wild tiles into incoming 2×2 bricks that match any adjacent color.
+#### Brick Shapes & 3-Color Shifts (11)
+36. **2×1 / 1×2 Domino Bricks** (`brick_2x1`): Transforms incoming falling pieces into nimble 2×1 / 1×2 domino bricks for one turn.
+37. **1×3 / 3×1 Trio Bricks** (`brick_3x1`): Transforms incoming falling pieces into linear 1×3 and 3×1 trio bricks for one turn.
+38. **3×2 / 2×3 Slab Bricks** (`brick_3x2`): Transforms incoming falling pieces into wide 3×2 / 2×3 six-tile slabs for one turn.
+39. **Tetromino Bricks** (`brick_tetromino`): Transforms incoming falling pieces into classic 4-tile I, O, T, S, Z, J, L shapes for one turn.
+40. **Obsidian Blocked Bricks** (`brick_blocked`): Mixes a solid dark obsidian block into occasional 2×2 pieces for one turn; shatters beside clears.
+41. **3-Color Spectrum** (`three_color_mode`): Introduces a third block color onto the board and incoming queue for one turn.
+42. **3-Tile Corner L-Bricks** (`brick_l_trio`): Carves incoming pieces into crisp 3-tile L-trominoes with a missing corner pocket for interlocking fits.
+43. **Chameleon Rotate** (`chameleon_rotate`): Rotating a falling brick cycles every tile color forward, letting you paint matches mid-air.
+44. **Prism Wild Bricks** (`prism_wild_bricks`): Embeds achromatic diamond Prism Wild tiles into incoming 2×2 bricks that match any adjacent color.
+45. **Crash Gem Surge** (`crash_gem`): Embeds radiant Crash Gems into pieces; clearing one detonates all connected matching-color blocks.
+46. **Architectural Stash Hold** (`stash_hold`): Unlocks a Hold slot (`C` / `Shift` / button) to bank and swap your active falling brick once per drop.
 
 #### Dramatic Row & Column Swaps (6)
-37. **Inside-Out Swap** (`inside_out_swap`): Swaps outer columns with inner columns, flipping a central mountain into twin outer cliffs.
-38. **Sawtooth Shear** (`sawtooth_shear`): Juts even rows right and odd rows left to transform straight walls into jagged zigzag teeth.
-39. **Horizon Shear** (`horizon_shear`): Cuts a glowing fault seam across the stack, sliding upper rows right and lower rows left.
-40. **The Zipper Merge** (`zipper_merge`): Interleaves top and bottom occupied rows cleanly like a zipper while keeping exact color ratios.
-41. **Mirror Symmetry Flip** (`mirror_flip`): Reflects the entire occupied board horizontally across the center line in a crisp specular flip.
-42. **Orbital Vortex Swirl** (`vortex_swirl`): Rotates occupied blocks clockwise around concentric perimeter rings like a slow architectural whirlpool.
+47. **Inside-Out Swap** (`inside_out_swap`): Swaps outer columns with inner columns, flipping a central mountain into twin outer cliffs.
+48. **Sawtooth Shear** (`sawtooth_shear`): Juts even rows right and odd rows left to transform straight walls into jagged zigzag teeth.
+49. **Horizon Shear** (`horizon_shear`): Cuts a glowing fault seam across the stack, sliding upper rows right and lower rows left.
+50. **The Zipper Merge** (`zipper_merge`): Interleaves top and bottom occupied rows cleanly like a zipper while keeping exact color ratios.
+51. **Mirror Symmetry Flip** (`mirror_flip`): Reflects the entire occupied board horizontally across the center line in a crisp specular flip.
+52. **Orbital Vortex Swirl** (`vortex_swirl`): Rotates occupied blocks clockwise around concentric perimeter rings like a slow architectural whirlpool.
 
 ## Skins and Music
 
@@ -141,9 +151,9 @@ An elegant, hypnotic dance fusion combining the measured grace of danzón with d
 * Vocal / Atmosphere: Wordless humming, desert wind textures, long analog delays, distant choral harmonics.
 ```
 
-I paste this into Google Gemini and say Generate a track. Then I download the MP3. 
+I paste this into Google Gemini and say Generate a track. Then I download the audio and encode it as OGG. 
 
-Once I upload the mp3 into the project, I ask AI studio to build a skin that is different than the other ones but inspired by the music, I usually also give it a visual reference that I love like cubist art that is a little more illustration and with a Neo Andean vibe. 
+Once I upload the ogg into the project, I ask AI studio to build a skin that is different than the other ones but inspired by the music, I usually also give it a visual reference that I love like cubist art that is a little more illustration and with a Neo Andean vibe. 
 
 Each of the 50 worlds pairs its own architectural or artistic backdrop, themed board border, block textures, and 4-stem reactive mix (Percussion, Bass, Lead, and Atmosphere)—ranging from sumi-e ink wash, cubist collage, Neo-Andean *cholets*, Nordic flat-pack showrooms, Grand Budapest symmetry, Ghibli rail expresses, 80s chrome sci-fi, Miami sunset neon, and animated cat sketchbooks to high-contrast monochrome worlds like **Silver Clearing**:
 
@@ -176,10 +186,11 @@ up down left right. Up rotates, down slams, left and right move the blocks.
 | Move Left / Right | `←` / `→` or `A` / `D` | `A` / `D` | `←` / `→` |
 | Rotate Clockwise | `↑`, `W`, `Space`, or `X` | `W` | `↑` |
 | Rotate Counter-CW | `Z` | `Q` | — |
-| Slam (Hard Drop) | `↓`, `S`, `C`, or `Shift` | `S` or `Left Shift` | `↓`, `Right Shift`, or `/` |
+| Slam (Hard Drop) | `↓` or `S` (`C` / `Shift` when Hold inactive) | `S` or `Left Shift` | `↓`, `Right Shift`, or `/` |
+| Stash Hold | `C` or `Shift` (during `stash_hold`) | — | — |
 | Pause / Restart / Mute | `P` or `Esc` / `R` / `M` | `P` or `Esc` / `R` / `M` | `P` or `Esc` / `R` / `M` |
 
-On compact mobile screens, on-screen Left/Right, Rotate, and Slam buttons appear automatically.
+On compact mobile screens, on-screen Left/Right, Rotate, and Slam buttons (plus Hold when `stash_hold` is active) appear automatically.
 
 ### Partial Overflow & Game Over Rule
 

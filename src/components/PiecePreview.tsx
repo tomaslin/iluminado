@@ -33,7 +33,7 @@ function buildSelectiveRoundedRectPath(
   ].join(' ');
 }
 
-export const PiecePreview: React.FC<PiecePreviewProps> = ({
+export const PiecePreview: React.FC<PiecePreviewProps> = React.memo(({
   piece,
   skin,
   cellSize = 20,
@@ -317,4 +317,4 @@ export const PiecePreview: React.FC<PiecePreviewProps> = ({
       )}
     </svg>
   );
-};
+});

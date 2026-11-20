@@ -103,10 +103,46 @@ const MODE_LIST: Array<{ id: GameMode; label: string; shortLabel: string; summar
 
 const EQ_HEIGHTS = [35, 58, 42, 82, 64, 95, 52, 74, 46, 62];
 
+const VolumeSlider: React.FC<{
+  id: string;
+  testId: string;
+  label: string;
+  ariaLabel: string;
+  value: number;
+  onChange: (val: number) => void;
+  mutedColor: string;
+  accentColor: string;
+}> = ({ id, testId, label, ariaLabel, value, onChange, mutedColor, accentColor }) => {
+  const pct = Math.round(value * 100);
+  return (
+    <div>
+      <div className="flex items-center justify-between text-xs font-semibold mb-1">
+        <label htmlFor={id}>{label}</label>
+        <span className="font-mono-tabular text-[11px]" style={{ color: mutedColor }}>
+          {pct}%
+        </span>
+      </div>
+      <input
+        id={id}
+        data-testid={testId}
+        type="range"
+        min={0}
+        max={100}
+        step={1}
+        value={pct}
+        onChange={(e) => onChange(Number(e.target.value) / 100)}
+        aria-label={ariaLabel}
+        className="w-full h-1.5 rounded-full cursor-pointer"
+        style={{ accentColor }}
+      />
+    </div>
+  );
+};
+
 const ModeArtworkSvg: React.FC<{
   mode: GameMode;
   skin: SkinConfig;
-}> = ({ mode, skin }) => {
+}> = React.memo(({ mode, skin }) => {
   const { palette } = skin;
   const aFill = palette.blockA.fill;
   const aHi = palette.blockA.highlight;
@@ -120,7 +156,6 @@ const ModeArtworkSvg: React.FC<{
       className="w-full h-full"
       aria-hidden="true"
     >
-      {/* Soft radial zen rays */}
       <g opacity="0.22">
         {Array.from({ length: 12 }, (_, idx) => {
           const ang = (idx / 12) * Math.PI * 2;
@@ -138,10 +173,8 @@ const ModeArtworkSvg: React.FC<{
         })}
       </g>
 
-      {/* Mode-specific crisp 2D / architectural emblem */}
       {mode === 'challenge' && (
         <g transform="translate(88, 92)">
-          {/* Subtle vertical timeline beam behind the block */}
           <rect
             x="-2"
             y="-64"
@@ -152,14 +185,12 @@ const ModeArtworkSvg: React.FC<{
             fillOpacity="0.45"
           />
 
-          {/* Tactile drop shadow under base 3 tiles */}
           <g fill={frame} fillOpacity="0.22" transform="translate(3, 5)">
             <rect x="-46" y="-46" width="42" height="42" rx="9" />
             <rect x="-46" y="4" width="42" height="42" rx="9" />
             <rect x="4" y="4" width="42" height="42" rx="9" />
           </g>
 
-          {/* Dashed origin socket for shifting top-right tile */}
           <rect
             x="4"
             y="-46"
@@ -174,7 +205,6 @@ const ModeArtworkSvg: React.FC<{
             strokeDasharray="5 4"
           />
 
-          {/* Top-Left Tile */}
           <rect
             x="-46"
             y="-46"
@@ -187,7 +217,6 @@ const ModeArtworkSvg: React.FC<{
           />
           <circle cx="-25" cy="-25" r="7" fill={aHi} fillOpacity="0.55" />
 
-          {/* Bottom-Left Tile */}
           <rect
             x="-46"
             y="4"
@@ -210,7 +239,6 @@ const ModeArtworkSvg: React.FC<{
             strokeWidth="2"
           />
 
-          {/* Bottom-Right Tile */}
           <rect
             x="4"
             y="4"
@@ -227,7 +255,6 @@ const ModeArtworkSvg: React.FC<{
             fillOpacity="0.6"
           />
 
-          {/* Shifting & Transforming Top-Right Tile */}
           <g transform="translate(11, -11)">
             <rect
               x="6"
@@ -291,7 +318,6 @@ const ModeArtworkSvg: React.FC<{
       {mode === 'puzzle' && (
         <g transform="translate(90, 90)">
           <rect x="-46" y="-42" width="92" height="84" rx="8" fill={bFill} stroke={frame} strokeWidth="2.5" />
-          {/* Archway silhouette */}
           <path
             d="M-24,42 L-24,-4 A24,24 0 0,1 24,-4 L24,42 Z"
             fill={aFill}
@@ -337,7 +363,6 @@ const ModeArtworkSvg: React.FC<{
           <rect x="-46" y="-40" width="92" height="22" rx="8" fill={palette.hudInk} />
           <rect x="-26" y="-48" width="8" height="14" rx="3" fill={palette.hudAccent} />
           <rect x="18" y="-48" width="8" height="14" rx="3" fill={palette.hudAccent} />
-          {/* Sanctuary 2x2 tile icon inside calendar frame */}
           <rect x="-18" y="-6" width="16" height="16" rx="3" fill={aFill} stroke={frame} strokeWidth="1.5" />
           <rect x="2" y="-6" width="16" height="16" rx="1.5" fill={bFill} stroke={frame} strokeWidth="1.5" />
           <rect x="-18" y="14" width="16" height="16" rx="1.5" fill={bFill} stroke={frame} strokeWidth="1.5" />
@@ -358,7 +383,7 @@ const ModeArtworkSvg: React.FC<{
       )}
     </svg>
   );
-};
+});
 
 export const TitleScreen: React.FC<TitleScreenProps> = ({
   selectedMode,
@@ -487,13 +512,11 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
 
   return (
     <div className="fixed inset-0 z-20 flex flex-col justify-between pointer-events-none overflow-y-auto lg:overflow-hidden">
-      {/* Top Minimal Perimeter Strip: Brand Lockup & World / Sound / Shifts */}
       <header
         className={`w-full flex items-center justify-between gap-3 ${
           isCompactLandscape ? 'px-4 pt-2.5' : 'px-4 sm:px-8 pt-4 sm:pt-6'
         } shrink-0`}
       >
-        {/* Brand Emblem */}
         <div className="flex items-center gap-2.5 pointer-events-auto">
           <svg
             width="38"
@@ -560,9 +583,7 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
           </h1>
         </div>
 
-        {/* Right Controls: Soundtrack Browser + Shifts + Sound */}
         <div className="flex items-center gap-2 pointer-events-auto">
-          {/* Compact World & Music Selector */}
           <div
             className="hidden sm:flex items-center gap-1.5 rounded-xl px-2 py-1 transition-colors duration-300"
             style={{
@@ -620,7 +641,6 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
             </button>
           </div>
 
-          {/* Shift Settings */}
           <button
             type="button"
             data-testid="open-shift-settings-title"
@@ -637,7 +657,6 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
             <span>Shifts</span>
           </button>
 
-          {/* In-App Install Prompt (auto-hides in standalone mode) */}
           <PWAInstallButton
             skin={previewSkin}
             chipBg={topChipBg}
@@ -645,7 +664,6 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
             heroInk={heroInk}
           />
 
-          {/* Audio Mute + Volume Mix Popover */}
           <div className="relative flex items-center" ref={audioMenuRef}>
             <div
               className="h-9 rounded-xl flex items-center overflow-hidden transition-colors"
@@ -692,54 +710,26 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
                   border: `1.5px solid ${palette.boardFrame}`,
                 }}
               >
-                <div>
-                  <div className="flex items-center justify-between text-xs font-semibold mb-1">
-                    <label htmlFor="title-music-vol">Music</label>
-                    <span
-                      className="font-mono-tabular text-[11px]"
-                      style={{ color: palette.hudMuted }}
-                    >
-                      {Math.round(musicVolume * 100)}%
-                    </span>
-                  </div>
-                  <input
-                    id="title-music-vol"
-                    data-testid="title-music-volume-slider"
-                    type="range"
-                    min={0}
-                    max={100}
-                    step={1}
-                    value={Math.round(musicVolume * 100)}
-                    onChange={(e) => onChangeMusicVolume(Number(e.target.value) / 100)}
-                    aria-label="Music volume"
-                    className="w-full h-1.5 rounded-full cursor-pointer"
-                    style={{ accentColor: palette.hudAccent }}
-                  />
-                </div>
-                <div>
-                  <div className="flex items-center justify-between text-xs font-semibold mb-1">
-                    <label htmlFor="title-sfx-vol">SFX</label>
-                    <span
-                      className="font-mono-tabular text-[11px]"
-                      style={{ color: palette.hudMuted }}
-                    >
-                      {Math.round(sfxVolume * 100)}%
-                    </span>
-                  </div>
-                  <input
-                    id="title-sfx-vol"
-                    data-testid="title-sfx-volume-slider"
-                    type="range"
-                    min={0}
-                    max={100}
-                    step={1}
-                    value={Math.round(sfxVolume * 100)}
-                    onChange={(e) => onChangeSfxVolume(Number(e.target.value) / 100)}
-                    aria-label="SFX volume"
-                    className="w-full h-1.5 rounded-full cursor-pointer"
-                    style={{ accentColor: palette.hudAccent }}
-                  />
-                </div>
+                <VolumeSlider
+                  id="title-music-vol"
+                  testId="title-music-volume-slider"
+                  label="Music"
+                  ariaLabel="Music volume"
+                  value={musicVolume}
+                  onChange={onChangeMusicVolume}
+                  mutedColor={palette.hudMuted}
+                  accentColor={palette.hudAccent}
+                />
+                <VolumeSlider
+                  id="title-sfx-vol"
+                  testId="title-sfx-volume-slider"
+                  label="SFX"
+                  ariaLabel="SFX volume"
+                  value={sfxVolume}
+                  onChange={onChangeSfxVolume}
+                  mutedColor={palette.hudMuted}
+                  accentColor={palette.hudAccent}
+                />
                 {(onToggleReducedMotion || onTogglePatternMode) && (
                   <div className="pt-2.5 border-t border-[#201c2c]/10 flex flex-col gap-1.5">
                     {onToggleReducedMotion && (
@@ -782,13 +772,11 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
         </div>
       </header>
 
-      {/* Center Welcoming Game Stage */}
       <main
         className={`flex-1 flex flex-col items-center justify-center ${
           isCompactLandscape ? 'px-4 py-1 gap-2' : 'px-4 sm:px-8 py-4 gap-4 sm:gap-5'
         } min-h-0`}
       >
-        {/* Interactive Mode Emblem + Title + Concise Options + Play Button */}
         <div className="flex flex-col items-center text-center max-w-xl w-full pointer-events-auto">
           <button
             type="button"
@@ -836,7 +824,6 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
               : activeModeObj.summary}
           </p>
 
-          {/* Compact Mode Sub-Options (only shown for modes that have choices) */}
           {selectedMode === 'challenge' && (
             <div
               className="flex flex-wrap items-center justify-center gap-1.5 mt-3 sm:mt-4 p-1 rounded-xl"
@@ -983,7 +970,6 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
             </div>
           )}
 
-          {/* Primary Play Action */}
           <div className="flex flex-col items-center gap-2 mt-4 sm:mt-5">
             <button
               type="button"
@@ -1019,7 +1005,6 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
         </div>
       </main>
 
-      {/* Bottom Mode Ribbon & Clean Control Hint */}
       <footer className="w-full flex flex-col items-center gap-2 pb-2 sm:pb-3 px-4 shrink-0">
         <div
           className="flex flex-wrap items-center justify-center gap-1.5 p-1.5 rounded-2xl pointer-events-auto max-w-full"
@@ -1054,7 +1039,6 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
           })}
         </div>
 
-        {/* Bottom Flat Borderless Control Hint (Desktop Keyboard Only) */}
         <div
           className="kbd-hint-bar text-center text-xs font-medium py-0.5 px-4 pointer-events-none transition-colors duration-300"
           style={{

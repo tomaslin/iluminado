@@ -127,10 +127,10 @@ export interface Cell {
   inSquare: boolean;
   pendingClear: boolean;
   sweptCol: boolean;
-  fallOffset: number; // visual interpolation in rows (>0 means animating downward)
-  landFlash: number; // 0..1 impact pulse
-  animOffsetX?: number; // temporary column translation offset for orientation pivot / flow slide
-  animOffsetY?: number; // temporary row translation offset (>0 = raised upward)
+  fallOffset: number;
+  landFlash: number;
+  animOffsetX?: number;
+  animOffsetY?: number;
 }
 
 export interface PieceCellData {
@@ -144,9 +144,9 @@ export interface PieceCellData {
 export type PieceCell = PieceCellData | null;
 
 export interface Piece {
-  x: number; // column of top-left cell
-  y: number; // row of top-left cell (can start at -2..-4 above board)
-  cells: PieceCell[][]; // rows x cols bounding grid, null for empty tetromino slots
+  x: number;
+  y: number;
+  cells: PieceCell[][];
   shapeMode?: PieceShapeMode;
   tetrominoKind?: TetrominoKind;
   springBounced?: boolean;
@@ -164,8 +164,8 @@ export interface ShiftSchedulerState {
 }
 
 export interface SquareCoord {
-  x: number; // 0..14
-  y: number; // 0..8
+  x: number;
+  y: number;
   color: CellColor;
 }
 
@@ -378,13 +378,13 @@ export interface SkinConfig {
   inspiration: string;
   subtitle: string;
   bpm: number;
-  gravitySpeed: number; // rows per second
-  spawnDelay: number; // seconds before gravity starts
-  chainFrequency: number; // probability 0..0.18 of a cell in a piece being a Chain Block
-  squaresPerLevel: number; // hidden squares required per level-up (excess overflow discarded)
-  levelsPerSkin: number; // 3 levels inside this skin before transitioning
-  squaresToAdvance: number; // nominal stage square target (squaresPerLevel * levelsPerSkin)
-  finalStageTimerSec?: number; // final stage transitions by flat timer instead of square quota
+  gravitySpeed: number;
+  spawnDelay: number;
+  chainFrequency: number;
+  squaresPerLevel: number;
+  levelsPerSkin: number;
+  squaresToAdvance: number;
+  finalStageTimerSec?: number;
   theme: SkinVisualTheme;
   particleShape: 'square' | 'petal' | 'spark' | 'ink' | 'bubble';
   palette: {
@@ -425,14 +425,14 @@ export interface SkinConfig {
     waveform: OscillatorType;
     bassWaveform: OscillatorType;
     intensity: number;
-    swingRatio: number; // 0 = straight, 0.33 = swing bounce
-    distortion: number; // 0..1 wave shaper drive
-    subBassGain: number; // 0..1 808/sub emphasis
+    swingRatio: number;
+    distortion: number;
+    subBassGain: number;
   };
 }
 
 export interface SweepState {
-  lastCol: number; // last column index (0..15) processed in current sweep
+  lastCol: number;
   squaresThisSweep: number;
   chainClearedThisSweep: number;
   cellsClearedThisSweep: number;
@@ -450,14 +450,14 @@ export interface ClearEvent {
 }
 
 export interface BoardState {
-  grid: (Cell | null)[][]; // [row][col], 10x16 landscape or 14x10 portrait
+  grid: (Cell | null)[][];
   cols: number;
   rows: number;
   baseCols: number;
   baseRows: number;
   orientation: BoardOrientation;
   gravityDirection?: GravityDirection;
-  orientationGraceTimer: number; // brief gravity pause after orientation switch
+  orientationGraceTimer: number;
   activeShift: ShiftType | null;
   pieceShapeMode: PieceShapeMode;
   colorCount: 2 | 3;
@@ -473,7 +473,7 @@ export interface BoardState {
   nextQueue: Piece[];
   squares: SquareCoord[];
   sweepState: SweepState;
-  comboLevel: number; // consecutive sweeps with >= 4 squares
+  comboLevel: number;
   comboGraceUsed?: boolean;
   vetoTokens?: number;
   upcomingShift?: ShiftType | null;
@@ -488,7 +488,7 @@ export interface BoardState {
   stageSquaresCleared: number;
   maxCombo: number;
   isGameOver: boolean;
-  lockedColumnsLeft: number; // for VS battle pressure
+  lockedColumnsLeft: number;
   lockedColumnsRight: number;
   pendingGarbage: number;
   biggestSweep: number;

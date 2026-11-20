@@ -213,9 +213,7 @@ export function saveProgress(progress: SavedProgress): void {
       STORAGE_KEY,
       JSON.stringify({ ...progress, shiftCatalogVersion: 7 })
     );
-  } catch {
-    // Ignore storage quota errors in private browsing
-  }
+  } catch {}
 }
 
 export function isDailyCompletedForDate(

@@ -7,7 +7,7 @@
 ## Why Use Butler Instead of Manual Zip Uploads?
 
 1. **Binary Delta Patching (Wharf)**:
-   *Iluminado* includes 50 soundtrack MP3 files (~115 MB). When you publish an update using Butler, Butler only sends the modified code bytes (typically <500 KB), rather than re-uploading the full 115 MB audio library every time.
+   *Iluminado* includes 50 soundtrack OGG files (~74 MB). When you publish an update using Butler, Butler only sends the modified code bytes (typically <500 KB), rather than re-uploading the full 74 MB audio library every time.
 2. **Instant Deploys**: Deployments take seconds over CLI or CI/CD pipelines.
 3. **Automated Version Tracking**: Automatically bumps and tags user-facing build numbers.
 4. **Zero Downtime**: The game continues running uninterrupted while new builds are processed in the background.

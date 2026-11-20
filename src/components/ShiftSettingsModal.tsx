@@ -1,10 +1,11 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import {
   ALL_SHIFT_TYPES,
   SHIFT_CATEGORY_LABELS,
   SHIFT_DEFINITIONS,
   START_FRIENDLY_SHIFTS,
   ShiftCategory,
+  ShiftDefinition,
 } from '../game/shifts';
 import { ShiftType, SkinConfig } from '../game/types';
 
@@ -17,6 +18,14 @@ interface ShiftSettingsModalProps {
 }
 
 const CATEGORIES: ShiftCategory[] = ['core', 'silhouette', 'obstacles', 'bricks', 'swaps'];
+
+const SHIFT_DEFINITIONS_BY_CATEGORY: Record<ShiftCategory, ShiftDefinition[]> = {
+  core: SHIFT_DEFINITIONS.filter((d) => d.category === 'core'),
+  silhouette: SHIFT_DEFINITIONS.filter((d) => d.category === 'silhouette'),
+  obstacles: SHIFT_DEFINITIONS.filter((d) => d.category === 'obstacles'),
+  bricks: SHIFT_DEFINITIONS.filter((d) => d.category === 'bricks'),
+  swaps: SHIFT_DEFINITIONS.filter((d) => d.category === 'swaps'),
+};
 
 export const ShiftSettingsModal: React.FC<ShiftSettingsModalProps> = ({
   isOpen,
@@ -38,10 +47,11 @@ export const ShiftSettingsModal: React.FC<ShiftSettingsModalProps> = ({
     return () => window.removeEventListener('keydown', onKeyDown, true);
   }, [isOpen, onClose]);
 
+  const enabledSet = useMemo(() => new Set<ShiftType>(enabledShifts), [enabledShifts]);
+
   if (!isOpen) return null;
 
   const { palette } = skin;
-  const enabledSet = new Set<ShiftType>(enabledShifts);
 
   const toggleShift = (id: ShiftType) => {
     if (enabledSet.has(id)) {
@@ -71,9 +81,7 @@ export const ShiftSettingsModal: React.FC<ShiftSettingsModalProps> = ({
     } else if (preset === 'none') {
       onChangeEnabledShifts([]);
     } else {
-      onChangeEnabledShifts(
-        SHIFT_DEFINITIONS.filter((d) => d.category === preset).map((d) => d.id)
-      );
+      onChangeEnabledShifts(SHIFT_DEFINITIONS_BY_CATEGORY[preset].map((d) => d.id));
     }
   };
 
@@ -103,7 +111,6 @@ export const ShiftSettingsModal: React.FC<ShiftSettingsModalProps> = ({
             color: palette.hudInk,
           }}
         >
-        {/* Header */}
         <div className="px-5 sm:px-6 pt-5 pb-4 border-b border-[#201c2c]/10 flex items-start justify-between gap-4 shrink-0">
           <div>
             <div
@@ -135,7 +142,6 @@ export const ShiftSettingsModal: React.FC<ShiftSettingsModalProps> = ({
           </button>
         </div>
 
-        {/* Presets Bar */}
         <div className="px-5 sm:px-6 py-3 border-b border-[#201c2c]/10 flex flex-wrap items-center gap-2 shrink-0">
           {(
             [
@@ -165,10 +171,9 @@ export const ShiftSettingsModal: React.FC<ShiftSettingsModalProps> = ({
           ))}
         </div>
 
-        {/* Shift Category Grid */}
         <div className="p-5 sm:p-6 overflow-y-auto flex-1 space-y-6">
           {CATEGORIES.map((category) => {
-            const items = SHIFT_DEFINITIONS.filter((d) => d.category === category);
+            const items = SHIFT_DEFINITIONS_BY_CATEGORY[category];
             return (
               <section key={category}>
                 <h3

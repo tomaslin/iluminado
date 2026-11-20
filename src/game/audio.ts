@@ -18,10 +18,6 @@ export interface StemLevels {
   vocal: number;
 }
 
-/**
- * Computes dynamic 4-stem mix levels based on live board occupancy, formed squares,
- * combo state, and stage progression so tracks evolve organically as the player plays.
- */
 export function computeStemLevels(
   board: BoardState | null,
   skin: SkinConfig
@@ -84,9 +80,6 @@ export interface LoopTimingSpec {
   loopSweeps: number;
 }
 
-/**
- * Resolves exact whole-sweep loop boundaries (`[firstBeatSec, loopEndSec)`) for a track buffer.
- */
 export function resolveLoopTiming(
   skin: Pick<SkinConfig, 'bpm' | 'music'>,
   bufferDurationSec: number
@@ -118,11 +111,6 @@ export function resolveLoopTiming(
   return { firstBeatSec, loopEndSec, loopSweeps: sweeps };
 }
 
-/**
- * Computes continuous unwrapped beat position directly from the unwrapped buffer playback cursor.
- * Because loop length is an exact whole number of 8-beat sweeps, `(beat % 8)` stays seamlessly
- * locked across every loop wrap.
- */
 export function computeBeatFromBufferPosition(params: {
   rawUnwrappedPosSec: number;
   firstBeatSec: number;
@@ -133,10 +121,6 @@ export function computeBeatFromBufferPosition(params: {
   return (elapsedSec * Math.max(40, bpm)) / 60;
 }
 
-/**
- * Quantizes rhythmic SFX (land, square-formed) to the next 16th-note boundary when within `maxSnapSec`,
- * returning delay in seconds (`0` if already on-grid or further than `maxSnapSec` away).
- */
 export function computeQuantizedSfxDelaySec(
   beatPos: number,
   bpm: number,
@@ -159,57 +143,146 @@ export interface AudioSpectrumSnapshot {
   hasLiveAudio: boolean;
 }
 
+const SPECTRUM_BAND_EDGES = [0, 1, 2, 4, 7, 11, 16, 23, 33, 46, 68];
+
+const AMBIENT_STYLES = new Set<MusicStyleId>([
+  'ambient',
+  'dark_ambient',
+  'cathedral_organ',
+  'solarpunk_ambient',
+  'de_stijl_minimal',
+]);
+
+const CLUB_HOUSE_STYLES = new Set<MusicStyleId>([
+  'dub_techno',
+  'flamenco_house',
+  'industrial_synth',
+  'miami_boogie',
+  'memphis_electro',
+  'constructivist_march',
+  'nordic_synth',
+  'kraut_motorik',
+  'analog_funk_70s',
+]);
+
+const PLUCK_LEAD_STYLES = new Set<MusicStyleId>([
+  'bachata',
+  'country',
+  'bossa_nova',
+  'blues_rock',
+  'shamisen_chill',
+  'botanical_waltz',
+]);
+
+const CHIP_MINIMAL_STYLES = new Set<MusicStyleId>(['chiptune_funk', 'de_stijl_minimal']);
+
+const WOOD_MARIMBA_STYLES = new Set<MusicStyleId>([
+  'salsa',
+  'bachata',
+  'bossa_nova',
+  'cumbia_dub',
+  'afrobeat_jazz',
+  'shamisen_chill',
+  'andean_cumbia',
+  'botanical_waltz',
+  'chamber_waltz',
+  'koto_taiko',
+]);
+
+const ROCK_CRUNCH_STYLES = new Set<MusicStyleId>([
+  'heavy_metal',
+  'alt_rock',
+  'blues_rock',
+  'industrial_synth',
+  'constructivist_march',
+]);
+
+const ANALOG_SYNTH_STYLES = new Set<MusicStyleId>([
+  'synthwave',
+  'miami_boogie',
+  'memphis_electro',
+  'nordic_synth',
+  'city_pop',
+  'analog_funk_70s',
+  'kraut_motorik',
+]);
+
+const JAZZ_FENDER_STYLES = new Set<MusicStyleId>([
+  'swing',
+  'jazz_fusion',
+  'ethio_jazz',
+  'cat_step_jazz',
+  'tokyo_jazz_kissa',
+  'neo_soul',
+  'space_age_lounge',
+  'cubist_chamber',
+  'tango_nuevo',
+  'flamenco_house',
+]);
+
+const DUB_CLUB_STYLES = new Set<MusicStyleId>([
+  'trap',
+  'reggaeton',
+  'kizomba',
+  'dark_zouk',
+  'dub_techno',
+  'uk_garage',
+  'liquid_dnb',
+  'funk_fusion',
+  'country',
+]);
+
 const TRACK_TRIM_GAINS: Record<string, number> = {
-  'music/world1.mp3': 1.38,
-  'music/world2.mp3': 1.32,
-  'music/world3.mp3': 2.5,
-  'music/world4.mp3': 1.58,
-  'music/world5.mp3': 0.8,
-  'music/world6.mp3': 1.42,
-  'music/world7.mp3': 0.68,
-  'music/world8.mp3': 0.68,
-  'music/world9.mp3': 0.65,
-  'music/world10.mp3': 1.62,
-  'music/world11.mp3': 0.94,
-  'music/world12.mp3': 0.74,
-  'music/world13.mp3': 0.66,
-  'music/world14.mp3': 0.6,
-  'music/world15.mp3': 0.6,
-  'music/world16.mp3': 0.6,
-  'music/world17.mp3': 0.68,
-  'music/world18.mp3': 0.63,
-  'music/world19.mp3': 0.62,
-  'music/world20.mp3': 0.68,
-  'music/world21.mp3': 0.98,
-  'music/world22.mp3': 1.04,
-  'music/world23.mp3': 0.74,
-  'music/world24.mp3': 1.2,
-  'music/world25.mp3': 0.86,
-  'music/world26.mp3': 0.76,
-  'music/world27.mp3': 1.12,
-  'music/world28.mp3': 1.16,
-  'music/world29.mp3': 0.96,
-  'music/world30.mp3': 0.88,
-  'music/world31.mp3': 0.94,
-  'music/world32.mp3': 1.0,
-  'music/world33.mp3': 0.92,
-  'music/world34.mp3': 0.95,
-  'music/world35.mp3': 0.88,
-  'music/world36.mp3': 0.92,
-  'music/world37.mp3': 0.84,
-  'music/world38.mp3': 0.86,
-  'music/world39.mp3': 0.94,
-  'music/world40.mp3': 0.88,
-  'music/world41.mp3': 1.58,
-  'music/world42.mp3': 1.48,
-  'music/world43.mp3': 1.12,
-  'music/world44.mp3': 0.82,
-  'music/world45.mp3': 0.92,
-  'music/world46.mp3': 1.52,
-  'music/world47.mp3': 0.82,
-  'music/world48.mp3': 0.76,
-  'music/world49.mp3': 1.18,
-  'music/world50.mp3': 0.88,
+  'music/world1.ogg': 1.0,
+  'music/world2.ogg': 0.98,
+  'music/world3.ogg': 1.04,
+  'music/world4.ogg': 1.07,
+  'music/world5.ogg': 0.97,
+  'music/world6.ogg': 0.95,
+  'music/world7.ogg': 0.9,
+  'music/world8.ogg': 1.16,
+  'music/world9.ogg': 0.97,
+  'music/world10.ogg': 0.91,
+  'music/world11.ogg': 0.95,
+  'music/world12.ogg': 1.01,
+  'music/world13.ogg': 1.02,
+  'music/world14.ogg': 0.92,
+  'music/world15.ogg': 0.93,
+  'music/world16.ogg': 0.93,
+  'music/world17.ogg': 1.07,
+  'music/world18.ogg': 0.97,
+  'music/world19.ogg': 0.95,
+  'music/world20.ogg': 1.05,
+  'music/world21.ogg': 1.14,
+  'music/world22.ogg': 0.92,
+  'music/world23.ogg': 1.0,
+  'music/world24.ogg': 0.97,
+  'music/world25.ogg': 0.93,
+  'music/world26.ogg': 1.04,
+  'music/world27.ogg': 1.05,
+  'music/world28.ogg': 0.94,
+  'music/world29.ogg': 1.01,
+  'music/world30.ogg': 0.98,
+  'music/world31.ogg': 1.02,
+  'music/world32.ogg': 1.1,
+  'music/world33.ogg': 1.01,
+  'music/world34.ogg': 1.04,
+  'music/world35.ogg': 0.99,
+  'music/world36.ogg': 0.99,
+  'music/world37.ogg': 0.93,
+  'music/world38.ogg': 0.95,
+  'music/world39.ogg': 1.02,
+  'music/world40.ogg': 0.98,
+  'music/world41.ogg': 1.06,
+  'music/world42.ogg': 1.02,
+  'music/world43.ogg': 1.15,
+  'music/world44.ogg': 1.06,
+  'music/world45.ogg': 0.91,
+  'music/world46.ogg': 0.97,
+  'music/world47.ogg': 1.06,
+  'music/world48.ogg': 0.95,
+  'music/world49.ogg': 0.98,
+  'music/world50.ogg': 0.99,
 };
 
 export function getTrackTrimGain(trackUrl?: string | null): number {
@@ -230,7 +303,6 @@ export class IluminadoAudioEngine {
   private stemLeadGain: GainNode | null = null;
   private stemVocalGain: GainNode | null = null;
 
-  // 3-band Linkwitz-Riley crossover split + mastering filter for MP3 tracks
   private musicTrimGain: GainNode | null = null;
   private musicLowBandGain: GainNode | null = null;
   private musicMidBandGain: GainNode | null = null;
@@ -248,7 +320,6 @@ export class IluminadoAudioEngine {
   private desiredSkin: SkinConfig | null = null;
   private desiredMode: 'title' | 'playing' | 'paused' | 'gameover' = 'title';
 
-  // Decoded AudioBuffer cache (capped at 3) + gapless sample-accurate AudioBufferSourceNode playback
   private rawTrackCache = new Map<string, ArrayBuffer>();
   private rawFetchPromises = new Map<string, Promise<ArrayBuffer | null>>();
   private audioBuffers = new Map<string, AudioBuffer>();
@@ -260,7 +331,6 @@ export class IluminadoAudioEngine {
   private transitionBloomUntilCtxTime = 0;
   private fadingBufferNodes = new Set<{ node: AudioBufferSourceNode; gain: GainNode }>();
 
-  // Exact buffer playback clock tracking (handles dynamic playbackRate changes without phase slip)
   private currentTempoScale = 1;
   private bufferAnchorCtxTime = 0;
   private bufferAnchorRawPosSec = 0;
@@ -285,6 +355,8 @@ export class IluminadoAudioEngine {
 
   private lastStems: StemLevels = { percussion: 0.78, bass: 0.45, lead: 0.25, vocal: 0.1 };
   private lastComboLevel = 0;
+  private readonly emptySpectrumBands = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+  private readonly liveSpectrumBands = new Array<number>(10).fill(0);
 
   public unlock(): void {
     this.unlockedByUser = true;
@@ -333,55 +405,35 @@ export class IluminadoAudioEngine {
       this.stemVocalGain.connect(this.sfxBusGain);
       this.sfxBusGain.connect(this.compressor);
 
-      // Studio MP3 multiband crossover split (LR4: Bass <200Hz, Mid 200..2400Hz, High >2400Hz)
       this.musicTrimGain = this.ctx.createGain();
       this.musicTrimGain.gain.value = getTrackTrimGain(this.activeMusicUrl);
 
-      const lowLp1 = this.ctx.createBiquadFilter();
-      lowLp1.type = 'lowpass';
-      lowLp1.frequency.value = 200;
-      lowLp1.Q.value = 0.7071;
-      const lowLp2 = this.ctx.createBiquadFilter();
-      lowLp2.type = 'lowpass';
-      lowLp2.frequency.value = 200;
-      lowLp2.Q.value = 0.7071;
+      const makeFilter = (type: BiquadFilterType, frequency: number, q = 0.7071) => {
+        const node = this.ctx!.createBiquadFilter();
+        node.type = type;
+        node.frequency.value = frequency;
+        node.Q.value = q;
+        return node;
+      };
+
+      const lowLp1 = makeFilter('lowpass', 200);
+      const lowLp2 = makeFilter('lowpass', 200);
       this.musicLowBandGain = this.ctx.createGain();
       this.musicLowBandGain.gain.value = 1;
 
-      const midHp1 = this.ctx.createBiquadFilter();
-      midHp1.type = 'highpass';
-      midHp1.frequency.value = 200;
-      midHp1.Q.value = 0.7071;
-      const midHp2 = this.ctx.createBiquadFilter();
-      midHp2.type = 'highpass';
-      midHp2.frequency.value = 200;
-      midHp2.Q.value = 0.7071;
-      const midLp1 = this.ctx.createBiquadFilter();
-      midLp1.type = 'lowpass';
-      midLp1.frequency.value = 2400;
-      midLp1.Q.value = 0.7071;
-      const midLp2 = this.ctx.createBiquadFilter();
-      midLp2.type = 'lowpass';
-      midLp2.frequency.value = 2400;
-      midLp2.Q.value = 0.7071;
+      const midHp1 = makeFilter('highpass', 200);
+      const midHp2 = makeFilter('highpass', 200);
+      const midLp1 = makeFilter('lowpass', 2400);
+      const midLp2 = makeFilter('lowpass', 2400);
       this.musicMidBandGain = this.ctx.createGain();
       this.musicMidBandGain.gain.value = 1;
 
-      const highHp1 = this.ctx.createBiquadFilter();
-      highHp1.type = 'highpass';
-      highHp1.frequency.value = 2400;
-      highHp1.Q.value = 0.7071;
-      const highHp2 = this.ctx.createBiquadFilter();
-      highHp2.type = 'highpass';
-      highHp2.frequency.value = 2400;
-      highHp2.Q.value = 0.7071;
+      const highHp1 = makeFilter('highpass', 2400);
+      const highHp2 = makeFilter('highpass', 2400);
       this.musicHighBandGain = this.ctx.createGain();
       this.musicHighBandGain.gain.value = 1;
 
-      this.musicFilter = this.ctx.createBiquadFilter();
-      this.musicFilter.type = 'lowpass';
-      this.musicFilter.frequency.value = 8200;
-      this.musicFilter.Q.value = 0.72;
+      this.musicFilter = makeFilter('lowpass', 8200, 0.72);
 
       this.musicBusGain = this.ctx.createGain();
       this.musicBusGain.gain.value = 0.56 * this.musicVolume;
@@ -410,7 +462,6 @@ export class IluminadoAudioEngine {
       this.masterGain.connect(this.analyser);
       this.analyser.connect(this.ctx.destination);
 
-      // Shared white-noise buffer (0.3s) for hi-hats, claps, snares, brushes, guira
       const len = Math.floor(this.ctx.sampleRate * 0.3);
       this.noiseBuffer = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
       const data = this.noiseBuffer.getChannelData(0);
@@ -420,7 +471,13 @@ export class IluminadoAudioEngine {
 
     }
     if (this.ctx.state === 'suspended') {
-      this.ctx.resume().catch(() => {});
+      this.ctx
+        .resume()
+        .then(() => {
+          this.ensureDesiredMusicPlaying();
+          this.applyDynamicMusicShaping();
+        })
+        .catch(() => {});
     }
     if (this.desiredTrackUrl) {
       void this.ensureBufferDecoded(this.desiredTrackUrl);
@@ -521,25 +578,16 @@ export class IluminadoAudioEngine {
       this.bufferAnchorCtxTime = now;
       try {
         this.activeBufferNode.playbackRate.setValueAtTime(clamped, now);
-      } catch {
-        // Ignore on stopped node
-      }
+      } catch {}
     }
     this.currentTempoScale = clamped;
     if (this.fallbackAudio) {
       try {
         this.fallbackAudio.playbackRate = clamped;
-      } catch {
-        // Ignore unsupported playbackRate
-      }
+      } catch {}
     }
   }
 
-  /**
-   * Computes current track beat directly from the playing AudioBuffer's hardware playback cursor
-   * (`((ctx.currentTime - startTime) * rate + firstBeat) * bpm / 60` generalized across rate changes),
-   * or returns `null` when falling back to synth / unbuffered audio.
-   */
   public getBufferBeatPosition(): number | null {
     if (
       !this.ctx ||
@@ -559,10 +607,6 @@ export class IluminadoAudioEngine {
     });
   }
 
-  /**
-   * Advances timeline beat progress locked directly to AudioContext's hardware sample clock
-   * whenever audio playback is running, falling back to clamped frame dt otherwise.
-   */
   public consumeTimelineBeatDelta(fallbackDt: number, effectiveBpm: number): number {
     const safeDt = Math.max(0, Math.min(0.05, fallbackDt));
     if (
@@ -592,17 +636,12 @@ export class IluminadoAudioEngine {
     return Array.from(this.audioBuffers.keys());
   }
 
-  /**
-   * Cache helper exposed so tests and runtime both enforce the strict 3-buffer memory cap.
-   * Protects the active track, desired track, and keepUrl from being evicted.
-   */
   public trimBufferCaches(keepUrl?: string): void {
     const protectedUrls = new Set<string>();
     if (this.activeBufferUrl) protectedUrls.add(this.activeBufferUrl);
     if (this.desiredTrackUrl) protectedUrls.add(this.desiredTrackUrl);
     if (keepUrl) protectedUrls.add(keepUrl);
 
-    // Evict decoded buffers beyond MAX_DECODED_BUFFER_CACHE
     while (this.audioBuffers.size > MAX_DECODED_BUFFER_CACHE) {
       let evictedKey: string | null = null;
       for (const key of this.audioBuffers.keys()) {
@@ -612,7 +651,6 @@ export class IluminadoAudioEngine {
         }
       }
       if (!evictedKey) {
-        // If all are protected, evict oldest that is not active or desired
         for (const key of this.audioBuffers.keys()) {
           if (key !== this.activeBufferUrl && key !== this.desiredTrackUrl) {
             evictedKey = key;
@@ -627,12 +665,10 @@ export class IluminadoAudioEngine {
       this.audioBuffers.delete(evictedKey);
     }
 
-    // Any track already decoded into audioBuffers can be safely purged from raw byte cache
     for (const key of this.audioBuffers.keys()) {
       this.rawTrackCache.delete(key);
     }
 
-    // Evict raw compressed tracks beyond MAX_RAW_TRACK_CACHE
     while (this.rawTrackCache.size > MAX_RAW_TRACK_CACHE) {
       let evictedKey: string | null = null;
       for (const key of this.rawTrackCache.keys()) {
@@ -711,7 +747,6 @@ export class IluminadoAudioEngine {
       .then((decoded) => {
         if (decoded) {
           this.touchBufferLru(url, decoded);
-          // Free raw byte buffer from memory now that PCM AudioBuffer is ready
           this.rawTrackCache.delete(url);
           this.trimBufferCaches(url);
           return decoded;
@@ -766,13 +801,11 @@ export class IluminadoAudioEngine {
     } catch {
       try {
         param.cancelScheduledValues(atTime);
-      } catch {
-        // Ignore if parameter cannot be cancelled
-      }
+      } catch {}
     }
   }
 
-  private stopFallbackAudio(fadeMs: number): void {
+  private stopFallbackAudio(_fadeMs: number): void {
     const el = this.fallbackAudio;
     this.fallbackAudio = null;
     this.fallbackUrl = null;
@@ -781,9 +814,7 @@ export class IluminadoAudioEngine {
       el.pause();
       el.removeAttribute('src');
       el.load();
-    } catch {
-      // Ignore
-    }
+    } catch {}
   }
 
   private stopActiveBufferSource(fadeMs: number): void {
@@ -800,13 +831,10 @@ export class IluminadoAudioEngine {
         node.stop();
         node.disconnect();
         gain.disconnect();
-      } catch {
-        // Ignore already stopped
-      }
+      } catch {}
       return;
     }
 
-    // Limit concurrent fading buffer nodes to prevent memory accumulation
     if (this.fadingBufferNodes.size >= 2) {
       for (const entry of Array.from(this.fadingBufferNodes)) {
         try {
@@ -822,18 +850,20 @@ export class IluminadoAudioEngine {
     this.fadingBufferNodes.add(entry);
     const now = this.ctx.currentTime;
     const fadeSec = Math.max(0.04, fadeMs / 1000);
-    this.cancelAudioParamSafe(gain.gain, now);
-    const startGain = clamp(gain.gain.value, 0.0001, 1);
     try {
-      gain.gain.setValueAtTime(startGain, now);
+      if (typeof gain.gain.cancelAndHoldAtTime === 'function') {
+        gain.gain.cancelAndHoldAtTime(now);
+      } else {
+        gain.gain.cancelScheduledValues(now);
+        const startGain = clamp(gain.gain.value, 0.0001, 1);
+        gain.gain.setValueAtTime(startGain, now);
+      }
       gain.gain.linearRampToValueAtTime(0.0001, now + fadeSec);
       node.stop(now + fadeSec + 0.04);
     } catch {
       try {
         node.stop();
-      } catch {
-        // Ignore already stopped
-      }
+      } catch {}
     }
 
     let cleaned = false;
@@ -904,14 +934,13 @@ export class IluminadoAudioEngine {
         0,
         1.15
       );
-      targetCutoff = 6200 + Math.min(1, intensity) * 13000;
+      targetCutoff = 8200 + Math.min(1, intensity) * 11000;
       targetBusGain = clamp(
         0.58 + this.lastStems.lead * 0.12 + this.lastStems.vocal * 0.1,
         0.55,
         0.75
       );
 
-      // Multiband 3-way reactive mix: bass, mids, highs respond independently to live board stems
       lowBand = clamp(
         0.74 +
           (this.lastStems.bass - 0.36) * 0.58 +
@@ -933,7 +962,6 @@ export class IluminadoAudioEngine {
         1.20
       );
 
-      // DJ-style Shift riser sweeps lowpass down + boosts Q over the final bar before Shift
       if (this.shiftRiserProgress > 0.01 && now >= this.transitionBloomUntilCtxTime) {
         const r = this.shiftRiserProgress;
         targetCutoff = targetCutoff * (1 - r) + 640 * r;
@@ -948,7 +976,6 @@ export class IluminadoAudioEngine {
     this.musicLowBandGain?.gain.setTargetAtTime(lowBand, now, 0.14);
     this.musicMidBandGain?.gain.setTargetAtTime(midBand, now, 0.14);
     this.musicHighBandGain?.gain.setTargetAtTime(highBand, now, 0.14);
-    // Headroom compensation prevents high trim tracks from clipping or over-compressing
     const trimComp = normalizedTrim > 1.4 ? 1.4 / normalizedTrim : 1.0;
     this.musicBusGain?.gain.setTargetAtTime(targetBusGain * trimComp * this.musicVolume, now, 0.08);
   }
@@ -1021,7 +1048,6 @@ export class IluminadoAudioEngine {
 
     const targetUrl = this.desiredTrackUrl;
 
-    // 1. Primary high-performance Web Audio engine (sample-accurate, zero-flange)
     if (this.ctx && this.musicTrimGain) {
       this.stopFallbackAudio(100);
 
@@ -1049,7 +1075,7 @@ export class IluminadoAudioEngine {
         const isSameTrack = this.activeBufferUrl === targetUrl;
         const swapFadeMs = this.desiredMode === 'playing' ? 280 : 260;
 
-        if (!isSameTrack && this.musicFilter && this.activeBufferNode) {
+        if (!isSameTrack && this.musicFilter && this.activeBufferNode && this.desiredMode !== 'paused') {
           const now = this.ctx.currentTime;
           this.cancelAudioParamSafe(this.musicFilter.frequency, now);
           this.musicFilter.frequency.setTargetAtTime(900, now, 0.03);
@@ -1062,8 +1088,6 @@ export class IluminadoAudioEngine {
         return;
       }
 
-      // Track buffer not yet decoded: fetch and decode directly into audioBuffers.
-      // Do not start a temporary HTMLAudioElement that would create phase cancellation / stutter.
       void this.ensureBufferDecoded(targetUrl).then((buf) => {
         if (
           buf &&
@@ -1077,7 +1101,6 @@ export class IluminadoAudioEngine {
       return;
     }
 
-    // 2. Standalone HTMLAudioElement fallback (only when Web Audio API is unsupported)
     if (typeof Audio === 'undefined') return;
 
     if (this.fallbackAudio && this.fallbackUrl === targetUrl) {
@@ -1132,7 +1155,6 @@ export class IluminadoAudioEngine {
   }
 
   public getSpectrumSnapshot(): AudioSpectrumSnapshot {
-    const emptyBands = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
     if (
       this.muted ||
       !this.analyser ||
@@ -1144,7 +1166,7 @@ export class IluminadoAudioEngine {
         subBass: 0,
         mid: 0,
         high: 0,
-        bands: emptyBands,
+        bands: this.emptySpectrumBands,
         hasLiveAudio: false,
       };
     }
@@ -1157,7 +1179,7 @@ export class IluminadoAudioEngine {
         subBass: 0,
         mid: 0,
         high: 0,
-        bands: emptyBands,
+        bands: this.emptySpectrumBands,
         hasLiveAudio: false,
       };
     }
@@ -1175,18 +1197,16 @@ export class IluminadoAudioEngine {
     for (let i = 25; i <= highEnd; i++) highSum += bins[i];
     const high = clamp(highSum / (Math.max(1, highEnd - 24) * 255), 0, 1);
 
-    const bandEdges = [0, 1, 2, 4, 7, 11, 16, 23, 33, 46, Math.min(len, 68)];
-    const bands = new Array<number>(10);
     let peak = 0;
     for (let b = 0; b < 10; b++) {
-      const start = bandEdges[b];
-      const end = Math.max(start + 1, bandEdges[b + 1]);
+      const start = SPECTRUM_BAND_EDGES[b];
+      const end = Math.max(start + 1, Math.min(len, SPECTRUM_BAND_EDGES[b + 1]));
       let sum = 0;
       for (let i = start; i < end; i++) {
         sum += bins[i];
       }
       const val = clamp(sum / ((end - start) * 255), 0, 1);
-      bands[b] = val;
+      this.liveSpectrumBands[b] = val;
       if (val > peak) peak = val;
     }
 
@@ -1194,7 +1214,7 @@ export class IluminadoAudioEngine {
       subBass,
       mid,
       high,
-      bands,
+      bands: this.liveSpectrumBands,
       hasLiveAudio: peak > 0.018,
     };
   }
@@ -1252,11 +1272,8 @@ export class IluminadoAudioEngine {
       try {
         navigator.vibrate(pattern);
         return;
-      } catch {
-        // Fall through to iOS fallback
-      }
+      } catch {}
     }
-    // iOS Safari 17.4+/18+ Taptic Engine fallback via hidden <input type="checkbox" switch> label click
     if (typeof navigator !== 'undefined' && typeof document !== 'undefined') {
       const ua = navigator.userAgent || '';
       const isAppleTouch =
@@ -1584,9 +1601,6 @@ export class IluminadoAudioEngine {
     osc.stop(stopTime);
   }
 
-  /**
-   * Called in lockstep with the 16-column horizontal timeline.
-   */
   public syncStep(
     stepCol: number,
     skin: SkinConfig,
@@ -1669,30 +1683,14 @@ export class IluminadoAudioEngine {
       if (col === 4 || col === 12) this.scheduleSnare(when, 0.3, style);
       this.scheduleHat(when, 0.06, false, style);
       this.scheduleHat(when + sixteenthDur, 0.04, false, style);
-    } else if (
-      style === 'ambient' ||
-      style === 'dark_ambient' ||
-      style === 'cathedral_organ' ||
-      style === 'solarpunk_ambient' ||
-      style === 'de_stijl_minimal'
-    ) {
+    } else if (AMBIENT_STYLES.has(style)) {
       if (col === 0 || col === 8) this.scheduleKick(when, 0.16, style);
       if (col % 4 === 2) this.scheduleHat(when, 0.03, true, style);
     } else if (style === 'uk_garage') {
       if (col === 0 || col === 6 || col === 10) this.scheduleKick(when, 0.34, style);
       if (col === 4 || col === 12) this.scheduleSnare(when, 0.28, style);
       this.scheduleHat(when, col % 2 === 1 ? 0.075 : 0.04, col === 14, style);
-    } else if (
-      style === 'dub_techno' ||
-      style === 'flamenco_house' ||
-      style === 'industrial_synth' ||
-      style === 'miami_boogie' ||
-      style === 'memphis_electro' ||
-      style === 'constructivist_march' ||
-      style === 'nordic_synth' ||
-      style === 'kraut_motorik' ||
-      style === 'analog_funk_70s'
-    ) {
+    } else if (CLUB_HOUSE_STYLES.has(style)) {
       if (
         col % 4 === 0 ||
         ((style === 'constructivist_march' || style === 'kraut_motorik') && col % 4 === 2)
@@ -1754,13 +1752,7 @@ export class IluminadoAudioEngine {
       const scaleInterval = music.scale[arpDegree % music.scale.length];
       const leadMidi = music.rootMidi + 12 + scaleInterval;
       const leadFreq = midiToFreq(leadMidi);
-      const isGuitarPluck =
-        style === 'bachata' ||
-        style === 'country' ||
-        style === 'bossa_nova' ||
-        style === 'blues_rock' ||
-        style === 'shamisen_chill' ||
-        style === 'botanical_waltz';
+      const isGuitarPluck = PLUCK_LEAD_STYLES.has(style);
       const leadDur = isGuitarPluck
         ? eighthDur * 1.15
         : style === 'ambient' || style === 'dark_ambient' || style === 'cathedral_organ'
@@ -1818,8 +1810,6 @@ export class IluminadoAudioEngine {
     }
   }
 
-  // ======================== SFX AS LIVE INSTRUMENTATION ========================
-
   private getSkinSfxProfile(skin?: SkinConfig): {
     family: 'wood_marimba' | 'analog_synth' | 'jazz_fender' | 'chip_minimal' | 'cathedral_glass' | 'rock_crunch' | 'dub_club';
     leadWave: OscillatorType;
@@ -1828,7 +1818,7 @@ export class IluminadoAudioEngine {
     drive: number;
   } {
     const style = skin?.music.styleId ?? 'ambient';
-    if (style === 'chiptune_funk' || style === 'de_stijl_minimal') {
+    if (CHIP_MINIMAL_STYLES.has(style)) {
       return {
         family: 'chip_minimal',
         leadWave: 'square',
@@ -1837,18 +1827,7 @@ export class IluminadoAudioEngine {
         drive: 0.08,
       };
     }
-    if (
-      style === 'salsa' ||
-      style === 'bachata' ||
-      style === 'bossa_nova' ||
-      style === 'cumbia_dub' ||
-      style === 'afrobeat_jazz' ||
-      style === 'shamisen_chill' ||
-      style === 'andean_cumbia' ||
-      style === 'botanical_waltz' ||
-      style === 'chamber_waltz' ||
-      style === 'koto_taiko'
-    ) {
+    if (WOOD_MARIMBA_STYLES.has(style)) {
       return {
         family: 'wood_marimba',
         leadWave: 'triangle',
@@ -1857,13 +1836,7 @@ export class IluminadoAudioEngine {
         drive: 0.04,
       };
     }
-    if (
-      style === 'heavy_metal' ||
-      style === 'alt_rock' ||
-      style === 'blues_rock' ||
-      style === 'industrial_synth' ||
-      style === 'constructivist_march'
-    ) {
+    if (ROCK_CRUNCH_STYLES.has(style)) {
       return {
         family: 'rock_crunch',
         leadWave: 'sawtooth',
@@ -1872,15 +1845,7 @@ export class IluminadoAudioEngine {
         drive: Math.max(0.28, skin?.music.distortion ?? 0.35),
       };
     }
-    if (
-      style === 'synthwave' ||
-      style === 'miami_boogie' ||
-      style === 'memphis_electro' ||
-      style === 'nordic_synth' ||
-      style === 'city_pop' ||
-      style === 'analog_funk_70s' ||
-      style === 'kraut_motorik'
-    ) {
+    if (ANALOG_SYNTH_STYLES.has(style)) {
       return {
         family: 'analog_synth',
         leadWave: skin?.music.waveform ?? 'sawtooth',
@@ -1889,18 +1854,7 @@ export class IluminadoAudioEngine {
         drive: 0.14,
       };
     }
-    if (
-      style === 'swing' ||
-      style === 'jazz_fusion' ||
-      style === 'ethio_jazz' ||
-      style === 'cat_step_jazz' ||
-      style === 'tokyo_jazz_kissa' ||
-      style === 'neo_soul' ||
-      style === 'space_age_lounge' ||
-      style === 'cubist_chamber' ||
-      style === 'tango_nuevo' ||
-      style === 'flamenco_house'
-    ) {
+    if (JAZZ_FENDER_STYLES.has(style)) {
       return {
         family: 'jazz_fender',
         leadWave: 'sine',
@@ -1909,17 +1863,7 @@ export class IluminadoAudioEngine {
         drive: 0.05,
       };
     }
-    if (
-      style === 'trap' ||
-      style === 'reggaeton' ||
-      style === 'kizomba' ||
-      style === 'dark_zouk' ||
-      style === 'dub_techno' ||
-      style === 'uk_garage' ||
-      style === 'liquid_dnb' ||
-      style === 'funk_fusion' ||
-      style === 'country'
-    ) {
+    if (DUB_CLUB_STYLES.has(style)) {
       return {
         family: 'dub_club',
         leadWave: skin?.music.waveform === 'sawtooth' ? 'triangle' : (skin?.music.waveform ?? 'triangle'),
@@ -1937,10 +1881,6 @@ export class IluminadoAudioEngine {
     };
   }
 
-  /**
-   * Move tick with rapid-repeat throttling (>78ms cooldown) and subtle ascending scale ladder
-   * so held DAS repeats don't machine-gun.
-   */
   public playMove(skin?: SkinConfig, nowMsOverride?: number): boolean {
     const nowMs = nowMsOverride ?? (typeof performance !== 'undefined' ? performance.now() : Date.now());
     const deltaMs = nowMs - this.lastMoveSfxMs;
@@ -2088,10 +2028,6 @@ export class IluminadoAudioEngine {
     }
   }
 
-  /**
-   * Quantized square-formed chime whose pitch climbs smoothly along the track's scale
-   * as squares accumulate in the stack (`squaresInStack`) or chains activate.
-   */
   public playSquareFormed(
     skin: SkinConfig,
     squaresInStack = 0,
@@ -2136,9 +2072,6 @@ export class IluminadoAudioEngine {
     }
   }
 
-  /**
-   * Celebratory harmonic sting + 1-beat wide filter bloom for ALL DELETED (+10,000) and SINGLE COLOR (+1,000).
-   */
   public playBonusSting(
     skin: SkinConfig,
     kind: 'all_deleted' | 'single_color',
@@ -2174,7 +2107,6 @@ export class IluminadoAudioEngine {
     });
     this.scheduleVocalPad(now + 0.03, root + 12, beatDurSec * 0.9, 0.12);
 
-    // One-beat filter open bloom
     if (this.musicFilter) {
       this.cancelAudioParamSafe(this.musicFilter.frequency, now);
       this.musicFilter.Q.setTargetAtTime(0.72, now, 0.03);
@@ -2246,7 +2178,6 @@ export class IluminadoAudioEngine {
         profile.drive * 0.25
       );
     });
-    // Snap DJ riser open cleanly on shift drop
     if (this.musicFilter) {
       this.cancelAudioParamSafe(this.musicFilter.frequency, now);
       this.musicFilter.Q.setTargetAtTime(0.72, now, 0.03);

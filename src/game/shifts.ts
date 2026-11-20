@@ -299,7 +299,6 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     description:
       'Interleaves top and bottom occupied rows cleanly like a zipper while keeping exact color ratios.',
   },
-  // --- 17 Additional Shifts ---
   {
     id: 'cyclotron_flow',
     name: 'Cyclotron Gravity Orbit',
@@ -470,7 +469,6 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     description:
       'Rotates occupied blocks clockwise around concentric perimeter rings like a slow architectural whirlpool.',
   },
-  // --- 10 New Shifts (v7) ---
   {
     id: 'double_time_sweep',
     name: 'Double-Time Sweep',
@@ -698,10 +696,6 @@ function makeObstacleCell(
   };
 }
 
-/**
- * Strips all neutral obstacles (stone walls, shelves, patrolling bumper) from the grid
- * and clears transient shift state before applying a single new transformation rule.
- */
 export function stripBoardObstacles(state: BoardState): void {
   const rows = state.grid.length;
   const cols = state.grid[0]?.length ?? state.cols;
@@ -725,10 +719,6 @@ export function stripBoardObstacles(state: BoardState): void {
   state.beatChargeAccum = 0;
 }
 
-/**
- * Safely resizes the board to (targetCols, targetRows), centering existing player tiles
- * and relocating any overflowing wing/top tiles onto open non-spawn lanes.
- */
 export function resizeBoardSafely(
   state: BoardState,
   targetCols: number,
@@ -796,7 +786,6 @@ export function resizeBoardSafely(
     }
   }
 
-  // Place any overflow blocks in the lowest open non-spawn columns
   for (const item of overflowPool) {
     let chosenCol = -1;
     let bestWriteRow = -1;
@@ -970,7 +959,6 @@ function rescueDisplacedCells(
 
   for (const cell of displaced) {
     let placed = false;
-    // Scan from lowest column stacks first, avoiding forbidden cols and top spawn chute
     let bestC = -1;
     let bestR = -1;
     for (let c = 0; c < cols; c++) {
@@ -1032,9 +1020,7 @@ function placeColumnShiftUp(
     grid[rows - 1 - k][col] = makeObstacleCell(style, true);
   }
 
-  // Re-insert existing blocks above the new floor height (from bottom up)
   const lowestAvail = rows - 1 - obstacleRowsFromBottom;
-  // existing is top-to-bottom; place bottom-up
   let writeRow = lowestAvail;
   for (let i = existing.length - 1; i >= 0; i--) {
     const cell = existing[i];
@@ -1091,8 +1077,6 @@ function applySplitCanyon(state: BoardState, animateBricks: boolean): void {
     }
   }
 
-  // Build impassable 2-block-wide canyon down center from row 2 to floor
-  // leaving rows 0..1 clear at top so freshly spawned 2x2 pieces can steer left or right!
   const startRow = Math.min(2, Math.max(0, rows - 4));
   for (let r = startRow; r < rows; r++) {
     newGrid[r][leftMid] = makeObstacleCell('chasm', true);
@@ -1126,7 +1110,6 @@ function applyHourglassFunnel(
       }
     }
   } else {
-    // Funnel walls narrowing at the bottom rows
     const outerStart = Math.max(3, Math.floor(rows * 0.5));
     const innerStart = Math.max(outerStart + 1, rows - 2);
     for (let r = outerStart; r < rows; r++) {
@@ -1154,7 +1137,6 @@ function applyHourglassFunnel(
 }
 
 function applyTwinElevators(state: BoardState, animateBricks: boolean): void {
-  // Expand height by +1 row (within <= 2 limit) while keeping current orientation (normal or 90-rotated)
   const nominal = getNominalBoardDims(state);
   const targetRows = nominal.rows + 1;
   resizeBoardSafely(state, nominal.cols, targetRows, animateBricks);
@@ -1247,7 +1229,6 @@ function applyFloatingShelf(state: BoardState, animateBricks: boolean): void {
   for (let c = startC; c <= endC; c++) {
     const existing = state.grid[shelfRow][c];
     if (existing && !existing.isObstacle) {
-      // Push existing cell one row above if open so stacks naturally sit on top of girder
       if (shelfRow - 1 >= 1 && state.grid[shelfRow - 1][c] === null) {
         state.grid[shelfRow - 1][c] = {
           ...existing,
@@ -1320,7 +1301,6 @@ function applyCornerEdgeBlock(
 ): void {
   const rows = state.rows;
   const cols = state.cols;
-  // Compact 4x4 bastion (3x4 on narrow boards) tucked cleanly into one bottom corner
   const blockW = Math.min(4, cols >= 12 ? 4 : 3);
   const blockH = Math.min(4, Math.max(2, rows - 5));
   const useRight = rng() < 0.5;
@@ -1348,7 +1328,6 @@ function applyBottomEdgeBlock(
   const spawnX = getSpawnColForWidth(cols, 2);
   const blockW = Math.min(4, cols >= 13 ? 4 : 3);
   const blockH = Math.min(3, Math.max(2, rows - 5));
-  // Offset just left or right of center spawn chute so main vertical lanes remain open
   const useRightSide = rng() < 0.5;
   const startC = useRightSide
     ? Math.min(cols - blockW - 1, Math.max(0, spawnX + 3))
@@ -1381,7 +1360,6 @@ function applySideEdgeLedge(
 
   for (let step = 0; step < wallCols; step++) {
     const c = useRightWall ? cols - 1 - step : step;
-    // Stepped 4 -> 3 -> 2 profile from wall inward so pieces never trap under overhangs
     const colH = Math.max(2, maxH - step);
     forbiddenCols.add(c);
     placeColumnShiftUp(state.grid, c, colH, colH, 'stone', displaced, animateBricks);
@@ -1413,7 +1391,6 @@ function applyThreeColorMode(
   state.colorCount = 3;
   state.pieceShapeMode = 'standard_2x2';
 
-  // Introduce 3rd color directly onto ~25% of existing non-square player blocks
   const rows = state.grid.length;
   const cols = state.grid[0]?.length ?? state.cols;
   const looseCells: Cell[] = [];
@@ -1587,7 +1564,6 @@ function applyZipperMerge(state: BoardState, animateBricks: boolean): void {
   }
 
   if (topOccupied >= rows - 1) {
-    // Fewer than 2 occupied rows; still refresh marks
     return;
   }
 
@@ -1654,77 +1630,74 @@ function applyLineColorShift(
     colorsPresent: number;
   };
   const candidates: CandidateLine[] = [];
+  const countColors = (mask: number) => (mask & 1) + ((mask >> 1) & 1) + ((mask >> 2) & 1);
 
-  // Horizontal rows
   for (let r = 0; r < rows; r++) {
     const coords: Array<{ r: number; c: number }> = [];
-    const seen = new Set<CellColor>();
+    let colorMask = 0;
     for (let c = 0; c < cols; c++) {
       const cell = state.grid[r][c];
       if (cell && !cell.isObstacle) {
         coords.push({ r, c });
-        seen.add(cell.color);
+        colorMask |= 1 << cell.color;
       }
     }
     if (coords.length >= 2) {
-      candidates.push({ coords, colorsPresent: seen.size });
+      candidates.push({ coords, colorsPresent: countColors(colorMask) });
     }
   }
 
-  // Vertical columns
   for (let c = 0; c < cols; c++) {
     const coords: Array<{ r: number; c: number }> = [];
-    const seen = new Set<CellColor>();
+    let colorMask = 0;
     for (let r = 0; r < rows; r++) {
       const cell = state.grid[r][c];
       if (cell && !cell.isObstacle) {
         coords.push({ r, c });
-        seen.add(cell.color);
+        colorMask |= 1 << cell.color;
       }
     }
     if (coords.length >= 2) {
-      candidates.push({ coords, colorsPresent: seen.size });
+      candidates.push({ coords, colorsPresent: countColors(colorMask) });
     }
   }
 
-  // Diagonals (slope +1 and -1)
   for (let startC = -(rows - 1); startC < cols; startC++) {
     const downRight: Array<{ r: number; c: number }> = [];
-    const seenDR = new Set<CellColor>();
+    let maskDR = 0;
     for (let r = 0; r < rows; r++) {
       const c = startC + r;
       if (c >= 0 && c < cols) {
         const cell = state.grid[r][c];
         if (cell && !cell.isObstacle) {
           downRight.push({ r, c });
-          seenDR.add(cell.color);
+          maskDR |= 1 << cell.color;
         }
       }
     }
     if (downRight.length >= 2) {
-      candidates.push({ coords: downRight, colorsPresent: seenDR.size });
+      candidates.push({ coords: downRight, colorsPresent: countColors(maskDR) });
     }
   }
   for (let startC = 0; startC < cols + rows - 1; startC++) {
     const downLeft: Array<{ r: number; c: number }> = [];
-    const seenDL = new Set<CellColor>();
+    let maskDL = 0;
     for (let r = 0; r < rows; r++) {
       const c = startC - r;
       if (c >= 0 && c < cols) {
         const cell = state.grid[r][c];
         if (cell && !cell.isObstacle) {
           downLeft.push({ r, c });
-          seenDL.add(cell.color);
+          maskDL |= 1 << cell.color;
         }
       }
     }
     if (downLeft.length >= 2) {
-      candidates.push({ coords: downLeft, colorsPresent: seenDL.size });
+      candidates.push({ coords: downLeft, colorsPresent: countColors(maskDL) });
     }
   }
 
   if (candidates.length === 0) {
-    // Fallback: convert any occupied single cells or spawn subtle row tint if board is empty
     const fallbackCoords: Array<{ r: number; c: number }> = [];
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
@@ -1738,7 +1711,6 @@ function applyLineColorShift(
     candidates.push({ coords: fallbackCoords, colorsPresent: 1 });
   }
 
-  // Prefer mixed-color lines so conversion makes a visible impact
   const mixed = candidates.filter((cand) => cand.colorsPresent > 1);
   const pool = mixed.length > 0 ? mixed : candidates;
   const chosen = pool[Math.floor(rng() * pool.length)];
@@ -1787,7 +1759,6 @@ function applyFlowDirectionShift(
   state.gravityDirection = nextDir;
   settleBoardForDirection(state.grid, nextDir, animateBricks);
 
-  // Protect entry edge margin (at least 3 cells clear) so newly entering pieces never auto-lose
   const marginDepth = 3;
   const overflow: Cell[] = [];
   if (nextDir === 'right') {
@@ -2226,7 +2197,6 @@ function applyBoardResizeShift(
   rng: () => number
 ): { targetCols: number; targetRows: number } {
   const nominal = getNominalBoardDims(state);
-  // Always keep targetCols within [nominalCols - 2, nominalCols + 2] AND |delta| <= 2 from current
   const minCols = Math.max(8, nominal.cols - 2);
   const maxCols = nominal.cols + 2;
   const minRows = Math.max(8, nominal.rows - 2);
@@ -2236,7 +2206,6 @@ function applyBoardResizeShift(
   for (let dc = -2; dc <= 2; dc += 1) {
     for (let dr = -2; dr <= 2; dr += 1) {
       if (dc === 0 && dr === 0) continue;
-      // Avoid tiny +/-1 diagonal steps when bigger 1 or 2-block shifts are clean
       if (Math.abs(dc) === 1 && Math.abs(dr) === 1) continue;
       const nc = nominal.cols + dc;
       const nr = nominal.rows + dr;
@@ -2259,12 +2228,6 @@ function applyBoardResizeShift(
   return { targetCols: state.cols, targetRows: state.rows };
 }
 
-/**
- * Picks an opening shift appropriate for Level 1 (an unpopulated/starting board).
- * Always prefers shifts marked start-ready (`!requiresBricks`) when any exist
- * in `enabledShifts`, falling back to `enabledShifts` only if the user enabled
- * exclusively populated-board shifts.
- */
 export function pickStartShift(
   enabledShifts: ShiftType[],
   rng: () => number = Math.random,
@@ -2287,14 +2250,6 @@ export function pickStartShift(
   return pool[Math.floor(rng() * pool.length)];
 }
 
-/**
- * Picks the next enabled transformation rule while honoring:
- * - Standard 2x2 gameplay for ~2/3 of the run, shifting every ~3 levels to 1x2, 1x3, 2x3, tetromino, blocked, or 3-color
- * - Rotations happening frequently (~every 2 turns when enabled, never > 3 turn gap)
- * - At most 1 obstacle shift and at most 1 tile-type/color shift per 3-level stage window
- * - One-time edge/heavy obstacle shifts firing only once per run when alternatives exist
- * - Preferring start-friendly (`!requiresBricks`) shifts when fewer than 6 player bricks occupy the board
- */
 export function pickNextShift(
   enabledShifts: ShiftType[],
   lastShift: ShiftType | null,
@@ -2332,19 +2287,16 @@ export function pickNextShift(
     }
     occupancy = playerCount / totalCells;
 
-    // Never repeat rotate_90 within 2 turns when other shifts exist
     if (sched.turnsSinceRotation < 2 && pool.length > 1 && pool.includes('rotate_90')) {
       const nonRot = pool.filter((s) => s !== 'rotate_90');
       if (nonRot.length > 0) pool = nonRot;
     }
 
-    // One-time shifts: exclude already-triggered one-time shifts when alternatives exist
     const withoutOneTime = pool.filter((s) => !usedOneTimeSet.has(s));
     if (withoutOneTime.length > 0) {
       pool = withoutOneTime;
     }
 
-    // If board is sparse (< 6 player blocks), favor shifts that work well without a crowded stack
     if (playerCount < 6) {
       const startFriendly = pool.filter((s) => isShiftStartFriendly(s));
       if (startFriendly.length > 0) {
@@ -2352,7 +2304,6 @@ export function pickNextShift(
       }
     }
 
-    // Per-stage-window cap: at most 1 obstacle shift (when alternatives exist)
     if (obsCount >= 1) {
       const nonObstacles = pool.filter((s) => !OBSTACLE_SHIFT_SET.has(s));
       if (nonObstacles.length > 0) {
@@ -2360,7 +2311,6 @@ export function pickNextShift(
       }
     }
 
-    // Per-stage-window cap: at most 1 tile-type / 3-color shift (when alternatives exist)
     if (tileCount >= 1) {
       const nonTiles = pool.filter((s) => !TILE_TYPE_SHIFT_SET.has(s));
       if (nonTiles.length > 0) {
@@ -2375,44 +2325,46 @@ export function pickNextShift(
       }
     }
 
-    // Re-apply no-immediate-repeat check after filtering if multiple choices remain
     if (pool.length > 1 && lastShift !== null) {
       const withoutLast = pool.filter((s) => s !== lastShift);
       if (withoutLast.length > 0) pool = withoutLast;
     }
 
-    const tileCandidates = pool.filter((s) => TILE_TYPE_SHIFT_SET.has(s));
-    const nonTileCandidates = pool.filter((s) => !TILE_TYPE_SHIFT_SET.has(s));
+    const tileCandidates: ShiftType[] = [];
+    const nonTileCandidates: ShiftType[] = [];
+    let hasRotate90 = false;
+    for (const s of pool) {
+      if (s === 'rotate_90') hasRotate90 = true;
+      if (TILE_TYPE_SHIFT_SET.has(s)) tileCandidates.push(s);
+      else nonTileCandidates.push(s);
+    }
 
-    // Gentle rotation cadence (~every 3-4 turns, never dominating the run)
-    if (pool.includes('rotate_90') && sched.turnsSinceRotation >= 4 && rng() < 0.45) {
+    if (hasRotate90 && sched.turnsSinceRotation >= 4 && rng() < 0.45) {
       return 'rotate_90';
     }
 
-    // Tile-type cadence (~every 3 levels): once >= 3 turns have elapsed since last special tile turn, pick one
     if (tileCount === 0 && turnsSinceTile >= 3 && tileCandidates.length > 0) {
       return tileCandidates[Math.floor(rng() * tileCandidates.length)];
     }
 
-    // Trigger special tile shift right around the 3rd level (turnsSinceTile === 2)
     if (tileCount === 0 && turnsSinceTile === 2 && tileCandidates.length > 0 && rng() < 0.72) {
       return tileCandidates[Math.floor(rng() * tileCandidates.length)];
     }
 
-    // Keep standard 2x2 pieces for ~2/3 of the game when non-tile shifts are available
     if (nonTileCandidates.length > 0) {
       pool = nonTileCandidates;
     }
 
-    // If board is nearly empty (< 2 player blocks), prefer non-line shifts if available
     if (playerCount < 2 && pool.length > 1 && pool.includes('line_color_shift')) {
       const nonLine = pool.filter((s) => s !== 'line_color_shift');
       if (nonLine.length > 0) pool = nonLine;
     }
   }
 
-  // Polarity weighting based on board occupancy: crowded boards favor boons, low boards allow banes
-  const weighted = pool.map((s) => {
+  let totalW = 0;
+  const weights = new Float64Array(pool.length);
+  for (let i = 0; i < pool.length; i++) {
+    const s = pool[i];
     const pol = SHIFT_MAP.get(s)?.polarity ?? 'neutral';
     let w = 1;
     if (occupancy >= 0.52) {
@@ -2420,18 +2372,16 @@ export function pickNextShift(
     } else if (occupancy <= 0.28) {
       w = pol === 'bane' ? 2.2 : pol === 'neutral' ? 1.4 : 0.9;
     }
-    if (s === 'rotate_90') {
-      w *= 0.5;
-    }
-    return { s, w };
-  });
+    if (s === 'rotate_90') w *= 0.5;
+    weights[i] = w;
+    totalW += w;
+  }
 
-  const totalW = weighted.reduce((acc, item) => acc + item.w, 0);
   if (totalW > 0) {
     let roll = rng() * totalW;
-    for (const item of weighted) {
-      roll -= item.w;
-      if (roll <= 0) return item.s;
+    for (let i = 0; i < pool.length; i++) {
+      roll -= weights[i];
+      if (roll <= 0) return pool[i];
     }
   }
   return pool[Math.floor(rng() * pool.length)];
@@ -2511,12 +2461,6 @@ function recordShiftTurn(state: BoardState, shiftType: ShiftType): void {
   }
 }
 
-/**
- * Applies strictly ONE board mutation rule cleanly:
- * - Strips transient obstacles & incompatible resize deltas before executing (while preserving 90° rotations).
- * - Updates brick shapes / 3-color rules cleanly (non-cumulative).
- * - Updates squares, sweep state, and active piece headroom safely so shifts never auto-lose.
- */
 export function applyBoardShift(
   state: BoardState,
   shiftType: ShiftType,
@@ -2537,22 +2481,18 @@ export function applyBoardShift(
   const prevColorCount = state.colorCount ?? 2;
   const prevGravityDir: GravityDirection = state.gravityDirection ?? 'down';
 
-  // Enforce Non-Cumulative Rule: clear prior transient obstacles before applying the new rule
   stripBoardObstacles(state);
 
-  // Revert non-cumulative directional flow back to normal top->bottom gravity when switching to another shift
   if (shiftType !== 'flow_direction' && shiftType !== 'cyclotron_flow' && prevGravityDir !== 'down') {
     state.gravityDirection = 'down';
     settleBoardForDirection(state.grid, 'down', animateBricks);
   }
 
-  // Revert non-cumulative 3-color mode cleanly when shifting to any other rule
   if (shiftType !== 'three_color_mode' && state.colorCount === 3) {
     state.colorCount = 2;
     convertColor2CellsToBinary(state, animateBricks);
   }
 
-  // Determine target brick shape mode (non-cumulative: only active during that tile shift's turn)
   const nextShapeMode: PieceShapeMode =
     shiftType === 'brick_2x1'
       ? 'domino_2x1'
@@ -2623,8 +2563,6 @@ export function applyBoardShift(
     };
   }
 
-  // Non-resize mutations normalize back to the current nominal orientation (preserving 90° rotation!)
-  // so resize deltas never compound while prior rotations can stay.
   const nominal = getNominalBoardDims(state);
   if (
     shiftType !== 'twin_elevators' &&
@@ -2633,7 +2571,6 @@ export function applyBoardShift(
     resizeBoardSafely(state, nominal.cols, nominal.rows, false);
   }
 
-  // Clear stash hold when shifting away from stash_hold
   if (shiftType !== 'stash_hold') {
     state.heldPiece = null;
     state.stashUsedThisTurn = false;
@@ -2687,7 +2624,6 @@ export function applyBoardShift(
     case 'brick_3x2':
     case 'brick_tetromino':
     case 'brick_blocked':
-      // Piece queue & active staging brick will update via syncQueueIfRulesChanged
       break;
     case 'three_color_mode':
       applyThreeColorMode(state, animateBricks, rng);
@@ -2840,10 +2776,6 @@ export function applyBoardShift(
   };
 }
 
-/**
- * Advances the patrolling 2x2 bumper 1 column horizontally along its patrol corridor.
- * Safely nudges loose cells in its path and drops blocks resting on the vacated column.
- */
 export function stepPatrollingBumper(state: BoardState): boolean {
   const b = state.patrollingBumper;
   if (!b || state.activeShift !== 'patrolling_bumper' || state.isGameOver) {
@@ -2862,7 +2794,6 @@ export function stepPatrollingBumper(state: BoardState): boolean {
   }
   if (nextX < 0 || nextX + 1 >= cols) return false;
 
-  // Avoid moving into active falling piece columns if overlapping vertically
   if (state.activePiece) {
     const pLeft = state.activePiece.x;
     const pRight = state.activePiece.x + 1;
@@ -2880,7 +2811,6 @@ export function stepPatrollingBumper(state: BoardState): boolean {
     }
   }
 
-  // Clear current bumper cells
   for (let r = b.y; r < b.y + 2; r++) {
     for (let c = b.x; c < b.x + 2; c++) {
       if (state.grid[r][c]?.isObstacle) {
@@ -2889,7 +2819,6 @@ export function stepPatrollingBumper(state: BoardState): boolean {
     }
   }
 
-  // Move any player cells in the leading column of the new footprint out to the vacated trailing col or upward
   const leadingCol = nextDir === 1 ? nextX + 1 : nextX;
   const trailingCol = nextDir === 1 ? b.x : b.x + 1;
   for (let r = b.y; r < b.y + 2; r++) {
@@ -2904,13 +2833,11 @@ export function stepPatrollingBumper(state: BoardState): boolean {
       } else if (b.y - 1 >= 1 && state.grid[b.y - 1][leadingCol] === null) {
         state.grid[b.y - 1][leadingCol] = blocking;
       } else {
-        // Place cleanly on floor/open cell
         rescueDisplacedCells(state.grid, [blocking]);
       }
     }
   }
 
-  // Write bumper at new position
   for (let r = b.y; r < b.y + 2; r++) {
     for (let c = nextX; c < nextX + 2; c++) {
       const bCell = makeObstacleCell('bumper', true);
@@ -2923,7 +2850,6 @@ export function stepPatrollingBumper(state: BoardState): boolean {
   b.x = nextX;
   b.dir = nextDir;
 
-  // Drop blocks that were sitting on the vacated column
   settleBoard(state.grid);
   state.squares = detectBoardMarks(state.grid);
   return true;

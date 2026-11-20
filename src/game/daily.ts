@@ -142,10 +142,6 @@ function makeDailyCell(id: number, color: CellColor, isChain = false): Cell {
   };
 }
 
-/**
- * Generates a unique, settled 16x10 courtyard layout for a given date key and mission type,
- * ensuring spawn clearance (rows 0..3 at center) and breaking accidental starting 2x2 squares.
- */
 export function buildDailyStartingGrid(
   dateKey: string,
   missionType: MissionLevel['type']
@@ -154,45 +150,37 @@ export function buildDailyStartingGrid(
   const grid = createEmptyGrid();
   let nextId = 70000;
 
-  // Choose 1 of 4 structural silhouette profiles per day so daily layouts visibly vary
   const silhouetteProfile = Math.floor(rng() * 4);
   const dominantColor: CellColor = rng() < 0.5 ? 0 : 1;
   const secondaryColor: CellColor = dominantColor === 0 ? 1 : 0;
 
   for (let c = 0; c < BOARD_COLS; c++) {
-    // Keep central spawn columns lower so player has clean maneuverability on turn 1
     const isCenterSpawn = c === 7 || c === 8;
     let colHeight = 0;
 
     if (missionType === 'all_clear') {
-      // Compact, cleanly clearable central-balanced monument ruins (height 1..3)
       const distCenter = Math.abs(c - 7.5);
       if (distCenter <= 5.5) {
         colHeight = Math.floor(rng() * 3) + 1;
       }
     } else if (missionType === 'single_color') {
-      // Predominantly one color with small removable contrast clusters
       colHeight = isCenterSpawn
         ? Math.floor(rng() * 2)
         : Math.floor(rng() * 3) + (c >= 2 && c <= 13 ? 1 : 0);
     } else {
       if (silhouetteProfile === 0) {
-        // Twin flanked colonnades
         colHeight = isCenterSpawn
           ? 1
           : c < 5 || c > 10
           ? 2 + Math.floor(rng() * 3)
           : 1 + Math.floor(rng() * 2);
       } else if (silhouetteProfile === 1) {
-        // Stepped valley rising outward
         const edgeFactor = Math.floor(Math.abs(c - 7.5) / 2);
         colHeight = Math.min(4, (isCenterSpawn ? 0 : 1) + edgeFactor + (rng() < 0.4 ? 1 : 0));
       } else if (silhouetteProfile === 2) {
-        // Asymmetric terraced bridge
         const wave = Math.round(1.6 + Math.sin(c * 0.65 + rng() * 0.4) * 1.6);
         colHeight = Math.max(0, Math.min(4, isCenterSpawn ? Math.min(1, wave) : wave));
       } else {
-        // Scattered courtyard ruins
         colHeight = isCenterSpawn
           ? Math.floor(rng() * 2)
           : rng() < 0.78
@@ -208,7 +196,6 @@ export function buildDailyStartingGrid(
       if (missionType === 'single_color') {
         color = rng() < 0.72 ? dominantColor : secondaryColor;
       } else {
-        // Checker-biased placement avoids solid 2x2 blobs while keeping rich pair clusters
         const biasAlt = (r + c) % 2 === 0 ? dominantColor : secondaryColor;
         color = rng() < 0.62 ? biasAlt : rng() < 0.5 ? 0 : 1;
       }
@@ -216,7 +203,6 @@ export function buildDailyStartingGrid(
     }
   }
 
-  // Ensure Chain Catalyst days guarantee a seed cluster of same-color blocks ready to connect
   if (missionType === 'chain_cells') {
     const baseCol = 3 + Math.floor(rng() * 4);
     for (let dc = 0; dc < 5; dc++) {
@@ -228,7 +214,6 @@ export function buildDailyStartingGrid(
     }
   }
 
-  // Break any accidental pre-formed 2x2 squares so the board starts clean with 0 auto-clears
   for (let pass = 0; pass < 4; pass++) {
     const squares = detectBoardMarks(grid);
     if (squares.length === 0) break;

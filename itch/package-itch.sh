@@ -45,7 +45,7 @@ if [ ! -d "$DIST_DIR/music" ]; then
   exit 1
 fi
 
-TRACK_COUNT=$(find "$DIST_DIR/music" -maxdepth 1 -name "*.mp3" | wc -l | tr -d ' ')
+TRACK_COUNT=$(find "$DIST_DIR/music" -maxdepth 1 -name "*.ogg" | wc -l | tr -d ' ')
 echo "   ✓ Found index.html"
 echo "   ✓ Found music directory with $TRACK_COUNT tracks"
 

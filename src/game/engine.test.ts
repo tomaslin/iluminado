@@ -511,20 +511,18 @@ test('getPieceLandingColumns predicts per-column split landing heights and hardD
   assert.ok((state.grid[9][4]?.fallOffset ?? 0) >= 5);
 });
 
-test('All 50 soundtrack worlds (1-50) configure root-relative MP3 paths in music/ with no public/music folder and .nojekyll present', () => {
+test('All 50 soundtrack worlds (1-50) configure root-relative OGG paths in music/ with no MP3s, no public/music folder, and .nojekyll present', () => {
   assert.equal(fs.existsSync(path.resolve(process.cwd(), 'public/music')), false);
   assert.equal(fs.existsSync(path.resolve(process.cwd(), '.nojekyll')), true);
-  assert.equal(
-    fs.existsSync(path.resolve(process.cwd(), 'music/wolrd30.mp3')),
-    false,
-    'Typo music/wolrd30.mp3 should remain renamed to music/world30.mp3'
-  );
+  const musicFiles = fs.readdirSync(path.resolve(process.cwd(), 'music'));
+  const mp3Files = musicFiles.filter((name) => name.toLowerCase().endsWith('.mp3'));
+  assert.equal(mp3Files.length, 0, `Expected no MP3 files in music/, found: ${mp3Files.join(', ')}`);
   for (let i = 0; i < 50; i++) {
-    const expectedUrl = `music/world${i + 1}.mp3`;
+    const expectedUrl = `music/world${i + 1}.ogg`;
     assert.equal(SKINS[i].music.audioTrackUrl, expectedUrl);
     const filePath = path.resolve(process.cwd(), expectedUrl);
-    assert.equal(fs.existsSync(filePath), true, `Missing MP3 asset at ${filePath}`);
-    assert.ok(fs.statSync(filePath).size > 0, `Empty MP3 asset at ${filePath}`);
+    assert.equal(fs.existsSync(filePath), true, `Missing OGG asset at ${filePath}`);
+    assert.ok(fs.statSync(filePath).size > 0, `Empty OGG asset at ${filePath}`);
   }
 });
 
@@ -717,7 +715,7 @@ test('Daily completion enforces once-per-24h completion, tracks consecutive stre
   assert.equal(afterGap.dailyStreak, 1);
 });
 
-test('INITIAL_UNLOCKED_SKIN_IDS unlocks all 50 worlds including all 50 studio MP3 worlds', () => {
+test('INITIAL_UNLOCKED_SKIN_IDS unlocks all 50 worlds including all 50 studio OGG worlds', () => {
   assert.equal(INITIAL_UNLOCKED_SKIN_IDS.length, 50);
   for (let i = 0; i < 50; i++) {
     assert.equal(
@@ -728,18 +726,17 @@ test('INITIAL_UNLOCKED_SKIN_IDS unlocks all 50 worlds including all 50 studio MP
   }
 });
 
-test('getTrackTrimGain normalizes loudness across all 50 MP3 tracks and getSpectrumSnapshot is safe in Node', () => {
+test('getTrackTrimGain normalizes loudness across all 50 OGG tracks and getSpectrumSnapshot is safe in Node', () => {
   for (let i = 0; i < 50; i++) {
     const url = SKINS[i].music.audioTrackUrl;
     const gain = getTrackTrimGain(url);
-    assert.ok(gain >= 0.5 && gain <= 3.0, `Unexpected trim gain ${gain} for ${url}`);
+    assert.ok(gain >= 0.85 && gain <= 1.25, `Unexpected trim gain ${gain} for ${url}`);
   }
-  // Quiet world3 track receives strong positive trim vs hot world9 / world14 tracks
-  assert.ok(getTrackTrimGain('music/world3.mp3') > 2.0);
-  assert.ok(getTrackTrimGain('/music/world3.mp3') > 2.0);
-  assert.ok(getTrackTrimGain('music/world8.mp3') < 1.0);
-  assert.ok(getTrackTrimGain('music/world9.mp3') < 1.0);
-  assert.ok(getTrackTrimGain('music/world14.mp3') < 0.8);
+  // Slightly quieter tracks (-13.5 LUFS world8) get gentle positive trim vs hotter tracks (-11.3 LUFS world7)
+  assert.ok(getTrackTrimGain('music/world8.ogg') > 1.1);
+  assert.ok(getTrackTrimGain('/music/world8.ogg') > 1.1);
+  assert.ok(getTrackTrimGain('music/world7.ogg') < 0.95);
+  assert.ok(getTrackTrimGain('music/world10.ogg') < 0.95);
   assert.equal(getTrackTrimGain(undefined), 1);
 
   const engine = new IluminadoAudioEngine();
@@ -1260,7 +1257,7 @@ test('Time Attack PB splits persist on new bests and compute live interpolated p
 
 test('IluminadoAudioEngine preloadTrack, setPlaybackTempoScale, consumeTimelineBeatDelta, and melodic triggers work safely in Node', () => {
   const audio = new IluminadoAudioEngine();
-  audio.preloadTrack('music/world1.mp3');
+  audio.preloadTrack('music/world1.ogg');
   audio.setPlaybackTempoScale(1.15);
   const delta = audio.consumeTimelineBeatDelta(0.02, 120);
   assert.ok(Math.abs(delta - 0.04) < 1e-6);
@@ -2405,14 +2402,14 @@ test('IluminadoAudioEngine enforces 3-buffer memory cap, throttles rapid move ti
 
   // Populate internal decoded buffer cache directly to test LRU eviction strictly to 3 entries
   const fakeCache = (engine as unknown as { audioBuffers: Map<string, unknown> }).audioBuffers;
-  fakeCache.set('music/world1.mp3', {});
-  fakeCache.set('music/world2.mp3', {});
-  fakeCache.set('music/world3.mp3', {});
-  fakeCache.set('music/world4.mp3', {});
-  fakeCache.set('music/world5.mp3', {});
-  engine.trimBufferCaches('music/world5.mp3');
+  fakeCache.set('music/world1.ogg', {});
+  fakeCache.set('music/world2.ogg', {});
+  fakeCache.set('music/world3.ogg', {});
+  fakeCache.set('music/world4.ogg', {});
+  fakeCache.set('music/world5.ogg', {});
+  engine.trimBufferCaches('music/world5.ogg');
   assert.equal(engine.getDecodedBufferCount(), 3);
-  assert.ok(engine.getCachedBufferUrls().includes('music/world5.mp3'));
+  assert.ok(engine.getCachedBufferUrls().includes('music/world5.ogg'));
 
   // Rapid 42ms DAS move repeats are throttled cleanly (>78ms cooldown)
   assert.equal(engine.playMove(SKINS[0], 1000), true);
@@ -2439,34 +2436,34 @@ test('IluminadoAudioEngine protects active and desired tracks during LRU cache e
   const priv = engine as unknown as { activeBufferUrl: string | null; desiredTrackUrl: string | null };
 
   // Set active and desired tracks
-  priv.activeBufferUrl = 'music/world2.mp3';
-  priv.desiredTrackUrl = 'music/world3.mp3';
+  priv.activeBufferUrl = 'music/world2.ogg';
+  priv.desiredTrackUrl = 'music/world3.ogg';
 
-  fakeDecoded.set('music/world1.mp3', {});
-  fakeDecoded.set('music/world2.mp3', {});
-  fakeDecoded.set('music/world3.mp3', {});
-  fakeDecoded.set('music/world4.mp3', {});
+  fakeDecoded.set('music/world1.ogg', {});
+  fakeDecoded.set('music/world2.ogg', {});
+  fakeDecoded.set('music/world3.ogg', {});
+  fakeDecoded.set('music/world4.ogg', {});
 
   // Raw byte cache has stale decoded tracks plus an undecoded one
-  fakeRaw.set('music/world1.mp3', new ArrayBuffer(16));
-  fakeRaw.set('music/world2.mp3', new ArrayBuffer(16));
-  fakeRaw.set('music/world5.mp3', new ArrayBuffer(16));
+  fakeRaw.set('music/world1.ogg', new ArrayBuffer(16));
+  fakeRaw.set('music/world2.ogg', new ArrayBuffer(16));
+  fakeRaw.set('music/world5.ogg', new ArrayBuffer(16));
 
-  // Trimming with keepUrl='music/world4.mp3'
-  engine.trimBufferCaches('music/world4.mp3');
+  // Trimming with keepUrl='music/world4.ogg'
+  engine.trimBufferCaches('music/world4.ogg');
 
   // Strict 3-buffer cap preserved
   assert.equal(engine.getDecodedBufferCount(), 3);
   // Protected active, desired, and keepUrl must be retained
-  assert.ok(fakeDecoded.has('music/world2.mp3'), 'Active buffer must be retained');
-  assert.ok(fakeDecoded.has('music/world3.mp3'), 'Desired track must be retained');
-  assert.ok(fakeDecoded.has('music/world4.mp3'), 'keepUrl track must be retained');
+  assert.ok(fakeDecoded.has('music/world2.ogg'), 'Active buffer must be retained');
+  assert.ok(fakeDecoded.has('music/world3.ogg'), 'Desired track must be retained');
+  assert.ok(fakeDecoded.has('music/world4.ogg'), 'keepUrl track must be retained');
   // Unprotected oldest world1 must be evicted
-  assert.ok(!fakeDecoded.has('music/world1.mp3'), 'Stale track world1 must be evicted');
+  assert.ok(!fakeDecoded.has('music/world1.ogg'), 'Stale track world1 must be evicted');
 
   // Raw byte cache for already-decoded tracks must be purged to free memory
-  assert.ok(!fakeRaw.has('music/world2.mp3'), 'Raw bytes for decoded track must be purged');
-  assert.ok(fakeRaw.has('music/world5.mp3'), 'Undecoded raw bytes must be kept');
+  assert.ok(!fakeRaw.has('music/world2.ogg'), 'Raw bytes for decoded track must be purged');
+  assert.ok(fakeRaw.has('music/world5.ogg'), 'Undecoded raw bytes must be kept');
 
   engine.dispose();
 });
