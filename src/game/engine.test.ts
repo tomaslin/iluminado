@@ -49,8 +49,8 @@ import {
   IluminadoAudioEngine,
   MAX_DECODED_BUFFER_CACHE,
   computeBeatFromBufferPosition,
+  computeMusicIntensity,
   computeQuantizedSfxDelaySec,
-  computeStemLevels,
   getTrackTrimGain,
   resolveLoopTiming,
 } from './audio';
@@ -346,18 +346,17 @@ test('puzzle pattern detection recognizes framed archway silhouette', () => {
   assert.equal(checkPuzzlePatternMatch(state.grid, arch), true);
 });
 
-test('computeStemLevels dynamically scales percussion, bass, lead, and vocal stems with board state', () => {
-  const skin = SKINS[3]; // Dark Zouk
-  const nullStems = computeStemLevels(null, skin);
-  assert.ok(nullStems.percussion > 0.7);
-  assert.ok(nullStems.vocal < 0.2);
+test('computeMusicIntensity dynamically scales single-track occupancy and tension with board state', () => {
+  const skin = SKINS[3];
+  const nullIntensity = computeMusicIntensity(null, skin);
+  assert.ok(nullIntensity.occupancy > 0.2);
+  assert.ok(nullIntensity.tension < 0.4);
+  assert.equal(nullIntensity.comboLevel, 0);
 
   const emptyState = createInitialBoardState(0);
-  const baseStems = computeStemLevels(emptyState, skin);
-  assert.equal(baseStems.percussion, 0.75);
-  assert.equal(baseStems.bass, 0.36);
-  assert.equal(baseStems.lead, 0.14);
-  assert.equal(baseStems.vocal, 0.06);
+  const baseIntensity = computeMusicIntensity(emptyState, skin);
+  assert.equal(baseIntensity.occupancy, 0);
+  assert.equal(baseIntensity.tension, 0.18);
 
   // Add formed 2x2 squares + occupied cells + combo + stage progress
   for (let r = 6; r < 10; r++) {
@@ -370,11 +369,10 @@ test('computeStemLevels dynamically scales percussion, bass, lead, and vocal ste
   emptyState.sweepState.squaresThisSweep = 3;
   emptyState.stageSquaresCleared = skin.squaresToAdvance;
 
-  const peakStems = computeStemLevels(emptyState, skin);
-  assert.ok(peakStems.percussion > baseStems.percussion);
-  assert.ok(peakStems.bass > baseStems.bass);
-  assert.ok(peakStems.lead > 0.9);
-  assert.ok(peakStems.vocal > 0.85);
+  const peakIntensity = computeMusicIntensity(emptyState, skin);
+  assert.ok(peakIntensity.occupancy > baseIntensity.occupancy);
+  assert.ok(peakIntensity.tension > 0.9);
+  assert.equal(peakIntensity.comboLevel, 2);
 });
 
 test('all 50 worlds define valid music configs covering all requested genres', () => {

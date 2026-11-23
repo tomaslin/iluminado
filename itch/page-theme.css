@@ -1,185 +1,298 @@
 /*
-  Iluminado — itch.io Page Styling & Theme Palette
-  
-  HOW TO APPLY TO YOUR ITCH.IO PROFILE:
-  1. Open your game's page on itch.io while logged in.
-  2. Click "Edit theme" in the top banner toolbar.
-  3. Apply the Palette values below in the sidebar inputs.
-  4. If your itch.io account has Custom CSS enabled, paste the CSS rules
-     in the "Custom CSS" panel at the bottom of the Theme Editor.
+  Iluminado — itch.io Page Theme ("Editorial Courtyard" Palette)
+
+  HOW TO APPLY ON ITCH.IO:
+  1. Open your Iluminado project page while logged in -> click "Edit theme".
+  2. Enter the Built-in Palette hex codes below in the Theme Editor sidebar.
+  3. Paste Section 2 (Custom CSS) into the Custom CSS panel at the bottom
+     of the Theme Editor (requires Custom CSS enabled on your itch account).
 */
 
 /* ==========================================================================
-   1. ITCH.IO THEME EDITOR BUILT-IN INPUTS (Copy & Paste these Hex Codes)
+   1. ITCH.IO THEME EDITOR BUILT-IN INPUTS (Copy & Paste)
    ==========================================================================
-   
-   Page background:     #07090e   (Deep cosmic void)
-   Text color:          #cbd5e1   (Muted silver slate)
-   Link color:          #38bdf8   (Luminescent cyan)
-   Highlight color:     #f59e0b   (Amber glow)
-   Banner background:   #0f1422   (Architectural frame)
-   Content background:  #0d121f   (Semi-translucent container)
-   Font family:         Lato, Open Sans, or Sans-serif
-   Font size:           Large (16px) or Normal
+
+   Background (Page BG):   #f4ece4   (Warm Alabaster Paper)
+   Text Color:             #2e293d   (Obsidian Ink)
+   Link Color:             #c4625c   (Terracotta Coral)
+   Button / Highlight:     #7562c4   (Shift Violet)
+   Banner BG:              #fbf7f3   (Gallery Cream)
+   Content BG:             #fffcf9   (Crisp Ivory Card)
+   Font Family:            Sans-Serif (Google Fonts loaded in Custom CSS below)
+   Font Size:              Normal / Large (16px)
+   Header Banner:          Upload itch/media/header-banner.png (1200x360)
    ========================================================================== */
 
-/* ==========================================================================
-   2. CUSTOM CSS RULES (For accounts with CSS editing privileges)
-   ========================================================================== */
+@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600;9..144,700&family=JetBrains+Mono:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
 
-/* Root Variables */
 :root {
-  --ilu-bg: #07090e;
-  --ilu-card-bg: rgba(15, 20, 34, 0.92);
-  --ilu-border: rgba(56, 189, 248, 0.25);
-  --ilu-border-glow: rgba(56, 189, 248, 0.6);
-  --ilu-accent-cyan: #38bdf8;
-  --ilu-accent-amber: #f59e0b;
-  --ilu-text-bright: #f8fafc;
-  --ilu-text-muted: #94a3b8;
-  --ilu-radius: 8px;
+  --ilu-paper: #f4ece4;
+  --ilu-card: #fffcf9;
+  --ilu-card-alt: #fbf5ee;
+  --ilu-ink: #231f30;
+  --ilu-ink-soft: #534c66;
+  --ilu-ink-muted: #7b728e;
+  --ilu-coral: #c96459;
+  --ilu-teal: #497e83;
+  --ilu-saffron: #d49617;
+  --ilu-violet: #7562c4;
+  --ilu-border: rgba(35, 31, 48, 0.13);
+  --ilu-border-strong: rgba(35, 31, 48, 0.28);
+  --ilu-radius: 16px;
 }
 
-/* Page Background & Grid Overlay */
+/* Warm Architectural Paper Canvas & Subtle Courtyard Grid */
 body {
-  background-color: var(--ilu-bg) !important;
-  background-image: 
-    radial-gradient(ellipse 80% 50% at 50% -20%, rgba(14, 165, 233, 0.15), transparent),
-    radial-gradient(circle at 100% 100%, rgba(245, 158, 11, 0.08), transparent),
-    linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px) !important;
-  background-size: 100% 100%, 100% 100%, 32px 32px, 32px 32px !important;
-  color: var(--ilu-text-muted) !important;
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+  background-color: var(--ilu-paper) !important;
+  background-image:
+    radial-gradient(circle at 14% 12%, rgba(223, 133, 123, 0.16), transparent 44%),
+    radial-gradient(circle at 86% 18%, rgba(92, 147, 152, 0.14), transparent 42%),
+    radial-gradient(circle at 50% 92%, rgba(117, 98, 196, 0.10), transparent 48%),
+    linear-gradient(rgba(35, 31, 48, 0.036) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(35, 31, 48, 0.036) 1px, transparent 1px) !important;
+  background-size: 100% 100%, 100% 100%, 100% 100%, 44px 44px, 44px 44px !important;
+  color: var(--ilu-ink-soft) !important;
+  font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif !important;
+  line-height: 1.65;
   -webkit-font-smoothing: antialiased;
 }
 
-/* Main Content Wrapper */
-.wrapper, #wrapper {
-  background: var(--ilu-card-bg) !important;
-  border: 1px solid var(--ilu-border) !important;
+/* Elevated Gallery Page Container + Signature 4-Color Top Accent Strip */
+.inner_column,
+.wrapper,
+#wrapper {
+  position: relative;
+  overflow: clip;
+  background: var(--ilu-card) !important;
+  border: 1.5px solid var(--ilu-border) !important;
   border-radius: var(--ilu-radius) !important;
-  box-shadow: 0 16px 48px -8px rgba(0, 0, 0, 0.8), 0 0 24px -4px rgba(56, 189, 248, 0.15) !important;
-  backdrop-filter: blur(12px);
-  padding: 24px 32px !important;
+  box-shadow: 0 24px 64px rgba(35, 31, 48, 0.10), 0 4px 14px rgba(35, 31, 48, 0.04) !important;
+  padding: 32px 36px 40px !important;
 }
 
-/* Game Title & Headers */
-.game_title, h1, h2, h3 {
-  color: var(--ilu-text-bright) !important;
-  letter-spacing: -0.02em;
-  font-weight: 700 !important;
+.inner_column::before,
+.wrapper::before,
+#wrapper::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 5px;
+  background: linear-gradient(90deg, #df857b 0%, #e2aa1e 34%, #5c9398 68%, #7562c4 100%);
+  z-index: 5;
 }
 
+/* Header Banner Polish */
+.header,
+.game_header {
+  border-radius: 14px !important;
+  overflow: hidden;
+  border: 1.5px solid var(--ilu-border) !important;
+  box-shadow: 0 12px 32px rgba(35, 31, 48, 0.08);
+  margin-bottom: 24px !important;
+}
+
+/* Editorial Fraunces Typography */
+.game_title,
+h1,
 h2 {
-  border-bottom: 1px solid var(--ilu-border);
-  padding-bottom: 8px;
-  margin-top: 32px;
-  color: var(--ilu-accent-cyan) !important;
+  font-family: 'Fraunces', Georgia, serif !important;
+  color: var(--ilu-ink) !important;
+  font-weight: 600 !important;
+  letter-spacing: -0.02em;
+}
+
+.formatted_description h2 {
+  font-size: 1.85rem !important;
+  margin-top: 42px !important;
+  margin-bottom: 14px !important;
+  padding-bottom: 10px;
+  border-bottom: 1.5px solid var(--ilu-border);
+  position: relative;
+}
+
+.formatted_description h2::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: -1.5px;
+  width: 72px;
+  height: 3px;
+  border-radius: 99px;
+  background: linear-gradient(90deg, var(--ilu-coral), var(--ilu-violet));
+}
+
+.formatted_description h3 {
+  font-family: 'JetBrains Mono', monospace !important;
+  font-size: 0.86rem !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
-  font-size: 1.25rem !important;
-  letter-spacing: 0.05em;
+  color: var(--ilu-coral) !important;
+  margin-top: 26px !important;
+  margin-bottom: 8px !important;
 }
 
-h3 {
-  color: var(--ilu-accent-amber) !important;
-  font-size: 1.05rem !important;
-  margin-top: 20px;
+.formatted_description p,
+.formatted_description li {
+  font-size: 1.02rem;
+  color: var(--ilu-ink-soft);
 }
 
-/* Links & Interactive Elements */
+.formatted_description strong {
+  color: var(--ilu-ink);
+  font-weight: 700;
+}
+
+/* Links & Buttons */
 a {
-  color: var(--ilu-accent-cyan) !important;
+  color: var(--ilu-coral) !important;
   text-decoration: none !important;
-  transition: color 0.15s ease, text-shadow 0.15s ease;
+  font-weight: 600;
+  transition: color 0.15s ease;
 }
 
 a:hover {
-  color: #7dd3fc !important;
-  text-shadow: 0 0 8px rgba(56, 189, 248, 0.5);
+  color: var(--ilu-violet) !important;
 }
 
-/* HTML5 Game Embed Frame */
-.html_embed_widget, .game_frame, iframe {
-  border: 1px solid var(--ilu-border) !important;
-  border-radius: var(--ilu-radius) !important;
-  box-shadow: 0 0 32px -4px rgba(56, 189, 248, 0.25) !important;
-  background-color: #000000 !important;
-  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+.button,
+.download_btn {
+  background: var(--ilu-ink) !important;
+  color: #fffcf9 !important;
+  border: 1.5px solid var(--ilu-ink) !important;
+  border-radius: 10px !important;
+  font-weight: 600 !important;
+  box-shadow: 0 3px 0 rgba(35, 31, 48, 0.25) !important;
+  transition: transform 0.14s ease, background 0.14s ease, box-shadow 0.14s ease !important;
 }
 
-.html_embed_widget:hover, .game_frame:hover {
-  border-color: var(--ilu-border-glow) !important;
-  box-shadow: 0 0 40px -2px rgba(56, 189, 248, 0.4) !important;
+.button:hover,
+.download_btn:hover {
+  background: var(--ilu-violet) !important;
+  border-color: var(--ilu-violet) !important;
+  transform: translateY(-1px);
+  box-shadow: 0 5px 14px rgba(117, 98, 196, 0.28) !important;
 }
 
-/* Video & Media Gallery Container */
-.video_embed, .media_gallery {
-  border-radius: var(--ilu-radius) !important;
+/* Playable Browser Frame & Trailer Embed */
+.html_embed_widget,
+.game_frame,
+.video_embed {
+  border: 2px solid var(--ilu-ink) !important;
+  border-radius: 16px !important;
   overflow: hidden;
-  border: 1px solid var(--ilu-border);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
-  margin-bottom: 24px;
+  box-shadow: 0 18px 42px rgba(35, 31, 48, 0.14), 0 5px 0 var(--ilu-ink) !important;
+  background: #1a1726 !important;
 }
 
-/* Tables (Controls, Feature Matrices) */
-table {
+/* Sidebar Screenshots & Description Media */
+.screenshot_list img,
+.formatted_description img {
+  border-radius: 12px !important;
+  border: 1.5px solid var(--ilu-border-strong) !important;
+  box-shadow: 0 10px 26px rgba(35, 31, 48, 0.09) !important;
+  transition: transform 0.18s ease, box-shadow 0.18s ease !important;
+}
+
+.screenshot_list img:hover,
+.formatted_description img:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 36px rgba(35, 31, 48, 0.15) !important;
+}
+
+/* Rhythmic Blockquote Callouts */
+.formatted_description blockquote {
+  margin: 24px 0 !important;
+  padding: 18px 24px !important;
+  background: linear-gradient(135deg, #fbf4ee 0%, #f5f0fc 100%) !important;
+  border-left: 4px solid var(--ilu-violet) !important;
+  border-radius: 0 12px 12px 0 !important;
+  color: var(--ilu-ink) !important;
+  font-family: 'Fraunces', Georgia, serif !important;
+  font-size: 1.18rem !important;
+  line-height: 1.45 !important;
+}
+
+/* Feature & Control Tables */
+.formatted_description table {
   width: 100%;
-  border-collapse: collapse;
-  margin: 16px 0 24px 0;
-  background: rgba(10, 15, 26, 0.6);
-  border: 1px solid var(--ilu-border);
-  border-radius: 6px;
+  border-collapse: separate;
+  border-spacing: 0;
+  margin: 18px 0 28px 0;
+  background: var(--ilu-card-alt);
+  border: 1.5px solid var(--ilu-border);
+  border-radius: 12px;
   overflow: hidden;
 }
 
-th {
-  background: rgba(56, 189, 248, 0.12) !important;
-  color: var(--ilu-accent-cyan) !important;
-  padding: 10px 14px !important;
-  font-weight: 600;
+.formatted_description th {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.78rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: #efe6dc !important;
+  color: var(--ilu-ink) !important;
+  padding: 12px 16px !important;
   text-align: left;
-  border-bottom: 1px solid var(--ilu-border) !important;
+  border-bottom: 1.5px solid var(--ilu-border) !important;
 }
 
-td {
-  padding: 10px 14px !important;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05) !important;
-  color: var(--ilu-text-bright);
+.formatted_description td {
+  padding: 11px 16px !important;
+  border-bottom: 1px solid rgba(35, 31, 48, 0.08) !important;
+  color: var(--ilu-ink-soft);
+  vertical-align: top;
 }
 
-tr:nth-child(even) td {
-  background: rgba(255, 255, 255, 0.015);
+.formatted_description tr:last-child td {
+  border-bottom: none !important;
 }
 
-/* Keyboard / Controller Badges */
+/* Tactile Keycap Badges */
 kbd {
   display: inline-block;
-  padding: 2px 7px;
-  font-size: 0.82rem;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  background-color: rgba(30, 41, 59, 0.9);
-  color: var(--ilu-accent-cyan);
-  border: 1px solid rgba(56, 189, 248, 0.4);
-  border-radius: 4px;
-  box-shadow: 0 2px 0 rgba(0, 0, 0, 0.6);
+  padding: 2px 8px;
+  margin: 1px 2px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--ilu-ink);
+  background: #ffffff;
+  border: 1.5px solid rgba(35, 31, 48, 0.28);
+  border-bottom-width: 3px;
+  border-radius: 6px;
 }
 
-/* Custom Scrollbar for Smooth Aesthetic */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+/* Optional Description Showcase Helpers */
+.ilu-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin: 18px 0 26px;
 }
 
-::-webkit-scrollbar-track {
-  background: var(--ilu-bg);
+.ilu-card {
+  background: var(--ilu-card-alt);
+  border: 1.5px solid var(--ilu-border);
+  border-radius: 12px;
+  padding: 16px 18px;
 }
 
-::-webkit-scrollbar-thumb {
-  background: rgba(56, 189, 248, 0.3);
-  border-radius: 4px;
+.ilu-tag {
+  display: inline-block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 3px 9px;
+  border-radius: 6px;
+  margin-bottom: 8px;
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(56, 189, 248, 0.6);
-}
+.ilu-tag-coral { background: rgba(201, 100, 89, 0.13); color: #9c4036; }
+.ilu-tag-teal { background: rgba(73, 126, 131, 0.14); color: #2b5e63; }
+.ilu-tag-violet { background: rgba(117, 98, 196, 0.14); color: #523ea3; }
+.ilu-tag-saffron { background: rgba(212, 150, 23, 0.16); color: #8c5c05; }

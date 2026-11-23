@@ -135,27 +135,19 @@ The music here reflects my pretty terrible musical taste. I wanted tracks I coul
 
 Basically I would come up with an idea or have AI suggest one that is different than the rest of the game. Something like:
 
-```Desert Psychedelic Danzón
+```Cyber-Tango × Porcelain IDM × Dark Zouk (Single-Track Lyria Prompt)
 
-Identity: Elegant Latin ballroom rhythm, desert psychedelia, organic downtempo electronica.
-Musical specification: 112 BPM · A Minor · 4/4 · Refined syncopated danzón-inspired pulse.
+Identity: Syncopated dark zouk pulse, cyber-tango bandoneón bends, porcelain marimba polyrhythms, warm dub sub-bass.
+Musical specification: 82 BPM · F# Minor · 4/4 · Single continuous looping OGG track.
 
-Full-track Lyria prompt
+Single-Track Lyria prompt
 
-An elegant, hypnotic dance fusion combining the measured grace of danzón with desert psychedelia and deep electronic production. Deliberate bass pulses anchor the rhythm while brushed timbales, claves, and restrained hand percussion establish intricate ballroom movement. Warm electric piano, nylon-string guitar, and subtle piano montuno fragments create a sophisticated harmonic foundation. Psychedelic slide guitar and breathy flute phrases drift through expansive analog delays. Mysterious, romantic, and ceremonial, with beautiful melodic bends, long instrumental conversations, and spacious production. Avoid conventional salsa arrangements.
-
-4-Stem Prompts
-* Percussion: 112 BPM, A Minor. Restrained danzón pulse, timbales, claves, brushed snare, soft shaker, minimal fills.
-* Bass: Warm electric bass, occasional sub reinforcement, A1, F1, G1, E1, controlled syncopation.
-* Lead / Harmony: Nylon guitar, soft piano montuno fragments, psychedelic slide guitar, breathy flute, extended minor-7 and suspended chords.
-* Vocal / Atmosphere: Wordless humming, desert wind textures, long analog delays, distant choral harmonics.
+82 BPM, F# Minor, 4/4. A weird, playful, futuristic fusion combining a slow hypnotic dark zouk pulse with cybernetic tango nuevo bandoneón bends, glitchy porcelain marimba arpeggios, and deep dub sub-bass. Crisp synthesized woodblock rimshots and shuffled metallic shakers drive an asymmetric pocket while glassy bowed cello harmonics and vocoded brass stabs trade phrases. Avoid straight traditional ballroom or plain acoustic folk arrangements; make every texture feel crystalline, off-kilter, and kinetic.
 ```
 
-I paste this into Google Gemini and say Generate a track. Then I download the audio and encode it as OGG. 
+I paste this into Google Gemini and say Generate a track. Then I download the audio and encode it as a single OGG file (`music/worldN.ogg`). 
 
-Once I upload the ogg into the project, I ask AI studio to build a skin that is different than the other ones but inspired by the music, I usually also give it a visual reference that I love like cubist art that is a little more illustration and with a Neo Andean vibe. 
-
-Each of the 50 worlds pairs its own architectural or artistic backdrop, themed board border, block textures, and 4-stem reactive mix (Percussion, Bass, Lead, and Atmosphere)—ranging from sumi-e ink wash, cubist collage, Neo-Andean *cholets*, Nordic flat-pack showrooms, Grand Budapest symmetry, Ghibli rail expresses, 80s chrome sci-fi, Miami sunset neon, and animated cat sketchbooks to high-contrast monochrome worlds like **Silver Clearing**:
+Once I upload the ogg into the project, I ask AI studio to build a skin that is different than the other ones but inspired by the music—ranging across fine art, geology, botanicals, architecture, ceramics, and textiles, from sumi-e ink wash, cubist collage, Neo-Andean *cholets*, Nordic birch woodworking, Grand Budapest stucco, Ghibli water trains, retro cinema, and animated cat sketchbooks to monochrome worlds like **Silver Clearing** (plus two playful comic-inspired palettes):
 
 ![Silver Clearing Black and White Skin](docs/images/skin-monochrome.png)
 

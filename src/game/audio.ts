@@ -11,19 +11,18 @@ function clamp(v: number, min: number, max: number): number {
 export const MAX_DECODED_BUFFER_CACHE = 3;
 export const MAX_RAW_TRACK_CACHE = 5;
 
-export interface StemLevels {
-  percussion: number;
-  bass: number;
-  lead: number;
-  vocal: number;
+export interface MusicIntensity {
+  occupancy: number;
+  tension: number;
+  comboLevel: number;
 }
 
-export function computeStemLevels(
+export function computeMusicIntensity(
   board: BoardState | null,
   skin: SkinConfig
-): StemLevels {
+): MusicIntensity {
   if (!board) {
-    return { percussion: 0.78, bass: 0.45, lead: 0.25, vocal: 0.1 };
+    return { occupancy: 0.32, tension: 0.28, comboLevel: 0 };
   }
 
   let occupied = 0;
@@ -42,36 +41,19 @@ export function computeStemLevels(
   const formedCount = board.squares.length;
   const sweepCount = board.sweepState.squaresThisSweep;
 
-  const percussion = clamp(
-    0.75 + Math.min(1, occupied / 36) * 0.18 + (sweepCount > 0 ? 0.07 : 0),
-    0.75,
+  const occupancy = clamp(occupied / 48, 0, 1);
+  const tension = clamp(
+    0.18 +
+      occupancy * 0.25 +
+      (formedCount > 0 ? 0.26 : 0) +
+      Math.min(0.25, sweepCount * 0.08) +
+      stageRatio * 0.3 +
+      Math.min(0.25, board.comboLevel * 0.08),
+    0.18,
     1
   );
 
-  const bass = clamp(
-    0.36 +
-      Math.min(1, occupied / 20) * 0.36 +
-      (board.stageSquaresCleared >= 1 || formedCount > 0 ? 0.28 : 0),
-    0.36,
-    1
-  );
-
-  const lead = clamp(
-    0.14 + (formedCount > 0 ? 0.42 : 0) + stageRatio * 0.44,
-    0.14,
-    1
-  );
-
-  const vocal = clamp(
-    0.06 +
-      (board.comboLevel > 0 ? 0.52 : 0) +
-      Math.min(1, sweepCount / 3) * 0.32 +
-      Math.max(0, stageRatio - 0.5) * 0.45,
-    0.06,
-    1
-  );
-
-  return { percussion, bass, lead, vocal };
+  return { occupancy, tension, comboLevel: board.comboLevel };
 }
 
 export interface LoopTimingSpec {
@@ -298,10 +280,7 @@ export class IluminadoAudioEngine {
   private analyser: AnalyserNode | null = null;
   private spectrumBins: Uint8Array<ArrayBuffer> | null = null;
   private sfxBusGain: GainNode | null = null;
-  private stemPercGain: GainNode | null = null;
-  private stemBassGain: GainNode | null = null;
-  private stemLeadGain: GainNode | null = null;
-  private stemVocalGain: GainNode | null = null;
+  private synthFallbackGain: GainNode | null = null;
 
   private musicTrimGain: GainNode | null = null;
   private musicLowBandGain: GainNode | null = null;
@@ -353,8 +332,7 @@ export class IluminadoAudioEngine {
   private moveLadderStep = 0;
   private shiftRiserProgress = 0;
 
-  private lastStems: StemLevels = { percussion: 0.78, bass: 0.45, lead: 0.25, vocal: 0.1 };
-  private lastComboLevel = 0;
+  private lastIntensity: MusicIntensity = { occupancy: 0.32, tension: 0.28, comboLevel: 0 };
   private readonly emptySpectrumBands = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
   private readonly liveSpectrumBands = new Array<number>(10).fill(0);
 
@@ -388,22 +366,11 @@ export class IluminadoAudioEngine {
 
       this.sfxBusGain = this.ctx.createGain();
       this.sfxBusGain.gain.value = 0.72 * this.sfxVolume;
-
-      this.stemPercGain = this.ctx.createGain();
-      this.stemBassGain = this.ctx.createGain();
-      this.stemLeadGain = this.ctx.createGain();
-      this.stemVocalGain = this.ctx.createGain();
-
-      this.stemPercGain.gain.value = 0.85;
-      this.stemBassGain.gain.value = 0.75;
-      this.stemLeadGain.gain.value = 0.6;
-      this.stemVocalGain.gain.value = 0.4;
-
-      this.stemPercGain.connect(this.sfxBusGain);
-      this.stemBassGain.connect(this.sfxBusGain);
-      this.stemLeadGain.connect(this.sfxBusGain);
-      this.stemVocalGain.connect(this.sfxBusGain);
       this.sfxBusGain.connect(this.compressor);
+
+      this.synthFallbackGain = this.ctx.createGain();
+      this.synthFallbackGain.gain.value = 0.52 * this.musicVolume;
+      this.synthFallbackGain.connect(this.compressor);
 
       this.musicTrimGain = this.ctx.createGain();
       this.musicTrimGain.gain.value = getTrackTrimGain(this.activeMusicUrl);
@@ -927,39 +894,34 @@ export class IluminadoAudioEngine {
       midBand = 0.92;
       highBand = 0.88;
     } else if (this.desiredMode === 'playing') {
-      const intensity = clamp(
-        this.lastStems.lead * 0.55 +
-          this.lastStems.vocal * 0.45 +
-          Math.min(0.4, this.lastComboLevel * 0.1),
+      const energy = clamp(
+        this.lastIntensity.tension * 0.78 +
+          this.lastIntensity.occupancy * 0.22 +
+          Math.min(0.35, this.lastIntensity.comboLevel * 0.09),
         0,
         1.15
       );
-      targetCutoff = 8200 + Math.min(1, intensity) * 11000;
+      targetCutoff = 8400 + Math.min(1, energy) * 10800;
       targetBusGain = clamp(
-        0.58 + this.lastStems.lead * 0.12 + this.lastStems.vocal * 0.1,
+        0.58 + this.lastIntensity.tension * 0.16,
         0.55,
         0.75
       );
 
       lowBand = clamp(
-        0.74 +
-          (this.lastStems.bass - 0.36) * 0.58 +
-          Math.min(0.2, this.lastComboLevel * 0.05),
-        0.72,
-        1.18
+        0.82 +
+          this.lastIntensity.occupancy * 0.26 +
+          Math.min(0.16, this.lastIntensity.comboLevel * 0.04),
+        0.78,
+        1.16
       );
-      midBand = clamp(
-        0.64 + this.lastStems.lead * 0.44 + this.lastStems.vocal * 0.22,
-        0.64,
-        1.18
-      );
+      midBand = clamp(0.78 + this.lastIntensity.tension * 0.34, 0.76, 1.15);
       highBand = clamp(
-        0.56 +
-          this.lastStems.percussion * 0.34 +
-          this.lastStems.vocal * 0.38 +
-          Math.min(0.18, this.lastComboLevel * 0.045),
-        0.56,
-        1.20
+        0.76 +
+          this.lastIntensity.tension * 0.32 +
+          Math.min(0.16, this.lastIntensity.comboLevel * 0.04),
+        0.74,
+        1.18
       );
 
       if (this.shiftRiserProgress > 0.01 && now >= this.transitionBloomUntilCtxTime) {
@@ -978,6 +940,8 @@ export class IluminadoAudioEngine {
     this.musicHighBandGain?.gain.setTargetAtTime(highBand, now, 0.14);
     const trimComp = normalizedTrim > 1.4 ? 1.4 / normalizedTrim : 1.0;
     this.musicBusGain?.gain.setTargetAtTime(targetBusGain * trimComp * this.musicVolume, now, 0.08);
+    const fallbackLevel = this.desiredMode === 'paused' ? 0.18 : this.desiredMode === 'title' ? 0.38 : 0.56;
+    this.synthFallbackGain?.gain.setTargetAtTime(fallbackLevel * this.musicVolume, now, 0.08);
   }
 
   private startDecodedBufferTrack(
@@ -1146,11 +1110,9 @@ export class IluminadoAudioEngine {
 
   public updateMusicMix(
     _skin: SkinConfig,
-    stems: StemLevels,
-    comboLevel: number
+    intensity: MusicIntensity
   ): void {
-    this.lastStems = stems;
-    this.lastComboLevel = comboLevel;
+    this.lastIntensity = intensity;
     this.applyDynamicMusicShaping();
   }
 
@@ -1454,7 +1416,7 @@ export class IluminadoAudioEngine {
         : 0.16;
     this.scheduleTone(
       when,
-      this.stemPercGain,
+      this.synthFallbackGain,
       startHz,
       dur,
       'sine',
@@ -1473,7 +1435,7 @@ export class IluminadoAudioEngine {
       style === 'constructivist_march' ||
       style === 'kraut_motorik'
     ) {
-      this.scheduleNoise(when, this.stemPercGain, 0.018, 'bandpass', 3200, 1.8, vol * 0.28);
+      this.scheduleNoise(when, this.synthFallbackGain, 0.018, 'bandpass', 3200, 1.8, vol * 0.28);
     }
   }
 
@@ -1491,7 +1453,7 @@ export class IluminadoAudioEngine {
     ) {
       this.scheduleTone(
         when,
-        this.stemPercGain,
+        this.synthFallbackGain,
         style === 'bossa_nova' || style === 'shamisen_chill' || style === 'space_age_lounge' ? 880 : 1150,
         0.055,
         'triangle',
@@ -1500,7 +1462,7 @@ export class IluminadoAudioEngine {
         3600
       );
       if (style === 'bachata' || style === 'cumbia_dub' || style === 'andean_cumbia') {
-        this.scheduleNoise(when, this.stemPercGain, 0.04, 'highpass', 5200, 1.5, vol * 0.25);
+        this.scheduleNoise(when, this.synthFallbackGain, 0.04, 'highpass', 5200, 1.5, vol * 0.25);
       }
       return;
     }
@@ -1515,13 +1477,13 @@ export class IluminadoAudioEngine {
       style === 'chamber_waltz' ||
       style === 'tokyo_jazz_kissa'
     ) {
-      this.scheduleNoise(when, this.stemPercGain, 0.09, 'bandpass', 2800, 0.9, vol * 0.45);
+      this.scheduleNoise(when, this.synthFallbackGain, 0.09, 'bandpass', 2800, 0.9, vol * 0.45);
       return;
     }
-    this.scheduleTone(when, this.stemPercGain, 190, 0.09, 'triangle', vol * 0.55, 0.002, 1200, 0.15, 110);
+    this.scheduleTone(when, this.synthFallbackGain, 190, 0.09, 'triangle', vol * 0.55, 0.002, 1200, 0.15, 110);
     this.scheduleNoise(
       when,
-      this.stemPercGain,
+      this.synthFallbackGain,
       style === 'synthwave' ||
         style === 'city_pop' ||
         style === 'industrial_synth' ||
@@ -1554,7 +1516,7 @@ export class IluminadoAudioEngine {
         : 6400;
     this.scheduleNoise(
       when,
-      this.stemPercGain,
+      this.synthFallbackGain,
       dur,
       style === 'swing' || style === 'cat_step_jazz' || style === 'tokyo_jazz_kissa' ? 'bandpass' : 'highpass',
       freq,
@@ -1563,8 +1525,14 @@ export class IluminadoAudioEngine {
     );
   }
 
-  private scheduleVocalPad(when: number, midi: number, dur: number, vol: number): void {
-    if (!this.canSchedule() || !this.ctx || !this.stemVocalGain) return;
+  private schedulePadTone(
+    when: number,
+    midi: number,
+    dur: number,
+    vol: number,
+    dest: GainNode | null = this.sfxBusGain
+  ): void {
+    if (!this.canSchedule() || !this.ctx || !dest) return;
 
     const startTime = Math.max(this.ctx.currentTime + 0.002, when);
     const stopTime = startTime + dur + 0.03;
@@ -1587,7 +1555,7 @@ export class IluminadoAudioEngine {
 
     osc.connect(f1);
     f1.connect(gain);
-    gain.connect(this.stemVocalGain);
+    gain.connect(dest);
 
     osc.onended = () => {
       try {
@@ -1604,7 +1572,7 @@ export class IluminadoAudioEngine {
   public syncStep(
     stepCol: number,
     skin: SkinConfig,
-    stems: StemLevels = { percussion: 0.85, bass: 0.75, lead: 0.65, vocal: 0.45 }
+    intensity: MusicIntensity = { occupancy: 0.4, tension: 0.5, comboLevel: 0 }
   ): void {
     const col = ((stepCol % 16) + 16) % 16;
     if (col === this.lastStepTriggered) return;
@@ -1616,19 +1584,19 @@ export class IluminadoAudioEngine {
     if (!this.canSchedule() || !this.ctx) return;
 
     if (this.isExternalMusicActive()) {
-      this.lastStems = stems;
+      this.lastIntensity = intensity;
       this.applyDynamicMusicShaping();
-      this.stemPercGain?.gain.setTargetAtTime(0.95, this.ctx.currentTime, 0.1);
-      this.stemLeadGain?.gain.setTargetAtTime(0.9, this.ctx.currentTime, 0.1);
-      this.stemVocalGain?.gain.setTargetAtTime(0.85, this.ctx.currentTime, 0.1);
       return;
     }
 
     const now = this.ctx.currentTime;
-    this.stemPercGain?.gain.setTargetAtTime(stems.percussion, now, 0.2);
-    this.stemBassGain?.gain.setTargetAtTime(stems.bass, now, 0.25);
-    this.stemLeadGain?.gain.setTargetAtTime(stems.lead, now, 0.28);
-    this.stemVocalGain?.gain.setTargetAtTime(stems.vocal, now, 0.35);
+    this.lastIntensity = intensity;
+    const fallbackLevel = this.desiredMode === 'paused' ? 0.18 : this.desiredMode === 'title' ? 0.38 : 0.56;
+    this.synthFallbackGain?.gain.setTargetAtTime(
+      fallbackLevel * (0.65 + intensity.tension * 0.35) * this.musicVolume,
+      now,
+      0.16
+    );
 
     const { music } = skin;
     const style = music.styleId;
@@ -1724,7 +1692,7 @@ export class IluminadoAudioEngine {
       const bassFreq = midiToFreq(bassMidi);
       this.scheduleTone(
         when,
-        this.stemBassGain,
+        this.synthFallbackGain,
         bassFreq,
         eighthDur * (style === 'heavy_metal' || style === 'constructivist_march' ? 0.85 : 1.45),
         music.bassWaveform,
@@ -1736,7 +1704,7 @@ export class IluminadoAudioEngine {
       if (music.subBassGain > 0.6) {
         this.scheduleTone(
           when,
-          this.stemBassGain,
+          this.synthFallbackGain,
           bassFreq * 0.5,
           eighthDur * 1.6,
           'sine',
@@ -1761,7 +1729,7 @@ export class IluminadoAudioEngine {
 
       this.scheduleTone(
         when,
-        this.stemLeadGain,
+        this.synthFallbackGain,
         leadFreq,
         leadDur,
         music.waveform,
@@ -1774,7 +1742,7 @@ export class IluminadoAudioEngine {
       if ((style === 'heavy_metal' || style === 'alt_rock') && col % 2 === 0) {
         this.scheduleTone(
           when,
-          this.stemLeadGain,
+          this.synthFallbackGain,
           midiToFreq(music.rootMidi + scaleInterval + 7),
           eighthDur * 0.9,
           'sawtooth',
@@ -1786,7 +1754,7 @@ export class IluminadoAudioEngine {
       } else if (style === 'salsa' && (col % 4 === 1 || col % 4 === 3)) {
         this.scheduleTone(
           when,
-          this.stemLeadGain,
+          this.synthFallbackGain,
           leadFreq * 0.5,
           eighthDur * 0.8,
           'triangle',
@@ -1799,14 +1767,14 @@ export class IluminadoAudioEngine {
 
     if (col === 0 || col === 8) {
       for (let i = 0; i < Math.min(3, chord.length); i++) {
-        this.scheduleVocalPad(when, music.rootMidi + chord[i], eighthDur * 3.8, 0.075);
+        this.schedulePadTone(when, music.rootMidi + chord[i], eighthDur * 3.8, 0.075, this.synthFallbackGain);
       }
     } else if (
       (style === 'trap' || style === 'dark_zouk' || style === 'reggaeton' || style === 'liquid_dnb') &&
       (col === 6 || col === 14)
     ) {
       const topNote = chord[chord.length - 1] ?? 7;
-      this.scheduleVocalPad(when, music.rootMidi + 12 + topNote, eighthDur * 0.9, 0.09);
+      this.schedulePadTone(when, music.rootMidi + 12 + topNote, eighthDur * 0.9, 0.09, this.synthFallbackGain);
     }
   }
 
@@ -1903,24 +1871,24 @@ export class IluminadoAudioEngine {
     const rootTickFreq = midiToFreq(root + 24 + Math.min(12, ladderSemi));
 
     if (profile.family === 'chip_minimal') {
-      this.scheduleTone(now, this.stemPercGain, rootTickFreq * 1.12, 0.022, 'square', 0.036 * ladderGain, 0.002, 2600);
+      this.scheduleTone(now, this.sfxBusGain, rootTickFreq * 1.12, 0.022, 'square', 0.036 * ladderGain, 0.002, 2600);
     } else if (profile.family === 'wood_marimba') {
-      this.scheduleTone(now, this.stemPercGain, rootTickFreq, 0.032, 'triangle', 0.062 * ladderGain, 0.002, 2400, 0, rootTickFreq * 0.85);
+      this.scheduleTone(now, this.sfxBusGain, rootTickFreq, 0.032, 'triangle', 0.062 * ladderGain, 0.002, 2400, 0, rootTickFreq * 0.85);
     } else if (profile.family === 'rock_crunch') {
-      this.scheduleNoise(now, this.stemPercGain, 0.024, 'bandpass', 2300 + this.moveLadderStep * 120, 2.0, 0.072 * ladderGain);
-      this.scheduleTone(now, this.stemPercGain, midiToFreq(root + ladderSemi), 0.028, 'triangle', 0.034 * ladderGain, 0.002, 1100, 0.2);
+      this.scheduleNoise(now, this.sfxBusGain, 0.024, 'bandpass', 2300 + this.moveLadderStep * 120, 2.0, 0.072 * ladderGain);
+      this.scheduleTone(now, this.sfxBusGain, midiToFreq(root + ladderSemi), 0.028, 'triangle', 0.034 * ladderGain, 0.002, 1100, 0.2);
     } else if (profile.family === 'analog_synth') {
-      this.scheduleNoise(now, this.stemPercGain, 0.02, 'highpass', 6800, 1.4, 0.062 * ladderGain);
-      this.scheduleTone(now, this.stemPercGain, rootTickFreq * 1.5, 0.02, 'sawtooth', 0.024 * ladderGain, 0.002, 3200, 0, rootTickFreq);
+      this.scheduleNoise(now, this.sfxBusGain, 0.02, 'highpass', 6800, 1.4, 0.062 * ladderGain);
+      this.scheduleTone(now, this.sfxBusGain, rootTickFreq * 1.5, 0.02, 'sawtooth', 0.024 * ladderGain, 0.002, 3200, 0, rootTickFreq);
     } else if (profile.family === 'jazz_fender') {
-      this.scheduleNoise(now, this.stemPercGain, 0.024, 'bandpass', 4300 + this.moveLadderStep * 140, 1.6, 0.056 * ladderGain);
-      this.scheduleTone(now, this.stemPercGain, rootTickFreq, 0.022, 'sine', 0.028 * ladderGain, 0.002, 2200);
+      this.scheduleNoise(now, this.sfxBusGain, 0.024, 'bandpass', 4300 + this.moveLadderStep * 140, 1.6, 0.056 * ladderGain);
+      this.scheduleTone(now, this.sfxBusGain, rootTickFreq, 0.022, 'sine', 0.028 * ladderGain, 0.002, 2200);
     } else if (profile.family === 'dub_club') {
-      this.scheduleNoise(now, this.stemPercGain, 0.02, 'highpass', 7200, 1.4, 0.065 * ladderGain);
-      this.scheduleTone(now, this.stemPercGain, rootTickFreq, 0.02, 'sine', 0.022 * ladderGain, 0.002, 2600);
+      this.scheduleNoise(now, this.sfxBusGain, 0.02, 'highpass', 7200, 1.4, 0.065 * ladderGain);
+      this.scheduleTone(now, this.sfxBusGain, rootTickFreq, 0.02, 'sine', 0.022 * ladderGain, 0.002, 2600);
     } else {
-      this.scheduleTone(now, this.stemPercGain, rootTickFreq * 1.5, 0.036, 'sine', 0.04 * ladderGain, 0.002, 4200);
-      this.scheduleNoise(now, this.stemPercGain, 0.018, 'highpass', 5800, 1.2, 0.032 * ladderGain);
+      this.scheduleTone(now, this.sfxBusGain, rootTickFreq * 1.5, 0.036, 'sine', 0.04 * ladderGain, 0.002, 4200);
+      this.scheduleNoise(now, this.sfxBusGain, 0.018, 'highpass', 5800, 1.2, 0.032 * ladderGain);
     }
     return true;
   }
@@ -1937,24 +1905,24 @@ export class IluminadoAudioEngine {
     const freq = midiToFreq(music.rootMidi + 12 + deg);
 
     if (profile.family === 'chip_minimal') {
-      this.scheduleTone(now, this.stemLeadGain, freq, 0.045, 'square', 0.068, 0.002, 3200);
-      this.scheduleTone(now + 0.028, this.stemLeadGain, freq * 1.25, 0.055, 'square', 0.052, 0.002, 3400);
+      this.scheduleTone(now, this.sfxBusGain, freq, 0.045, 'square', 0.068, 0.002, 3200);
+      this.scheduleTone(now + 0.028, this.sfxBusGain, freq * 1.25, 0.055, 'square', 0.052, 0.002, 3400);
     } else if (profile.family === 'wood_marimba') {
-      this.scheduleTone(now, this.stemLeadGain, freq, 0.11, 'triangle', 0.115, 0.002, 2600);
-      this.scheduleTone(now, this.stemLeadGain, freq * 2, 0.045, 'sine', 0.04, 0.001, 4200);
+      this.scheduleTone(now, this.sfxBusGain, freq, 0.11, 'triangle', 0.115, 0.002, 2600);
+      this.scheduleTone(now, this.sfxBusGain, freq * 2, 0.045, 'sine', 0.04, 0.001, 4200);
     } else if (profile.family === 'jazz_fender') {
-      this.scheduleTone(now, this.stemLeadGain, freq, 0.13, 'sine', 0.105, 0.003, 2800);
-      this.scheduleTone(now, this.stemLeadGain, freq * 3, 0.035, 'sine', 0.03, 0.002, 4600);
+      this.scheduleTone(now, this.sfxBusGain, freq, 0.13, 'sine', 0.105, 0.003, 2800);
+      this.scheduleTone(now, this.sfxBusGain, freq * 3, 0.035, 'sine', 0.03, 0.002, 4600);
     } else if (profile.family === 'cathedral_glass') {
-      this.scheduleTone(now, this.stemLeadGain, freq, 0.16, 'sine', 0.095, 0.008, 4200);
-      this.scheduleTone(now + 0.014, this.stemLeadGain, freq * 1.5, 0.14, 'triangle', 0.042, 0.008, 4400);
+      this.scheduleTone(now, this.sfxBusGain, freq, 0.16, 'sine', 0.095, 0.008, 4200);
+      this.scheduleTone(now + 0.014, this.sfxBusGain, freq * 1.5, 0.14, 'triangle', 0.042, 0.008, 4400);
     } else if (profile.family === 'rock_crunch') {
-      this.scheduleTone(now, this.stemLeadGain, freq, 0.09, 'sawtooth', 0.082, 0.002, 2900, profile.drive);
-      this.scheduleTone(now, this.stemLeadGain, freq * 1.5, 0.08, 'sawtooth', 0.052, 0.002, 2700, profile.drive * 0.7);
+      this.scheduleTone(now, this.sfxBusGain, freq, 0.09, 'sawtooth', 0.082, 0.002, 2900, profile.drive);
+      this.scheduleTone(now, this.sfxBusGain, freq * 1.5, 0.08, 'sawtooth', 0.052, 0.002, 2700, profile.drive * 0.7);
     } else {
       this.scheduleTone(
         now,
-        this.stemLeadGain,
+        this.sfxBusGain,
         freq,
         0.1,
         profile.leadWave,
@@ -1975,21 +1943,21 @@ export class IluminadoAudioEngine {
     const subGain = skin?.music.subBassGain ?? 0.5;
 
     if (profile.family === 'wood_marimba') {
-      this.scheduleTone(when, this.stemPercGain, midiToFreq(root + 5), 0.045, 'triangle', 0.068, 0.002, 1600, 0, midiToFreq(root - 2));
-      this.scheduleTone(when, this.stemPercGain, midiToFreq(root - 12) * 1.4, 0.13, 'sine', 0.14, 0.003, 720, 0, midiToFreq(root - 24));
+      this.scheduleTone(when, this.sfxBusGain, midiToFreq(root + 5), 0.045, 'triangle', 0.068, 0.002, 1600, 0, midiToFreq(root - 2));
+      this.scheduleTone(when, this.sfxBusGain, midiToFreq(root - 12) * 1.4, 0.13, 'sine', 0.14, 0.003, 720, 0, midiToFreq(root - 24));
     } else if (profile.family === 'chip_minimal') {
-      this.scheduleTone(when, this.stemPercGain, midiToFreq(root + 7), 0.036, 'square', 0.048, 0.002, 1800, 0, midiToFreq(root - 12));
-      this.scheduleTone(when, this.stemPercGain, midiToFreq(root - 12), 0.09, 'triangle', 0.12, 0.002, 900);
+      this.scheduleTone(when, this.sfxBusGain, midiToFreq(root + 7), 0.036, 'square', 0.048, 0.002, 1800, 0, midiToFreq(root - 12));
+      this.scheduleTone(when, this.sfxBusGain, midiToFreq(root - 12), 0.09, 'triangle', 0.12, 0.002, 900);
     } else if (profile.family === 'cathedral_glass') {
-      this.scheduleTone(when, this.stemPercGain, midiToFreq(root), 0.09, 'sine', 0.075, 0.004, 1500);
-      this.scheduleTone(when, this.stemPercGain, midiToFreq(root - 12), 0.14, 'sine', 0.115, 0.006, 620);
+      this.scheduleTone(when, this.sfxBusGain, midiToFreq(root), 0.09, 'sine', 0.075, 0.004, 1500);
+      this.scheduleTone(when, this.sfxBusGain, midiToFreq(root - 12), 0.14, 'sine', 0.115, 0.006, 620);
     } else if (profile.family === 'rock_crunch') {
-      this.scheduleNoise(when, this.stemPercGain, 0.02, 'bandpass', 2600, 1.8, 0.065);
-      this.scheduleTone(when, this.stemPercGain, midiToFreq(root - 12) * 1.5, 0.11, 'triangle', 0.145, 0.002, 820, 0.22, midiToFreq(root - 24));
+      this.scheduleNoise(when, this.sfxBusGain, 0.02, 'bandpass', 2600, 1.8, 0.065);
+      this.scheduleTone(when, this.sfxBusGain, midiToFreq(root - 12) * 1.5, 0.11, 'triangle', 0.145, 0.002, 820, 0.22, midiToFreq(root - 24));
     } else {
       this.scheduleTone(
         when,
-        this.stemPercGain,
+        this.sfxBusGain,
         midiToFreq(root) * 1.15,
         0.048,
         profile.landWave,
@@ -2001,7 +1969,7 @@ export class IluminadoAudioEngine {
       );
       this.scheduleTone(
         when,
-        this.stemPercGain,
+        this.sfxBusGain,
         midiToFreq(root - 12) * 1.35,
         0.11,
         'sine',
@@ -2015,7 +1983,7 @@ export class IluminadoAudioEngine {
     if (subGain >= 0.78) {
       this.scheduleTone(
         when,
-        this.stemPercGain,
+        this.sfxBusGain,
         midiToFreq(root - 12),
         0.13,
         'sine',
@@ -2046,21 +2014,21 @@ export class IluminadoAudioEngine {
     const thirdOrFourth = chord[1] ?? 4;
 
     if (profile.family === 'wood_marimba') {
-      this.scheduleTone(when, this.stemLeadGain, midiToFreq(root), 0.19, 'triangle', 0.1, 0.002, 2600);
-      this.scheduleTone(when + 0.032, this.stemLeadGain, midiToFreq(root + thirdOrFourth), 0.21, 'triangle', 0.09, 0.002, 2800);
-      this.scheduleTone(when + 0.064, this.stemLeadGain, midiToFreq(root + 7), 0.24, 'sine', 0.08, 0.004, 3000);
+      this.scheduleTone(when, this.sfxBusGain, midiToFreq(root), 0.19, 'triangle', 0.1, 0.002, 2600);
+      this.scheduleTone(when + 0.032, this.sfxBusGain, midiToFreq(root + thirdOrFourth), 0.21, 'triangle', 0.09, 0.002, 2800);
+      this.scheduleTone(when + 0.064, this.sfxBusGain, midiToFreq(root + 7), 0.24, 'sine', 0.08, 0.004, 3000);
     } else if (profile.family === 'jazz_fender') {
-      this.scheduleTone(when, this.stemLeadGain, midiToFreq(root), 0.24, 'sine', 0.09, 0.004, 2800);
-      this.scheduleTone(when + 0.025, this.stemLeadGain, midiToFreq(root + thirdOrFourth), 0.25, 'sine', 0.08, 0.004, 3000);
-      this.scheduleTone(when + 0.05, this.stemLeadGain, midiToFreq(root + (chord[3] ?? 11)), 0.28, 'triangle', 0.055, 0.006, 3200);
+      this.scheduleTone(when, this.sfxBusGain, midiToFreq(root), 0.24, 'sine', 0.09, 0.004, 2800);
+      this.scheduleTone(when + 0.025, this.sfxBusGain, midiToFreq(root + thirdOrFourth), 0.25, 'sine', 0.08, 0.004, 3000);
+      this.scheduleTone(when + 0.05, this.sfxBusGain, midiToFreq(root + (chord[3] ?? 11)), 0.28, 'triangle', 0.055, 0.006, 3200);
     } else if (profile.family === 'chip_minimal') {
-      this.scheduleTone(when, this.stemLeadGain, midiToFreq(root), 0.08, 'square', 0.072, 0.002, 3200);
-      this.scheduleTone(when + 0.045, this.stemLeadGain, midiToFreq(root + 7), 0.12, 'square', 0.072, 0.002, 3400);
+      this.scheduleTone(when, this.sfxBusGain, midiToFreq(root), 0.08, 'square', 0.072, 0.002, 3200);
+      this.scheduleTone(when + 0.045, this.sfxBusGain, midiToFreq(root + 7), 0.12, 'square', 0.072, 0.002, 3400);
     } else {
-      this.scheduleVocalPad(when, root, 0.22, 0.105);
+      this.schedulePadTone(when, root, 0.22, 0.105);
       this.scheduleTone(
         when + 0.02,
-        this.stemLeadGain,
+        this.sfxBusGain,
         midiToFreq(root + 7),
         0.24,
         profile.leadWave,
@@ -2095,7 +2063,7 @@ export class IluminadoAudioEngine {
       const t = now + idx * 0.042;
       this.scheduleTone(
         t,
-        this.stemLeadGain,
+        this.sfxBusGain,
         midiToFreq(root + semi),
         kind === 'all_deleted' ? 0.52 : 0.34,
         idx % 2 === 0 ? 'triangle' : profile.leadWave,
@@ -2105,7 +2073,7 @@ export class IluminadoAudioEngine {
         profile.drive * 0.2
       );
     });
-    this.scheduleVocalPad(now + 0.03, root + 12, beatDurSec * 0.9, 0.12);
+    this.schedulePadTone(now + 0.03, root + 12, beatDurSec * 0.9, 0.12);
 
     if (this.musicFilter) {
       this.cancelAudioParamSafe(this.musicFilter.frequency, now);
@@ -2135,7 +2103,7 @@ export class IluminadoAudioEngine {
 
     this.scheduleTone(
       now,
-      this.stemLeadGain,
+      this.sfxBusGain,
       freq,
       profile.family === 'chip_minimal' ? 0.1 : 0.17,
       profile.family === 'rock_crunch' ? 'triangle' : profile.leadWave,
@@ -2147,7 +2115,7 @@ export class IluminadoAudioEngine {
     if (cellsCleared >= 4 || profile.family === 'jazz_fender' || profile.family === 'cathedral_glass') {
       this.scheduleTone(
         now + 0.016,
-        this.stemLeadGain,
+        this.sfxBusGain,
         freq * 1.5,
         0.18,
         'sine',
@@ -2168,7 +2136,7 @@ export class IluminadoAudioEngine {
     chord.slice(0, 4).forEach((semi, idx) => {
       this.scheduleTone(
         now + idx * 0.035,
-        this.stemLeadGain,
+        this.sfxBusGain,
         midiToFreq(music.rootMidi + 12 + semi),
         profile.family === 'cathedral_glass' ? 0.36 : 0.26,
         profile.leadWave,
@@ -2199,7 +2167,7 @@ export class IluminadoAudioEngine {
       const t = now + i * 0.04;
       this.scheduleTone(
         t,
-        this.stemLeadGain,
+        this.sfxBusGain,
         midiToFreq(music.rootMidi + 12 + semi),
         0.24,
         profile.family === 'chip_minimal' ? 'square' : 'triangle',
@@ -2226,7 +2194,7 @@ export class IluminadoAudioEngine {
       const t = now + idx * (profile.family === 'chip_minimal' ? 0.034 : 0.044);
       this.scheduleTone(
         t,
-        this.stemLeadGain,
+        this.sfxBusGain,
         midiToFreq(root + interval),
         profile.family === 'cathedral_glass' ? 0.4 : 0.32,
         profile.leadWave,
@@ -2236,7 +2204,7 @@ export class IluminadoAudioEngine {
         profile.drive * 0.35
       );
       if (idx === stepCount - 1) {
-        this.scheduleVocalPad(t, root + interval, 0.44, 0.12);
+        this.schedulePadTone(t, root + interval, 0.44, 0.12);
       }
     }
     if (squares >= 2 && this.musicFilter) {
@@ -2258,10 +2226,10 @@ export class IluminadoAudioEngine {
     const chainIntervals = [0, chord[1] ?? 4, chord[2] ?? 7, chord[3] ?? 11, 14];
     chainIntervals.forEach((semi, i) => {
       const t = now + i * 0.036;
-      this.scheduleVocalPad(t, root + semi, 0.36, 0.105);
+      this.schedulePadTone(t, root + semi, 0.36, 0.105);
       this.scheduleTone(
         t,
-        this.stemLeadGain,
+        this.sfxBusGain,
         midiToFreq(root + 12 + semi),
         0.22,
         profile.leadWave,
@@ -2289,7 +2257,7 @@ export class IluminadoAudioEngine {
       const t = now + i * 0.095;
       this.scheduleTone(
         t,
-        this.stemLeadGain,
+        this.sfxBusGain,
         midiToFreq(midi),
         0.55,
         'triangle',
@@ -2298,8 +2266,8 @@ export class IluminadoAudioEngine {
         4200
       );
     });
-    this.scheduleVocalPad(now + 0.06, root, 1.45, 0.048);
-    this.scheduleVocalPad(now + 0.24, root + 7, 1.45, 0.042);
+    this.schedulePadTone(now + 0.06, root, 1.45, 0.048);
+    this.schedulePadTone(now + 0.24, root + 7, 1.45, 0.042);
 
     if (this.musicFilter) {
       this.cancelAudioParamSafe(this.musicFilter.frequency, now);
@@ -2316,7 +2284,7 @@ export class IluminadoAudioEngine {
     [60, 57, 53, 48].forEach((midi, i) => {
       this.scheduleTone(
         now + i * 0.095,
-        this.stemLeadGain,
+        this.sfxBusGain,
         midiToFreq(midi),
         0.45,
         'triangle',

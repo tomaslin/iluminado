@@ -4,7 +4,7 @@ import { GameModals } from './components/GameModals';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { ShiftSettingsModal } from './components/ShiftSettingsModal';
 import { TitleScreen } from './components/TitleScreen';
-import { IluminadoAudioEngine, computeStemLevels } from './game/audio';
+import { IluminadoAudioEngine, computeMusicIntensity } from './game/audio';
 import { IluminadoCanvasRenderer } from './game/canvasRenderer';
 import {
   createSeededRng,
@@ -1536,10 +1536,9 @@ export default function App() {
           const titleNorm = (sim.beatAccum % 8) / 8;
           const titleCol = Math.floor(titleNorm * BOARD_COLS) % BOARD_COLS;
           audioRef.current.syncStep(titleCol, skin, {
-            percussion: 0.78,
-            bass: 0.45,
-            lead: 0.28,
-            vocal: 0.14,
+            occupancy: 0.35,
+            tension: 0.3,
+            comboLevel: 0,
           });
         }
       } else if (sim.status === 'playing' && sim.board) {
@@ -1730,9 +1729,9 @@ export default function App() {
 
           const processColumn = (col: number) => {
             if (!sim.board) return;
-            const stems = computeStemLevels(sim.board, skin);
-            audioRef.current.syncStep(col, skin, stems);
-            audioRef.current.updateMusicMix(skin, stems, sim.board.comboLevel);
+            const intensity = computeMusicIntensity(sim.board, skin);
+            audioRef.current.syncStep(col, skin, intensity);
+            audioRef.current.updateMusicMix(skin, intensity);
 
             const activeMission =
               sim.mode === 'mission'

@@ -1,99 +1,185 @@
-# Iluminado — itch.io Storefront Copy & Presentation
+# Iluminado — itch.io Storefront Copy & Dashboard Setup
 
-Copy and paste the sections below directly into your **itch.io** project dashboard (**Edit game**).
-
----
-
-## Metadata Fields
-
-* **Title**: `Iluminado`
-* **Short Tagline**: `A rhythm-locked falling block puzzle where the rules, board, and shapes shift dynamically as you play.`
-* **Classification**: `Games`
-* **Kind of Project**: `HTML`
-* **Release Status**: `Released`
-* **Community**: `Comments` (or `Disabled`)
-* **Genre**: `Puzzle`
-* **Tags**:
-  ```text
-  lumines, falling-blocks, puzzle, rhythm, music, arcade, browser, html5, retro, synthwave, soundtrack, score-attack, daily-challenge, local-multiplayer, two-player, pwa, 2d, singleplayer
-  ```
+Paste the metadata fields and formatted HTML/Markdown description below directly into **Dashboard -> Edit Game** on itch.io.
 
 ---
 
-## Page Description (Copy & Paste into itch.io Description Box)
+## 1. Dashboard Metadata Fields
 
-```markdown
-<div align="center">
+| Field | Value |
+| :--- | :--- |
+| **Title** | `Iluminado` |
+| **Short description / Tagline** | `Drop on the beat. Align 2×2 squares. Outlast 52 rule-bending shifts across 50 genre-fusion worlds.` |
+| **Classification** | `Games` |
+| **Kind of project** | `HTML` (Play in browser) |
+| **Embed size** | `1280 × 720` (Desktop 16:9) · Also responds cleanly in mobile Portrait (`10×14`) |
+| **Embed options** | Enable **Click to play** (required so the browser unlocks Web Audio cleanly), **Fullscreen button**, and **Mobile friendly** |
+| **Genre** | `Puzzle` |
+| **Tags** | `lumines, rhythm, falling-blocks, puzzle, music, arcade, score-attack, daily-challenge, local-multiplayer, two-player, browser, html5, pwa` |
 
-# ILUMINADO
-### *The rhythm-locked block dropper where the rules change mid-run.*
+---
 
+## 2. Media Uploads Checklist (Alongside Your ~100MB Gameplay Video)
+
+| itch.io Slot | File to Upload | Spec |
+| :--- | :--- | :--- |
+| **Video URL / Trailer** | Your ~100MB gameplay video (hosted on YouTube/Vimeo) | Auto-docks first in the itch carousel |
+| **Cover Image** | `itch/media/cover.png` | `1260 × 1000 px` (exact 1.26:1 ratio) |
+| **Theme -> Header Banner** | `itch/media/header-banner.png` | `1200 × 360 px` panoramic banner |
+| **Screenshots (5 recommended)** | `itch/media/screenshots/01-core-rhythm-flow.png`<br>`itch/media/screenshots/02-tetromino-shift.png`<br>`itch/media/screenshots/03-split-canyon-shift.png`<br>`itch/media/screenshots/04-splitscreen-versus.png`<br>`itch/media/screenshots/05-52-shifts-codex.png` | `1280 × 720 px` lossless PNG |
+| **Description Body GIFs (3 recommended)** | `itch/media/clips/clip-01-beat-sweep-combo.gif`<br>`itch/media/clips/clip-02-tetromino-shift.gif`<br>`itch/media/clips/clip-03-slab-bricks-shift.gif` | `600 × 338 px` looping GIF (`1.7–2.2 MB`, under itch's 3MB limit) |
+
+---
+
+## 3. Page Description (Ready to Copy & Paste into itch.io)
+
+> **Tip**: After pasting into itch.io's description editor, upload the three GIFs from `itch/media/clips/` via the **Insert Image** button so itch hosts them on its CDN in those three visual slots.
+
+```html
+<blockquote>
+  What if your favorite beat-matching brick dropper rewrote its own rules every time you leveled up?
+</blockquote>
+
+<p>
+  <strong>Iluminado</strong> takes the hypnotic 2×2 rhythm-sweep flow inspired by <em>Lumines</em> and turns the playfield into a living, shifting instrument. Drop dual-color bricks, build glowing single-color squares, and let the tempo-locked timeline beam sweep them away in bursts of score multipliers.
+</p>
+
+<p>
+  Just when your hands find a groove, a <strong>Shift</strong> fires—warping brick shapes, rotating the entire board 90°, splitting the timeline in half, or turning gravity sideways.
+</p>
+
+<p align="center">
+  <!-- Replace src with uploaded clip-01-beat-sweep-combo.gif -->
+  <img src="media/clips/clip-01-beat-sweep-combo.gif" alt="2x2 squares clearing across the beat-locked timeline sweep in Alabaster Courtyard" />
+</p>
+
+<h2>52 Shifts That Rewrite the Game</h2>
+<p>
+  No two runs stay polite for long. Every level triggers a curated rule mutation from a catalog of <strong>52 playable Shifts</strong>—or open the <strong>Board Shift Rules</strong> codex before starting to customize your favorite mix.
+</p>
+
+<div class="ilu-grid-2">
+  <div class="ilu-card">
+    <span class="ilu-tag ilu-tag-coral">Brick Mutations</span>
+    <p>Swap standard 2×2 blocks for classic <strong>Tetrominoes</strong> (I, O, T, S, Z, J, L), nimble <strong>2×1 Dominoes</strong>, heavy <strong>3×2 Slabs</strong>, <strong>Chameleon Rotation</strong>, or chained <strong>Wild Prism</strong> tiles.</p>
+  </div>
+  <div class="ilu-card">
+    <span class="ilu-tag ilu-tag-violet">Gravity &amp; Geometry</span>
+    <p>Spin the entire courtyard <strong>90° mid-run</strong> into a tall vertical shaft, expand or shrink the grid, carve a <strong>Split Canyon</strong> chasm, or face <strong>Cyclotron Orbit</strong> gravity rotating clockwise every drop.</p>
+  </div>
+  <div class="ilu-card">
+    <span class="ilu-tag ilu-tag-teal">Timeline Remixes</span>
+    <p>Reverse the sweep beam's direction, split it into staggered <strong>Top &amp; Bottom Half-Sweeps</strong>, tilt it into a <strong>Diagonal Slant</strong>, or illuminate blocks with a roving <strong>Lantern Spotlight</strong>.</p>
+  </div>
+  <div class="ilu-card">
+    <span class="ilu-tag ilu-tag-saffron">Spectrum &amp; Obstacles</span>
+    <p>Unlock a <strong>3rd Block Color</strong> mid-run, break <strong>Obsidian Blocker</strong> cells by clearing beside them, bank pieces with <strong>Hold / Stash</strong>, or dodge mid-air <strong>Patrolling Bumpers</strong>.</p>
+  </div>
 </div>
 
----
+<p align="center">
+  <!-- Replace src with uploaded clip-02-tetromino-shift.gif -->
+  <img src="media/clips/clip-02-tetromino-shift.gif" alt="Tetromino brick mutation dropping I, T, and L pieces onto Gouache Meadow" />
+</p>
 
-### ✦ Watch the Gameplay Trailer
-*(Embed your YouTube / Vimeo trailer here using itch.io's video button or view the media gallery above)*
+<h2>50 Worlds, 50 Genre-Fusion Soundtracks</h2>
+<p>
+  Every stage opens onto an illustrated world with its own tactile tile material, particle geometry, color spectrum, and an original full-length soundtrack built around bold futuristic genre crossovers—from <em>Glass Zouk × Choral IDM × Dub</em> and <em>Clockwork Swing × Glitch × Gamelan</em> to <em>Liquid Bachata × Vapor × Cello</em> and <em>Harlequin Glitch × Swing × Acid-Pop</em>.
+</p>
 
----
+<ul>
+  <li><strong>Quantized Musical Feedback</strong> — Steering, rotating, landing, and chain clears trigger harmonic chimes locked in key with each world's tempo and scale.</li>
+  <li><strong>Visual Rhythm Telemetry</strong> — Subtle architectural motion, sweep glow, and score popups pulse right on the measure without distracting HUD clutter.</li>
+</ul>
 
-### What is Iluminado?
+<p align="center">
+  <!-- Replace src with uploaded clip-03-slab-bricks-shift.gif -->
+  <img src="media/clips/clip-03-slab-bricks-shift.gif" alt="3x2 and 2x3 architectural slab bricks rotating into position in Saffron Caravan" />
+</p>
 
-**Iluminado** is a love letter to classic early-2000s handheld rhythm droppers (inspired heavily by *Lumines*), infused with a dynamic twist: **every time you level up, the game mutates.**
+<h2>7 Distinct Modes</h2>
+<table>
+  <thead>
+    <tr>
+      <th>Mode</th>
+      <th>What Awaits</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Challenge</strong></td>
+      <td>Journey across worlds as Shifts stack on every level—play <em>Basic</em>, <em>Endless</em>, <em>Shuffle</em>, or pressure-free <em>Zen Flow</em>.</td>
+    </tr>
+    <tr>
+      <td><strong>Daily Challenge</strong></td>
+      <td>A deterministic world and Shift sequence generated fresh every 24 hours so everyone races the same board.</td>
+    </tr>
+    <tr>
+      <td><strong>Time Attack</strong></td>
+      <td><strong>60s</strong>, <strong>180s</strong>, or <strong>300s</strong> pure clear sprints with split-pace tracking.</td>
+    </tr>
+    <tr>
+      <td><strong>Puzzle</strong></td>
+      <td>Sculpt deliberate silhouettes—like <em>Pastel Archway</em>, <em>Sand Hourglass</em>, and <em>Monument Crown</em>—against the clock.</td>
+    </tr>
+    <tr>
+      <td><strong>Mission</strong></td>
+      <td>Tactical micro-challenges with preset stacks (4-square single sweeps, full board clears, monochrome leftovers).</td>
+    </tr>
+    <tr>
+      <td><strong>VS CPU</strong></td>
+      <td>Head-to-head duel against an adaptive AI solver—big clears launch garbage pressure across the center line.</td>
+    </tr>
+    <tr>
+      <td><strong>2P Battle</strong></td>
+      <td>Shared-screen local versus battle on one keyboard or browser window.</td>
+    </tr>
+  </tbody>
+</table>
 
-Drop 2×2 dual-color bricks into the courtyard. Align 2×2 single-color squares. When the beat-locked timeline sweeps across the board on the tempo, it clears completed squares in time with the music.
+<h2>Controls</h2>
+<table>
+  <thead>
+    <tr>
+      <th>Action</th>
+      <th>Solo Keyboard</th>
+      <th>2P Battle (P1 / P2)</th>
+      <th>Touch / Mobile</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>Move Left / Right</strong></td>
+      <td><kbd>←</kbd> <kbd>→</kbd> or <kbd>A</kbd> <kbd>D</kbd></td>
+      <td><kbd>A</kbd> <kbd>D</kbd> &nbsp;/&nbsp; <kbd>←</kbd> <kbd>→</kbd></td>
+      <td>Drag horizontally or tap arrow controls</td>
+    </tr>
+    <tr>
+      <td><strong>Rotate CW / CCW</strong></td>
+      <td><kbd>↑</kbd> <kbd>W</kbd> <kbd>Space</kbd> <kbd>X</kbd> &nbsp;/&nbsp; <kbd>Z</kbd></td>
+      <td><kbd>W</kbd> <kbd>Q</kbd> &nbsp;/&nbsp; <kbd>↑</kbd></td>
+      <td>Tap board or rotate buttons</td>
+    </tr>
+    <tr>
+      <td><strong>Hard Drop / Slam</strong></td>
+      <td><kbd>↓</kbd> <kbd>S</kbd> <kbd>C</kbd> <kbd>Shift</kbd></td>
+      <td><kbd>S</kbd> <kbd>L-Shift</kbd> &nbsp;/&nbsp; <kbd>↓</kbd> <kbd>R-Shift</kbd> <kbd>/</kbd></td>
+      <td>Swipe down or tap drop button</td>
+    </tr>
+    <tr>
+      <td><strong>Hold / Stash Piece</strong></td>
+      <td><kbd>C</kbd> or <kbd>Shift</kbd> <em>(when Stash Shift is active)</em></td>
+      <td>—</td>
+      <td>Tap Hold slot</td>
+    </tr>
+    <tr>
+      <td><strong>Pause / Mute</strong></td>
+      <td><kbd>Esc</kbd> or <kbd>P</kbd> &nbsp;·&nbsp; <kbd>M</kbd></td>
+      <td><kbd>Esc</kbd> &nbsp;·&nbsp; <kbd>M</kbd></td>
+      <td>Top-right Pause &amp; Sound icons</td>
+    </tr>
+  </tbody>
+</table>
 
-The twist? Just when you settle into your rhythm, a **Shift** triggers.
-
----
-
-### ✦ The Central Mechanic: Shifts
-
-Shifts are targeted mutations to the rules, shapes, and physics of the playfield:
-
-* 🧱 **Brick Geometry Shifts**: Incoming pieces transform from standard 2×2 blocks into **Tetrominoes (I, O, T, S, Z, J, L)**, nimble **2×1 dominoes**, wide **3×2 slabs**, or **Obsidian Blocker Bricks** that shatter when surrounding squares clear.
-* 🔄 **Board & Dimension Shifts**: The entire board rotates 90° into a tall **vertical 10×16 shaft**, drops your stacks to the new floor, or expands and contracts by ±2 rows and columns.
-* 🎨 **3-Color Spectrum**: Breaks the traditional two-tone rule by introducing a harmonious **third tile color**, **Chameleon rotation** (rotating pieces recolors them in mid-air), and luminous **Prism Wild diamonds**.
-* ⚡ **Physics & Flow Shifts**: Gravitational flow alters—pieces enter from the left or right, orbit clockwise in a **Cyclotron flow**, or teleport across edges via **Portal Wrap**.
-* ⏳ **Timeline Alterations**: The sweep beam reverses direction, splits into **twin staggered beams** sweeping 4 beats apart, or slants diagonally across the board.
-
-Over **50 unique Shifts** keep every run unpredictable.
-
----
-
-### ✦ Key Features
-
-* 🎵 **50 Original Soundtrack Worlds**: 50 complete worlds spanning synthwave, Latin jazz, bossa nova, liquid drum & bass, heavy metal, ambient dub, and funk.
-* 🎛️ **Live 4-Stem Adaptive Audio**: The soundtrack evolves organically as you play—drums, bass, lead melodies, and vocal pads respond in real-time to your board height, square combos, and level progression.
-* 🏆 **6 Distinct Game Modes**:
-  * **Challenge Mode**: Progress through stages with dynamic Shifts, featuring Endless, Shuffle, and Zen variants.
-  * **Time Attack**: 60s, 180s, or 300s sprint for peak square-clearing efficiency with live split tracking.
-  * **Puzzle Mode**: Shape stacks to match silhouette targets without gravity obstacles.
-  * **Mission Mode**: Clear specific objectives under tight constraints.
-  * **VS CPU**: Single-player battle against an adaptive AI opponent with garbage countering.
-  * **2-Player Battle**: Shared-screen local showdown—trigger 4+ square sweeps to launch garbage attacks at your rival!
-* 📅 **Daily Challenge**: A unique, deterministic puzzle board generated fresh every 24 hours with streak tracking.
-* 📱 **True Responsive & PWA Ready**: Seamlessly runs on desktop and mobile browsers, supporting both landscape and portrait orientations with touch and keyboard controls.
-
----
-
-### ✦ Controls
-
-| Action | Player 1 (Keyboard) | Player 2 (Battle Mode) | Gamepad | Touch / Mobile |
-| :--- | :--- | :--- | :--- | :--- |
-| **Move Left / Right** | `←` / `→` or `A` / `D` | `J` / `L` | D-Pad / Left Stick | Drag or Left/Right Buttons |
-| **Soft Drop** | `↓` or `S` | `K` | D-Pad Down | Drag Down / Drop Button |
-| **Hard Drop** | `Space` or `W` | `I` | `D-Pad Up` or `R1` | Quick Swipe Down |
-| **Rotate Clockwise** | `↑` or `X` or `E` | `O` | `A` / `Cross` | Tap Screen / Rotate Button |
-| **Rotate Counter-CW** | `Z` or `Q` | `U` | `B` / `Circle` | Tap Left / CCW Button |
-| **Hold / Stash Piece** | `C` or `Shift` | `N` | `L1` / `LB` | Hold Slot Button |
-| **Pause / Resume** | `Escape` or `P` | `Escape` | `Start` | Pause Icon |
-| **Toggle Mute** | `M` | `M` | — | Sound Icon |
-| **Fullscreen** | `F` | `F` | — | Fullscreen Icon |
-
----
-
-### ✦ Audio & Headphones Recommendation
-
-Iluminado features rich multiband audio synthesis and spatial sound design. **Headphones are highly recommended** to experience the dynamic basslines, quantized rhythmic SFX, and Linkwitz-Riley crossover stem mixing.
+<p><em>Headphones recommended — built-in dynamic compressor &amp; quantized harmonic SFX respond cleanly on every beat. Plays smoothly in desktop landscape or mobile portrait right in your browser.</em></p>
 ```

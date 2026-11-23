@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Iluminado — itch.io Page Preview</title>
+    <link rel="stylesheet" href="./page-theme.css" />
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; padding: 36px 20px 64px; }
+      .preview_shell { max-width: 1120px; margin: 0 auto; }
+      .inner_column { width: 100%; }
+      .embed_hero {
+        position: relative;
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: url("./media/screenshots/01-core-rhythm-flow.png") center/cover no-repeat;
+      }
+      .embed_scrim {
+        position: absolute;
+        inset: 0;
+        background: rgba(35, 31, 48, 0.32);
+        backdrop-filter: blur(2px);
+      }
+      .embed_cta {
+        position: relative;
+        z-index: 2;
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        padding: 16px 32px;
+        border-radius: 12px;
+        background: #231f30;
+        color: #fffcf9;
+        font-family: 'Plus Jakarta Sans', sans-serif;
+        font-size: 1.05rem;
+        font-weight: 700;
+        border: 2px solid #fffcf9;
+        box-shadow: 0 16px 36px rgba(0, 0, 0, 0.35);
+      }
+      .page_grid {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 300px;
+        gap: 32px;
+        margin-top: 28px;
+        align-items: start;
+      }
+      .sidebar_box {
+        position: sticky;
+        top: 24px;
+        display: flex;
+        flex-direction: column;
+        gap: 18px;
+      }
+      .trailer_card {
+        background: #1a1726;
+        color: #f8fafc;
+        border-radius: 12px;
+        padding: 14px;
+        border: 1.5px solid rgba(35, 31, 48, 0.25);
+        box-shadow: 0 12px 26px rgba(35, 31, 48, 0.14);
+      }
+      .trailer_thumb {
+        position: relative;
+        aspect-ratio: 16 / 9;
+        border-radius: 8px;
+        overflow: hidden;
+        background: url("./media/screenshots/02-tetromino-shift.png") center/cover no-repeat;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .trailer_thumb::after {
+        content: "▶  100 MB Gameplay Trailer";
+        padding: 8px 14px;
+        border-radius: 999px;
+        background: rgba(26, 23, 38, 0.88);
+        color: #fffcf9;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        border: 1px solid rgba(255, 255, 255, 0.25);
+      }
+      .screenshot_list {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .screenshot_list img {
+        width: 100%;
+        display: block;
+      }
+      .cover_preview {
+        width: 100%;
+        border-radius: 12px;
+        border: 1.5px solid rgba(35, 31, 48, 0.16);
+      }
+      .sidebar_label {
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: #7b728e;
+        margin-bottom: 6px;
+      }
+      .formatted_description img {
+        max-width: 100%;
+        display: block;
+        margin: 18px auto;
+      }
+      @media (max-width: 860px) {
+        .page_grid { grid-template-columns: 1fr; }
+        .ilu-grid-2 { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="preview_shell">
+      <div class="inner_column">
+        <div class="header">
+          <img src="./media/header-banner.png" alt="Iluminado Header Banner" style="width:100%; display:block;" />
+        </div>
+
+        <div class="game_frame">
+          <div class="embed_hero">
+            <div class="embed_scrim"></div>
+            <div class="embed_cta">▶ Run Game (1280 × 720 HTML5)</div>
+          </div>
+        </div>
+
+        <div class="page_grid">
+          <main class="formatted_description">
+            <blockquote>
+              What if your favorite beat-matching brick dropper rewrote its own rules every time you leveled up?
+            </blockquote>
+
+            <p>
+              <strong>Iluminado</strong> takes the hypnotic 2×2 rhythm-sweep flow inspired by <em>Lumines</em> and turns the playfield into a living, shifting instrument. Drop dual-color bricks, build glowing single-color squares, and let the tempo-locked timeline beam sweep them away in bursts of score multipliers.
+            </p>
+            <p>
+              Just when your hands find a groove, a <strong>Shift</strong> fires—warping brick shapes, rotating the entire board 90°, splitting the timeline in half, or turning gravity sideways.
+            </p>
+
+            <img src="./media/clips/clip-01-beat-sweep-combo.gif" alt="2x2 squares clearing across the beat-locked timeline sweep in Alabaster Courtyard" />
+
+            <h2>52 Shifts That Rewrite the Game</h2>
+            <p>
+              No two runs stay polite for long. Every level triggers a curated rule mutation from a catalog of <strong>52 playable Shifts</strong>—or open the <strong>Board Shift Rules</strong> codex before starting to customize your favorite mix.
+            </p>
+
+            <div class="ilu-grid-2">
+              <div class="ilu-card">
+                <span class="ilu-tag ilu-tag-coral">Brick Mutations</span>
+                <p>Swap standard 2×2 blocks for classic <strong>Tetrominoes</strong> (I, O, T, S, Z, J, L), nimble <strong>2×1 Dominoes</strong>, heavy <strong>3×2 Slabs</strong>, <strong>Chameleon Rotation</strong>, or chained <strong>Wild Prism</strong> tiles.</p>
+              </div>
+              <div class="ilu-card">
+                <span class="ilu-tag ilu-tag-violet">Gravity &amp; Geometry</span>
+                <p>Spin the entire courtyard <strong>90° mid-run</strong> into a tall vertical shaft, expand or shrink the grid, carve a <strong>Split Canyon</strong> chasm, or face <strong>Cyclotron Orbit</strong> gravity rotating clockwise every drop.</p>
+              </div>
+              <div class="ilu-card">
+                <span class="ilu-tag ilu-tag-teal">Timeline Remixes</span>
+                <p>Reverse the sweep beam's direction, split it into staggered <strong>Top &amp; Bottom Half-Sweeps</strong>, tilt it into a <strong>Diagonal Slant</strong>, or illuminate blocks with a roving <strong>Lantern Spotlight</strong>.</p>
+              </div>
+              <div class="ilu-card">
+                <span class="ilu-tag ilu-tag-saffron">Spectrum &amp; Obstacles</span>
+                <p>Unlock a <strong>3rd Block Color</strong> mid-run, break <strong>Obsidian Blocker</strong> cells by clearing beside them, bank pieces with <strong>Hold / Stash</strong>, or dodge mid-air <strong>Patrolling Bumpers</strong>.</p>
+              </div>
+            </div>
+
+            <img src="./media/clips/clip-02-tetromino-shift.gif" alt="Tetromino brick mutation dropping I, T, and L pieces onto Gouache Meadow" />
+
+            <h2>50 Worlds, 50 Genre-Fusion Soundtracks</h2>
+            <p>
+              Every stage opens onto an illustrated world with its own tactile tile material, particle geometry, color spectrum, and an original full-length soundtrack built around bold futuristic genre crossovers—from <em>Glass Zouk × Choral IDM × Dub</em> and <em>Clockwork Swing × Glitch × Gamelan</em> to <em>Liquid Bachata × Vapor × Cello</em> and <em>Harlequin Glitch × Swing × Acid-Pop</em>.
+            </p>
+            <ul>
+              <li><strong>Quantized Musical Feedback</strong> — Steering, rotating, landing, and chain clears trigger harmonic chimes locked in key with each world's tempo and scale.</li>
+              <li><strong>Visual Rhythm Telemetry</strong> — Subtle architectural motion, sweep glow, and score popups pulse right on the measure without distracting HUD clutter.</li>
+            </ul>
+
+            <img src="./media/clips/clip-03-slab-bricks-shift.gif" alt="3x2 and 2x3 architectural slab bricks rotating into position in Saffron Caravan" />
+
+            <h2>7 Distinct Modes</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>Mode</th>
+                  <th>What Awaits</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>Challenge</strong></td>
+                  <td>Journey across worlds as Shifts stack on every level—play <em>Basic</em>, <em>Endless</em>, <em>Shuffle</em>, or pressure-free <em>Zen Flow</em>.</td>
+                </tr>
+                <tr>
+                  <td><strong>Daily Challenge</strong></td>
+                  <td>A deterministic world and Shift sequence generated fresh every 24 hours so everyone races the same board.</td>
+                </tr>
+                <tr>
+                  <td><strong>Time Attack</strong></td>
+                  <td><strong>60s</strong>, <strong>180s</strong>, or <strong>300s</strong> pure clear sprints with split-pace tracking.</td>
+                </tr>
+                <tr>
+                  <td><strong>Puzzle</strong></td>
+                  <td>Sculpt deliberate silhouettes—like <em>Pastel Archway</em>, <em>Sand Hourglass</em>, and <em>Monument Crown</em>—against the clock.</td>
+                </tr>
+                <tr>
+                  <td><strong>Mission</strong></td>
+                  <td>Tactical micro-challenges with preset stacks (4-square single sweeps, full board clears, monochrome leftovers).</td>
+                </tr>
+                <tr>
+                  <td><strong>VS CPU</strong></td>
+                  <td>Head-to-head duel against an adaptive AI solver—big clears launch garbage pressure across the center line.</td>
+                </tr>
+                <tr>
+                  <td><strong>2P Battle</strong></td>
+                  <td>Shared-screen local versus battle on one keyboard or browser window.</td>
+                </tr>
+              </tbody>
+            </table>
+
+            <h2>Controls</h2>
+            <table>
+              <thead>
+                <tr>
+                  <th>Action</th>
+                  <th>Solo Keyboard</th>
+                  <th>2P Battle (P1 / P2)</th>
+                  <th>Touch / Mobile</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>Move Left / Right</strong></td>
+                  <td><kbd>←</kbd> <kbd>→</kbd> or <kbd>A</kbd> <kbd>D</kbd></td>
+                  <td><kbd>A</kbd> <kbd>D</kbd> &nbsp;/&nbsp; <kbd>←</kbd> <kbd>→</kbd></td>
+                  <td>Drag horizontally or tap arrow controls</td>
+                </tr>
+                <tr>
+                  <td><strong>Rotate CW / CCW</strong></td>
+                  <td><kbd>↑</kbd> <kbd>W</kbd> <kbd>Space</kbd> <kbd>X</kbd> &nbsp;/&nbsp; <kbd>Z</kbd></td>
+                  <td><kbd>W</kbd> <kbd>Q</kbd> &nbsp;/&nbsp; <kbd>↑</kbd></td>
+                  <td>Tap board or rotate buttons</td>
+                </tr>
+                <tr>
+                  <td><strong>Hard Drop / Slam</strong></td>
+                  <td><kbd>↓</kbd> <kbd>S</kbd> <kbd>C</kbd> <kbd>Shift</kbd></td>
+                  <td><kbd>S</kbd> <kbd>L-Shift</kbd> &nbsp;/&nbsp; <kbd>↓</kbd> <kbd>R-Shift</kbd> <kbd>/</kbd></td>
+                  <td>Swipe down or tap drop button</td>
+                </tr>
+                <tr>
+                  <td><strong>Hold / Stash Piece</strong></td>
+                  <td><kbd>C</kbd> or <kbd>Shift</kbd> <em>(when Stash Shift active)</em></td>
+                  <td>—</td>
+                  <td>Tap Hold slot</td>
+                </tr>
+                <tr>
+                  <td><strong>Pause / Mute</strong></td>
+                  <td><kbd>Esc</kbd> or <kbd>P</kbd> &nbsp;·&nbsp; <kbd>M</kbd></td>
+                  <td><kbd>Esc</kbd> &nbsp;·&nbsp; <kbd>M</kbd></td>
+                  <td>Top-right Pause &amp; Sound icons</td>
+                </tr>
+              </tbody>
+            </table>
+          </main>
+
+          <aside class="sidebar_box">
+            <div>
+              <div class="sidebar_label">Cover Card (1260×1000)</div>
+              <img class="cover_preview" src="./media/cover.png" alt="Iluminado Cover Image" />
+            </div>
+            <div>
+              <div class="sidebar_label">Gameplay Video + Screenshots</div>
+              <div class="trailer_card">
+                <div class="trailer_thumb"></div>
+              </div>
+            </div>
+            <div class="screenshot_list">
+              <img src="./media/screenshots/01-core-rhythm-flow.png" alt="Core Rhythm Flow" />
+              <img src="./media/screenshots/02-tetromino-shift.png" alt="Tetromino Shift" />
+              <img src="./media/screenshots/03-split-canyon-shift.png" alt="Split Canyon Shift" />
+              <img src="./media/screenshots/04-splitscreen-versus.png" alt="Split-Screen Duel" />
+              <img src="./media/screenshots/05-52-shifts-codex.png" alt="52 Shifts Codex" />
+            </div>
+          </aside>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>
