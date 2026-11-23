@@ -34,10 +34,10 @@ Iluminado scales responsively across both **Landscape (`16×10`)** and **Portrai
 
 ## 3. Gameplay Video, Cover, Screenshots & Looping Clips
 
-Because your ~100 MB main gameplay trailer covers the full video showcase, the `itch/media/` folder supplies the complete recommended set of static art, gallery screenshots, and lightweight looping GIFs:
+Alongside the full gameplay video (**https://youtu.be/BUGGmayKcXU**), the `itch/media/` folder supplies the complete recommended set of static art, gallery screenshots, and lightweight looping GIFs:
 
-1. **Main Gameplay Trailer (~100 MB video)**:
-   * Upload to YouTube or Vimeo (Unlisted or Public) and paste the link into itch's **Video URL / Trailer** field. It automatically docks first in the media showcase above the screenshots.
+1. **Main Gameplay Trailer (`https://youtu.be/BUGGmayKcXU`)**:
+   * Paste `https://youtu.be/BUGGmayKcXU` into itch's **Video URL / Trailer** field. It automatically docks first in the media showcase above the screenshots.
 2. **Storefront Artwork**:
    * `itch/media/cover.png` (`1260 × 1000 px`) -> Upload as **Cover Image**.
    * `itch/media/header-banner.png` (`1200 × 360 px`) -> Upload in **Edit Theme -> Header Banner**.
@@ -58,7 +58,7 @@ Because your ~100 MB main gameplay trailer covers the full video showcase, the `
 
 * [page-theme.css](./page-theme.css) — Warm editorial theme palette hex codes + itch.io Custom CSS (`Fraunces` serif headers, tactile `<kbd>` keycaps, 4-color top accent rule, callout cards).
 * [storefront-copy.md](./storefront-copy.md) — Ready-to-paste HTML/Markdown page description, accurate 7-mode overview, and controls table.
-* [media-and-trailer-guide.md](./media-and-trailer-guide.md) — Specs and usage guide for your 100 MB trailer, cover, screenshots, and GIF embeds.
+* [media-and-trailer-guide.md](./media-and-trailer-guide.md) — Specs and usage guide for the gameplay trailer (`https://youtu.be/BUGGmayKcXU`), cover, screenshots, and GIF embeds.
 * [preview.html](./preview.html) — Local visual preview of the complete styled itch page.
 * [package-itch.sh](./package-itch.sh) — Builds `dist/` and packages `itch/iluminado-html5.zip` for upload.
 * [deploy-butler.sh](./deploy-butler.sh) & [butler.md](./butler.md) — Delta deploys via itch.io Butler CLI.

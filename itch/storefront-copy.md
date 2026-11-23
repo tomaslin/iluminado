@@ -19,11 +19,11 @@ Paste the metadata fields and formatted HTML/Markdown description below directly
 
 ---
 
-## 2. Media Uploads Checklist (Alongside Your ~100MB Gameplay Video)
+## 2. Media Uploads Checklist (`https://youtu.be/BUGGmayKcXU`)
 
-| itch.io Slot | File to Upload | Spec |
+| itch.io Slot | File / URL | Spec |
 | :--- | :--- | :--- |
-| **Video URL / Trailer** | Your ~100MB gameplay video (hosted on YouTube/Vimeo) | Auto-docks first in the itch carousel |
+| **Video URL / Trailer** | `https://youtu.be/BUGGmayKcXU` | Auto-docks first in the itch carousel |
 | **Cover Image** | `itch/media/cover.png` | `1260 × 1000 px` (exact 1.26:1 ratio) |
 | **Theme -> Header Banner** | `itch/media/header-banner.png` | `1200 × 360 px` panoramic banner |
 | **Screenshots (5 recommended)** | `itch/media/screenshots/01-core-rhythm-flow.png`<br>`itch/media/screenshots/02-tetromino-shift.png`<br>`itch/media/screenshots/03-split-canyon-shift.png`<br>`itch/media/screenshots/04-splitscreen-versus.png`<br>`itch/media/screenshots/05-52-shifts-codex.png` | `1280 × 720 px` lossless PNG |
@@ -46,6 +46,10 @@ Paste the metadata fields and formatted HTML/Markdown description below directly
 
 <p>
   Just when your hands find a groove, a <strong>Shift</strong> fires—warping brick shapes, rotating the entire board 90°, splitting the timeline in half, or turning gravity sideways.
+</p>
+
+<p>
+  <strong><a href="https://youtu.be/BUGGmayKcXU" target="_blank" rel="noopener noreferrer">▶ Watch the Full Gameplay Trailer on YouTube</a></strong>
 </p>
 
 <p align="center">

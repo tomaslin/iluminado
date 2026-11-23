@@ -266,12 +266,9 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    const total = SKINS.length;
-    const urls = [0, 1, -1].map(
-      (offset) =>
-        getSkinByIndex((previewSkinIdx + offset + total) % total).music.audioTrackUrl
-    );
-    audioRef.current.preloadTracks(urls);
+    audioRef.current.preloadTracks([
+      getSkinByIndex(previewSkinIdx).music.audioTrackUrl,
+    ]);
   }, [previewSkinIdx]);
 
   useEffect(() => {
@@ -1050,34 +1047,6 @@ export default function App() {
       }
     },
     [buildHudSnapshot, dailySpec.skinIndex]
-  );
-
-  const stepPreviewSkin = useCallback(
-    (delta: -1 | 1) => {
-      audioRef.current.unlock();
-      const sim = simRef.current;
-      const total = SKINS.length;
-      const nextIdx = (((sim.skinIndex + delta) % total) + total) % total;
-      setPreviewSkinIdx(nextIdx);
-      if (sim.status === 'title') {
-        sim.prevSkinIndex = sim.skinIndex;
-        sim.skinIndex = nextIdx;
-        sim.transitionAlpha = 0;
-        const nextSkin = getSkinByIndex(nextIdx);
-        audioRef.current.resetStepTrack();
-        audioRef.current.syncWorldMusic(nextSkin, 'title');
-        audioRef.current.preloadTrack(
-          getSkinByIndex((nextIdx + delta + total) % total).music.audioTrackUrl
-        );
-        setHud(buildHudSnapshot(sim));
-      }
-    },
-    [buildHudSnapshot]
-  );
-
-  const getTitleSpectrumSnapshot = useCallback(
-    () => audioRef.current.getSpectrumSnapshot(),
-    []
   );
 
   const emitLandingFeedback = useCallback(
@@ -2430,8 +2399,6 @@ export default function App() {
           onChangeMusicVolume={handleChangeMusicVolume}
           onChangeSfxVolume={handleChangeSfxVolume}
           previewSkin={getSkinByIndex(previewSkinIdx)}
-          onStepPreviewSkin={stepPreviewSkin}
-          getSpectrumSnapshot={getTitleSpectrumSnapshot}
           dailySpec={dailySpec}
           onStart={() => startNewGame()}
           onOpenShiftSettings={() => setIsShiftSettingsOpen(true)}

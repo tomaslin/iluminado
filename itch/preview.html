@@ -56,12 +56,18 @@
         gap: 18px;
       }
       .trailer_card {
+        display: block;
         background: #1a1726;
-        color: #f8fafc;
+        color: #f8fafc !important;
         border-radius: 12px;
-        padding: 14px;
+        padding: 12px;
         border: 1.5px solid rgba(35, 31, 48, 0.25);
         box-shadow: 0 12px 26px rgba(35, 31, 48, 0.14);
+        transition: transform 0.16s ease, box-shadow 0.16s ease;
+      }
+      .trailer_card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 16px 32px rgba(35, 31, 48, 0.22);
       }
       .trailer_thumb {
         position: relative;
@@ -74,16 +80,23 @@
         justify-content: center;
       }
       .trailer_thumb::after {
-        content: "▶  100 MB Gameplay Trailer";
+        content: "▶  Watch Gameplay Trailer";
         padding: 8px 14px;
         border-radius: 999px;
-        background: rgba(26, 23, 38, 0.88);
+        background: rgba(26, 23, 38, 0.90);
         color: #fffcf9;
         font-family: 'JetBrains Mono', monospace;
         font-size: 0.72rem;
         font-weight: 700;
         letter-spacing: 0.06em;
-        border: 1px solid rgba(255, 255, 255, 0.25);
+        border: 1px solid rgba(255, 255, 255, 0.28);
+      }
+      .trailer_caption {
+        margin-top: 8px;
+        font-family: 'JetBrains Mono', monospace;
+        font-size: 0.72rem;
+        color: #cbd5e1;
+        text-align: center;
       }
       .screenshot_list {
         display: flex;
@@ -144,6 +157,9 @@
             </p>
             <p>
               Just when your hands find a groove, a <strong>Shift</strong> fires—warping brick shapes, rotating the entire board 90°, splitting the timeline in half, or turning gravity sideways.
+            </p>
+            <p>
+              <strong><a href="https://youtu.be/BUGGmayKcXU" target="_blank" rel="noopener noreferrer">▶ Watch the Full Gameplay Trailer on YouTube</a></strong>
             </p>
 
             <img src="./media/clips/clip-01-beat-sweep-combo.gif" alt="2x2 squares clearing across the beat-locked timeline sweep in Alabaster Courtyard" />
@@ -277,9 +293,10 @@
             </div>
             <div>
               <div class="sidebar_label">Gameplay Video + Screenshots</div>
-              <div class="trailer_card">
+              <a class="trailer_card" href="https://youtu.be/BUGGmayKcXU" target="_blank" rel="noopener noreferrer">
                 <div class="trailer_thumb"></div>
-              </div>
+                <div class="trailer_caption">youtu.be/BUGGmayKcXU</div>
+              </a>
             </div>
             <div class="screenshot_list">
               <img src="./media/screenshots/01-core-rhythm-flow.png" alt="Core Rhythm Flow" />

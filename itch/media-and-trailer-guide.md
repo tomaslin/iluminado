@@ -1,14 +1,14 @@
 # Iluminado — Storefront Media & Showcase Guide
 
-With your full **~100 MB gameplay trailer video** handling the long-form video showcase, `itch/media/` provides the recommended storefront images and lightweight looping GIF clips to make the itch.io page pop cleanly at every touchpoint.
+Alongside the full gameplay trailer (**https://youtu.be/BUGGmayKcXU**), `itch/media/` provides the recommended storefront images and lightweight looping GIF clips to make the itch.io page pop cleanly at every touchpoint.
 
 ---
 
-## 1. Main Gameplay Trailer (~100 MB Video)
+## 1. Main Gameplay Trailer (`https://youtu.be/BUGGmayKcXU`)
 
-* **Where it goes**: Host your ~100 MB video on **YouTube** or **Vimeo** and paste the URL into **Edit Game -> Media -> Video URL**.
+* **Where it goes**: Paste `https://youtu.be/BUGGmayKcXU` into **Edit Game -> Media -> Video URL**.
 * **Why**: Itch.io automatically docks the video first in the top media carousel, right beside your playable HTML5 canvas and ahead of your screenshots.
-* **Tip**: You can also embed the same trailer URL in the description body using itch's toolbar video embed if you want a second watch prompt halfway down the page.
+* **Tip**: You can also embed `https://youtu.be/BUGGmayKcXU` directly in the description body using itch's toolbar **Insert Video** button for a second watch prompt halfway down the page.
 
 ---
 
