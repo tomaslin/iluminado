@@ -524,6 +524,7 @@ export interface BoardState {
   gravityAccum: number;
   lockTimer: number;
   lockResetCount: number;
+  activeLockDelaySec?: number;
   nextQueue: Piece[];
   squares: SquareCoord[];
   sweepState: SweepState;
@@ -623,6 +624,8 @@ export interface HudSnapshot {
   score: number;
   highScore: number;
   level: number;
+  speedMultiplier?: number;
+  gravitySpeed?: number;
   skinIndex: number;
   musicGenre: string;
   bpm: number;

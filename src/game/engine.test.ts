@@ -16,6 +16,7 @@ import {
   canPlacePiece,
   computeBeamProximity,
   computeEncoreState,
+  computeLevelPacing,
   computeStageProgressMetrics,
   computeTimeAttackPaceDelta,
   countMarkedAheadOfBeam,
@@ -744,11 +745,12 @@ test('getTrackTrimGain normalizes loudness across all 50 OGG tracks and getSpect
     const gain = getTrackTrimGain(url);
     assert.ok(gain >= 0.85 && gain <= 1.25, `Unexpected trim gain ${gain} for ${url}`);
   }
-  // Slightly quieter tracks (-13.5 LUFS world8) get gentle positive trim vs hotter tracks (-11.3 LUFS world7)
-  assert.ok(getTrackTrimGain('music/world8.ogg') > 1.1);
-  assert.ok(getTrackTrimGain('/music/world8.ogg') > 1.1);
-  assert.ok(getTrackTrimGain('music/world7.ogg') < 0.95);
-  assert.ok(getTrackTrimGain('music/world10.ogg') < 0.95);
+  // Slightly quieter tracks (-13.8 LUFS world4, -13.6 LUFS world1) get positive trim vs hotter tracks (-11.8 LUFS world14, -11.9 LUFS world7)
+  assert.ok(getTrackTrimGain('music/world4.ogg') > 1.15);
+  assert.ok(getTrackTrimGain('/music/world4.ogg') > 1.15);
+  assert.ok(getTrackTrimGain('music/world1.ogg') > 1.1);
+  assert.ok(getTrackTrimGain('music/world14.ogg') <= 0.95);
+  assert.ok(getTrackTrimGain('music/world7.ogg') < 1);
   assert.equal(getTrackTrimGain(undefined), 1);
 
   const engine = new IluminadoAudioEngine();
@@ -2939,6 +2941,73 @@ test('Non-loss guarantee: transitioning into ANY of all 72 shifts on a densely s
     assert.equal(state.isGameOver, false, `${shiftType} must not unfairly kill on the first drop after shift`);
   }
 });
+
+test('computeLevelPacing progressively accelerates gravity, tightens spawn/lock delays, and scales tempo per level', () => {
+  const slowSkin = SKINS[0]; // 80 BPM
+  const fastSkin = SKINS[6]; // 174 BPM
+
+  const lv1 = computeLevelPacing(1, slowSkin, { mode: 'challenge', challengeVariant: 'basic' });
+  const lv2 = computeLevelPacing(2, slowSkin, { mode: 'challenge', challengeVariant: 'basic' });
+  const lv5 = computeLevelPacing(5, slowSkin, { mode: 'challenge', challengeVariant: 'basic' });
+  const lv10 = computeLevelPacing(10, slowSkin, { mode: 'challenge', challengeVariant: 'basic' });
+  const lv25 = computeLevelPacing(25, slowSkin, { mode: 'challenge', challengeVariant: 'basic' });
+  const lv50 = computeLevelPacing(50, slowSkin, { mode: 'challenge', challengeVariant: 'endless' });
+
+  // Monotonically faster drop speed every level
+  assert.ok(lv2.gravitySpeed > lv1.gravitySpeed);
+  assert.ok(lv5.gravitySpeed > lv2.gravitySpeed);
+  assert.ok(lv10.gravitySpeed > lv5.gravitySpeed);
+  assert.ok(lv25.gravitySpeed > lv10.gravitySpeed);
+  assert.ok(lv50.gravitySpeed >= lv25.gravitySpeed && lv50.gravitySpeed <= 18.0);
+  assert.ok(lv10.speedMultiplier > lv1.speedMultiplier);
+
+  // Even when transitioning to a slower-BPM skin at higher level, drop speed stays faster
+  const lv1FastSkin = computeLevelPacing(1, fastSkin, { mode: 'challenge', challengeVariant: 'basic' });
+  const lv6SlowSkin = computeLevelPacing(6, slowSkin, { mode: 'challenge', challengeVariant: 'basic' });
+  assert.ok(lv6SlowSkin.gravitySpeed > lv1FastSkin.gravitySpeed);
+
+  // Spawn delay and lock delay tighten cleanly without collapsing
+  assert.ok(lv10.spawnDelay < lv1.spawnDelay && lv50.spawnDelay >= 0.14);
+  assert.equal(lv1.lockDelaySec, LOCK_DELAY_SEC);
+  assert.ok(lv10.lockDelaySec < lv1.lockDelaySec && lv50.lockDelaySec >= 0.26);
+
+  // Tempo scales gently per level and stays within audio playbackRate clamp (<= 1.25)
+  assert.equal(lv1.tempoScale, 1);
+  assert.ok(lv10.tempoScale > 1.0 && lv25.tempoScale <= 1.25);
+  assert.ok(lv10.effectiveBpm > slowSkin.bpm);
+  const withEncore = computeLevelPacing(30, slowSkin, {
+    mode: 'challenge',
+    challengeVariant: 'basic',
+    encoreBonusBpm: 20,
+  });
+  assert.ok(withEncore.tempoScale <= 1.25);
+
+  // Zen mode stays gentle; Puzzle mode stays flat
+  const zenLv20 = computeLevelPacing(20, slowSkin, { mode: 'challenge', challengeVariant: 'zen' });
+  assert.ok(zenLv20.gravitySpeed < lv10.gravitySpeed);
+  assert.equal(zenLv20.lockDelaySec, LOCK_DELAY_SEC);
+
+  const puzzleLv5 = computeLevelPacing(5, fastSkin, { mode: 'puzzle' });
+  assert.equal(puzzleLv5.gravitySpeed, 1.2);
+  assert.equal(puzzleLv5.tempoScale, 1);
+});
+
+test('stepPassiveGravity honors custom lockDelaySec and records activeLockDelaySec on board', () => {
+  const state = createInitialBoardState(0);
+  state.activePiece = createPieceFromPattern([0, 0, 1, 1]);
+  state.activePiece.x = 4;
+  state.activePiece.y = BOARD_ROWS - 2; // Grounded on bottom row
+  state.spawnTimer = 1;
+
+  // With custom tight lockDelaySec = 0.26, waiting 0.27s locks immediately (< default 0.45s)
+  const tick1 = stepPassiveGravity(state, 0.15, 4.0, 0.25, 0, Math.random, { lockDelaySec: 0.26 });
+  assert.equal(tick1.landed, false);
+  assert.equal(state.activeLockDelaySec, 0.26);
+
+  const tick2 = stepPassiveGravity(state, 0.12, 4.0, 0.25, 0, Math.random, { lockDelaySec: 0.26 });
+  assert.equal(tick2.landed, true);
+});
+
 
 
 

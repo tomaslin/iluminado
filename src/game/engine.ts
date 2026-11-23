@@ -4,7 +4,9 @@ import {
   BoardWellRegion,
   Cell,
   CellColor,
+  ChallengeVariant,
   ClearEvent,
+  GameMode,
   GravityDirection,
   PentominoKind,
   Piece,
@@ -2505,7 +2507,7 @@ export function stepPassiveGravity(
   spawnDelay: number,
   chainFrequency: number = 0.05,
   rng: () => number = Math.random,
-  options?: { zenNoLoss?: boolean }
+  options?: { zenNoLoss?: boolean; lockDelaySec?: number }
 ): {
   moved: boolean;
   landed: boolean;
@@ -2519,6 +2521,9 @@ export function stepPassiveGravity(
   if (!state.activePiece || state.isGameOver) {
     return { moved: false, landed: false, squaresFormed: 0, chainActivated: false, zenTrimmed: false };
   }
+
+  const lockLimit = Math.max(0.15, options?.lockDelaySec ?? LOCK_DELAY_SEC);
+  state.activeLockDelaySec = lockLimit;
 
   if (state.orientationGraceTimer > 0) {
     state.orientationGraceTimer = Math.max(0, state.orientationGraceTimer - dt);
@@ -2557,7 +2562,7 @@ export function stepPassiveGravity(
     }
     state.gravityAccum = 0;
     state.lockTimer += dt;
-    if (state.lockTimer >= LOCK_DELAY_SEC) {
+    if (state.lockTimer >= lockLimit) {
       const fx = state.activePiece.x;
       const fy = state.activePiece.y;
       const res = lockActivePiece(state, chainFrequency, rng, options);
@@ -3929,6 +3934,84 @@ export function computeEncoreState(
   return {
     encoreBonusBpm: Math.min(20, comboLevel * 4),
     encoreIntensity: Math.min(1, comboLevel / 4),
+  };
+}
+
+export interface LevelPacing {
+  gravitySpeed: number;
+  spawnDelay: number;
+  lockDelaySec: number;
+  tempoScale: number;
+  effectiveBpm: number;
+  cpuMoveIntervalSec: number;
+  speedMultiplier: number;
+}
+
+export function computeLevelPacing(
+  level: number,
+  skin: Pick<SkinConfig, 'bpm' | 'gravitySpeed' | 'spawnDelay'>,
+  options?: {
+    mode?: GameMode;
+    challengeVariant?: ChallengeVariant;
+    encoreBonusBpm?: number;
+  }
+): LevelPacing {
+  const lv = Math.max(1, Math.floor(level || 1));
+  const baseBpm = Math.max(40, skin.bpm || 120);
+  const mode = options?.mode;
+  const isZen = mode === 'challenge' && options?.challengeVariant === 'zen';
+  const encoreBonusBpm = Math.max(0, options?.encoreBonusBpm ?? 0);
+
+  if (mode === 'puzzle') {
+    return {
+      gravitySpeed: 1.2,
+      spawnDelay: 0.4,
+      lockDelaySec: LOCK_DELAY_SEC,
+      tempoScale: 1,
+      effectiveBpm: baseBpm,
+      cpuMoveIntervalSec: 0.14,
+      speedMultiplier: 1.0,
+    };
+  }
+
+  if (isZen) {
+    const gravitySpeed = Math.min(3.2, 1.15 + (lv - 1) * 0.1);
+    const spawnDelay = Math.max(0.28, 0.4 - (lv - 1) * 0.005);
+    const levelScale = 1 + Math.min(0.04, (lv - 1) * 0.002);
+    const encoreScale = encoreBonusBpm / baseBpm;
+    const tempoScale = Math.min(1.25, levelScale + encoreScale);
+    return {
+      gravitySpeed,
+      spawnDelay,
+      lockDelaySec: LOCK_DELAY_SEC,
+      tempoScale,
+      effectiveBpm: Math.round(baseBpm * tempoScale),
+      cpuMoveIntervalSec: 0.14,
+      speedMultiplier: Math.round((gravitySpeed / 1.15) * 10) / 10,
+    };
+  }
+
+  const gravitySpeed = Math.min(
+    18.0,
+    1.2 + (lv - 1) * 0.25 + Math.pow(Math.max(0, lv - 1), 1.35) * 0.045
+  );
+  const spawnDelay = Math.max(0.14, 0.4 - (lv - 1) * 0.012);
+  const lockDelaySec = Math.max(0.26, LOCK_DELAY_SEC - Math.max(0, lv - 4) * 0.0095);
+  const levelTempoScale = 1 + Math.min(0.18, (lv - 1) * 0.008);
+  const encoreScale = encoreBonusBpm / baseBpm;
+  const tempoScale = Math.min(1.25, levelTempoScale + encoreScale);
+  const effectiveBpm = Math.round(baseBpm * tempoScale);
+  const cpuMoveIntervalSec = Math.max(0.07, 0.14 - (lv - 1) * 0.004);
+  const speedMultiplier = Math.round((gravitySpeed / 1.2) * 10) / 10;
+
+  return {
+    gravitySpeed,
+    spawnDelay,
+    lockDelaySec,
+    tempoScale,
+    effectiveBpm,
+    cpuMoveIntervalSec,
+    speedMultiplier,
   };
 }
 

@@ -18,6 +18,7 @@ import {
   advanceTimedStageProgression,
   applyMetronomeChargeBonus,
   computeEncoreState,
+  computeLevelPacing,
   computeStageProgressMetrics,
   computeTimeAttackPaceDelta,
   countBoardCells,
@@ -430,6 +431,11 @@ export default function App() {
       (sim.mode === 'mission' && sim.missionIdx + 1 < MISSION_LEVELS.length);
 
     const fallbackDims = getDimensionsForOrientation(orientationRef.current);
+    const pacing = computeLevelPacing(sim.progression.level, skin, {
+      mode: sim.mode,
+      challengeVariant: sim.challengeVariant,
+      encoreBonusBpm: sim.encoreBonusBpm,
+    });
     return {
       status: sim.status,
       mode: sim.mode,
@@ -459,9 +465,11 @@ export default function App() {
       score,
       highScore,
       level: sim.progression.level,
+      speedMultiplier: pacing.speedMultiplier,
+      gravitySpeed: pacing.gravitySpeed,
       skinIndex: sim.skinIndex,
       musicGenre: skin.music.genreLabel,
-      bpm: skin.bpm + sim.encoreBonusBpm,
+      bpm: pacing.effectiveBpm,
       squaresThisSweep: sim.board?.sweepState.squaresThisSweep ?? 0,
       squaresTotal: sim.board?.squaresClearedTotal ?? 0,
       stageSquares,
@@ -1247,7 +1255,11 @@ export default function App() {
             preX,
             preY,
             skin,
-            skin.bpm + sim.encoreBonusBpm,
+            computeLevelPacing(sim.progression.level, skin, {
+              mode: sim.mode,
+              challengeVariant: sim.challengeVariant,
+              encoreBonusBpm: sim.encoreBonusBpm,
+            }).effectiveBpm,
             activePieceSnapshot && landingInfo
               ? {
                   piece: activePieceSnapshot,
@@ -1607,10 +1619,13 @@ export default function App() {
           const encore = computeEncoreState(isFinalWorld, sim.board.comboLevel);
           sim.encoreBonusBpm = encore.encoreBonusBpm;
           sim.encoreIntensity = encore.encoreIntensity;
-          const effectiveBpm = skin.bpm + encore.encoreBonusBpm;
-          audioRef.current.setPlaybackTempoScale(
-            effectiveBpm / Math.max(1, skin.bpm)
-          );
+          const levelPacing = computeLevelPacing(sim.progression.level, skin, {
+            mode: sim.mode,
+            challengeVariant: sim.challengeVariant,
+            encoreBonusBpm: encore.encoreBonusBpm,
+          });
+          const effectiveBpm = levelPacing.effectiveBpm;
+          audioRef.current.setPlaybackTempoScale(levelPacing.tempoScale);
 
           if (sim.mode === 'challenge' || sim.mode === 'skin_edit') {
             const { stageSquares, stageGoal } = computeStageProgressMetrics(
@@ -2102,6 +2117,12 @@ export default function App() {
             );
             sim.level = sim.progression.level;
             if (progRes.leveledUp && sim.mode !== 'puzzle') {
+              const activeSkinForLevel = getSkinByIndex(sim.skinIndex);
+              const nextPacing = computeLevelPacing(sim.progression.level, activeSkinForLevel, {
+                mode: sim.mode,
+                challengeVariant: sim.challengeVariant,
+                encoreBonusBpm: sim.encoreBonusBpm,
+              });
               const chosenShift =
                 sim.board.upcomingShift ??
                 pickNextShift(
@@ -2111,6 +2132,7 @@ export default function App() {
                   sim.board
                 );
               sim.board.upcomingShift = null;
+              let shiftAnnounced = false;
               if (chosenShift) {
                 const shiftRes = applyBoardShift(sim.board, chosenShift, {
                   animateBricks: true,
@@ -2129,6 +2151,7 @@ export default function App() {
                   }
                 }
                 if (shiftRes.applied) {
+                  shiftAnnounced = true;
                   if (shiftRes.didRotate90) {
                     rendererRef.current.triggerBoardRotate90(shiftRes.rotateDir);
                   }
@@ -2136,15 +2159,22 @@ export default function App() {
                     getShiftPolarity(chosenShift) ?? 'neutral'
                   );
                   rendererRef.current.triggerBoardTremor(0.6);
-                  const activeSkinForShift = getSkinByIndex(sim.skinIndex);
-                  audioRef.current.playShiftChord(activeSkinForShift);
+                  audioRef.current.playShiftChord(activeSkinForLevel);
                   rendererRef.current.spawnScorePopup(
                     0,
-                    `LEVEL ${sim.progression.level}`,
+                    `LEVEL ${sim.progression.level} · ${nextPacing.speedMultiplier.toFixed(1)}×`,
                     shiftRes.label,
-                    activeSkinForShift.palette.hudAccent
+                    activeSkinForLevel.palette.hudAccent
                   );
                 }
+              }
+              if (!shiftAnnounced && !progRes.shouldTransitionSkin) {
+                rendererRef.current.spawnScorePopup(
+                  0,
+                  `LEVEL ${sim.progression.level}`,
+                  `${nextPacing.speedMultiplier.toFixed(1)}× SPEED · ${nextPacing.effectiveBpm} BPM`,
+                  activeSkinForLevel.palette.hudAccent
+                );
               }
             } else if (!progRes.shouldTransitionSkin) {
               const sweepRng =
@@ -2357,11 +2387,11 @@ export default function App() {
               const res = stepPassiveGravity(
                 sim.board,
                 dt,
-                skin.gravitySpeed,
-                skin.spawnDelay,
+                levelPacing.gravitySpeed,
+                levelPacing.spawnDelay,
                 chainFreq,
                 pieceRng,
-                { zenNoLoss: isZen }
+                { zenNoLoss: isZen, lockDelaySec: levelPacing.lockDelaySec }
               );
               if (res.bouncePositions?.length) {
                 audioRef.current.playRotate(skin);
@@ -2388,7 +2418,7 @@ export default function App() {
                   sim.cpuRotationsDone = 0;
                 }
                 sim.cpuMoveAccum += dt;
-                if (sim.cpuMoveAccum >= 0.14) {
+                if (sim.cpuMoveAccum >= levelPacing.cpuMoveIntervalSec) {
                   sim.cpuMoveAccum = 0;
                   const cpuGrav = getActiveGravityDirection(sim.board2);
                   const isHorizGrav = cpuGrav === 'left' || cpuGrav === 'right';
@@ -2426,9 +2456,11 @@ export default function App() {
                 const res = stepPassiveGravity(
                   sim.board2,
                   dt,
-                  skin.gravitySpeed,
-                  skin.spawnDelay,
-                  chainFreq
+                  levelPacing.gravitySpeed,
+                  levelPacing.spawnDelay,
+                  chainFreq,
+                  Math.random,
+                  { lockDelaySec: levelPacing.lockDelaySec }
                 );
                 if (res.landed && sim.mode === 'vs_cpu') {
                   sim.cpuPlan = null;

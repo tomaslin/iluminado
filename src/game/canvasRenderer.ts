@@ -5125,7 +5125,9 @@ export class IluminadoCanvasRenderer {
       const pieceRows = activePiece.cells.length;
       const pieceCols = activePiece.cells[0]?.length ?? 2;
       const lockProgress =
-        board.lockTimer > 0 ? Math.min(1, board.lockTimer / LOCK_DELAY_SEC) : 0;
+        board.lockTimer > 0
+          ? Math.min(1, board.lockTimer / Math.max(0.15, board.activeLockDelaySec ?? LOCK_DELAY_SEC))
+          : 0;
 
       const suppressTopRails =
         board.activeShift === 'dual_screen' || board.activeShift === 'clamshell';

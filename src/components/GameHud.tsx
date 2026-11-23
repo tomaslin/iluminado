@@ -264,7 +264,9 @@ export const GameHud: React.FC<GameHudProps> = ({
                 </span>
               </div>
               <div className="flex items-baseline justify-between mt-0.5">
-                <span style={{ color: palette.hudMuted }}>Lv {hud.level}</span>
+                <span style={{ color: palette.hudMuted }}>
+                  Lv {hud.level} · {(hud.speedMultiplier ?? 1).toFixed(1)}×
+                </span>
                 <span
                   className="font-mono-tabular font-semibold text-xs"
                   style={{ color: hud.comboMultiplier >= 4 ? palette.hudAccent : palette.hudInk }}
@@ -474,7 +476,7 @@ export const GameHud: React.FC<GameHudProps> = ({
                   <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: palette.hudMuted }}>
                     Level
                   </span>
-                  <span className="font-mono-tabular text-xs font-semibold">
+                  <span className="font-mono-tabular text-xs font-semibold" data-testid="hud-level">
                     {hud.level}
                   </span>
                 </div>
@@ -487,7 +489,11 @@ export const GameHud: React.FC<GameHudProps> = ({
                     }}
                   />
                 </div>
-                <div className="flex items-center justify-between text-[10px] mt-1 font-mono-tabular" style={{ color: palette.hudMuted }}>
+                <div className="flex items-center justify-between text-[10px] mt-1 font-mono-tabular" style={{ color: palette.hudMuted }} data-testid="hud-pace">
+                  <span>Pace {(hud.speedMultiplier ?? 1).toFixed(1)}×</span>
+                  <span>{hud.bpm} BPM</span>
+                </div>
+                <div className="flex items-center justify-between text-[10px] mt-0.5 font-mono-tabular" style={{ color: palette.hudMuted }}>
                   <span>Cleared</span>
                   <span>{hud.squaresTotal}</span>
                 </div>
@@ -676,6 +682,9 @@ export const GameHud: React.FC<GameHudProps> = ({
             <div>
               <span style={{ color: palette.hudMuted }}>Lv </span>
               <span className="font-mono-tabular font-semibold text-sm">{hud.level}</span>
+              <span className="font-mono-tabular text-[10px] ml-1" style={{ color: palette.hudMuted }}>
+                {(hud.speedMultiplier ?? 1).toFixed(1)}×
+              </span>
             </div>
             <div>
               <span style={{ color: palette.hudMuted }}>Combo </span>
