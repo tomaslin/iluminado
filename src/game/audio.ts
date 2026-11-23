@@ -135,6 +135,37 @@ export function computeQuantizedSfxDelaySec(
   return delaySec <= maxSnapSec ? delaySec : 0;
 }
 
+export function buildEqualPowerFadeCurve(
+  direction: 'in' | 'out',
+  targetGain = 1,
+  steps = 32
+): Float32Array<ArrayBuffer> {
+  const safeSteps = Math.max(4, Math.floor(steps));
+  const safeGain = clamp(targetGain, 0, 2.5);
+  const curve = new Float32Array(new ArrayBuffer(safeSteps * 4));
+  for (let i = 0; i < safeSteps; i++) {
+    const t = i / (safeSteps - 1);
+    const weight =
+      direction === 'in'
+        ? Math.sin(t * Math.PI * 0.5)
+        : Math.cos(t * Math.PI * 0.5);
+    curve[i] = Math.max(0.0001, weight * safeGain);
+  }
+  return curve;
+}
+
+export function computeBoardStereoPan(
+  col: number,
+  totalCols = 16,
+  maxPan = 0.48
+): number {
+  if (!Number.isFinite(col) || !Number.isFinite(totalCols) || totalCols <= 1) {
+    return 0;
+  }
+  const norm = clamp(col / (totalCols - 1), 0, 1);
+  return clamp((norm * 2 - 1) * maxPan, -0.85, 0.85);
+}
+
 export interface AudioSpectrumSnapshot {
   subBass: number;
   mid: number;
@@ -308,7 +339,11 @@ export class IluminadoAudioEngine {
   private musicMidBandGain: GainNode | null = null;
   private musicHighBandGain: GainNode | null = null;
   private musicFilter: BiquadFilterNode | null = null;
+  private musicDuckGain: GainNode | null = null;
   private musicBusGain: GainNode | null = null;
+  private sfxSpaceDelay: DelayNode | null = null;
+  private sfxSpaceFeedback: GainNode | null = null;
+  private sfxSpaceWetGain: GainNode | null = null;
 
   private noiseBuffer: AudioBuffer | null = null;
   private distortionCache = new Map<number, WaveShaperNode['curve']>();
@@ -405,8 +440,34 @@ export class IluminadoAudioEngine {
       this.stemVocalGain.connect(this.sfxBusGain);
       this.sfxBusGain.connect(this.compressor);
 
+      // Subtle architectural courtyard ambience send exclusively on melodic lead/vocal stems
+      if (typeof this.ctx.createDelay === 'function') {
+        const spaceDelay = this.ctx.createDelay(0.6);
+        spaceDelay.delayTime.value = 0.145;
+        const spaceFilter = this.ctx.createBiquadFilter();
+        spaceFilter.type = 'lowpass';
+        spaceFilter.frequency.value = 3200;
+        spaceFilter.Q.value = 0.7;
+        const spaceFeedback = this.ctx.createGain();
+        spaceFeedback.gain.value = 0.22;
+        const spaceWet = this.ctx.createGain();
+        spaceWet.gain.value = 0.15;
+
+        this.stemLeadGain.connect(spaceDelay);
+        this.stemVocalGain.connect(spaceDelay);
+        spaceDelay.connect(spaceFilter);
+        spaceFilter.connect(spaceFeedback);
+        spaceFeedback.connect(spaceDelay);
+        spaceFilter.connect(spaceWet);
+        spaceWet.connect(this.sfxBusGain);
+
+        this.sfxSpaceDelay = spaceDelay;
+        this.sfxSpaceFeedback = spaceFeedback;
+        this.sfxSpaceWetGain = spaceWet;
+      }
+
       this.musicTrimGain = this.ctx.createGain();
-      this.musicTrimGain.gain.value = getTrackTrimGain(this.activeMusicUrl);
+      this.musicTrimGain.gain.value = 1;
 
       const makeFilter = (type: BiquadFilterType, frequency: number, q = 0.7071) => {
         const node = this.ctx!.createBiquadFilter();
@@ -433,7 +494,9 @@ export class IluminadoAudioEngine {
       this.musicHighBandGain = this.ctx.createGain();
       this.musicHighBandGain.gain.value = 1;
 
-      this.musicFilter = makeFilter('lowpass', 8200, 0.72);
+      this.musicFilter = makeFilter('lowpass', 15800, 0.72);
+      this.musicDuckGain = this.ctx.createGain();
+      this.musicDuckGain.gain.value = 1;
 
       this.musicBusGain = this.ctx.createGain();
       this.musicBusGain.gain.value = 0.56 * this.musicVolume;
@@ -455,7 +518,8 @@ export class IluminadoAudioEngine {
       highHp2.connect(this.musicHighBandGain);
       this.musicHighBandGain.connect(this.musicFilter);
 
-      this.musicFilter.connect(this.musicBusGain);
+      this.musicFilter.connect(this.musicDuckGain);
+      this.musicDuckGain.connect(this.musicBusGain);
       this.musicBusGain.connect(this.compressor);
 
       this.compressor.connect(this.masterGain);
@@ -470,6 +534,9 @@ export class IluminadoAudioEngine {
       }
 
     }
+    if (this.desiredTrackUrl) {
+      void this.ensureBufferDecoded(this.desiredTrackUrl);
+    }
     if (this.ctx.state === 'suspended') {
       this.ctx
         .resume()
@@ -478,9 +545,7 @@ export class IluminadoAudioEngine {
           this.applyDynamicMusicShaping();
         })
         .catch(() => {});
-    }
-    if (this.desiredTrackUrl) {
-      void this.ensureBufferDecoded(this.desiredTrackUrl);
+      return;
     }
     this.ensureDesiredMusicPlaying();
     this.applyDynamicMusicShaping();
@@ -849,17 +914,21 @@ export class IluminadoAudioEngine {
     const entry = { node, gain };
     this.fadingBufferNodes.add(entry);
     const now = this.ctx.currentTime;
-    const fadeSec = Math.max(0.04, fadeMs / 1000);
+    const fadeSec = Math.max(0.05, fadeMs / 1000);
     try {
-      if (typeof gain.gain.cancelAndHoldAtTime === 'function') {
-        gain.gain.cancelAndHoldAtTime(now);
+      const currentGain = clamp(gain.gain.value, 0.0001, 2.5);
+      this.cancelAudioParamSafe(gain.gain, now);
+      if (typeof gain.gain.setValueCurveAtTime === 'function') {
+        gain.gain.setValueCurveAtTime(
+          buildEqualPowerFadeCurve('out', currentGain, 32),
+          now,
+          fadeSec
+        );
       } else {
-        gain.gain.cancelScheduledValues(now);
-        const startGain = clamp(gain.gain.value, 0.0001, 1);
-        gain.gain.setValueAtTime(startGain, now);
+        gain.gain.setValueAtTime(currentGain, now);
+        gain.gain.linearRampToValueAtTime(0.0001, now + fadeSec);
       }
-      gain.gain.linearRampToValueAtTime(0.0001, now + fadeSec);
-      node.stop(now + fadeSec + 0.04);
+      node.stop(now + fadeSec + 0.05);
     } catch {
       try {
         node.stop();
@@ -882,7 +951,7 @@ export class IluminadoAudioEngine {
 
     node.onended = cleanup;
     if (typeof window !== 'undefined') {
-      window.setTimeout(cleanup, Math.ceil((fadeSec + 0.15) * 1000));
+      window.setTimeout(cleanup, Math.ceil((fadeSec + 0.18) * 1000));
     }
   }
 
@@ -890,6 +959,16 @@ export class IluminadoAudioEngine {
     this.stopActiveBufferSource(fadeMs);
     this.stopFallbackAudio(fadeMs);
     this.activeMusicUrl = null;
+  }
+
+  private triggerMusicDuck(depth = 0.84, holdSec = 0.14): void {
+    if (!this.ctx || !this.musicDuckGain || this.ctx.state !== 'running') return;
+    if (this.desiredMode !== 'playing') return;
+    const now = this.ctx.currentTime;
+    const target = clamp(depth, 0.5, 1);
+    this.cancelAudioParamSafe(this.musicDuckGain.gain, now);
+    this.musicDuckGain.gain.setTargetAtTime(target, now, 0.015);
+    this.musicDuckGain.gain.setTargetAtTime(1, now + Math.max(0.04, holdSec), 0.11);
   }
 
   public updateShiftRiser(riser01: number): void {
@@ -903,81 +982,91 @@ export class IluminadoAudioEngine {
     if (!this.ctx || this.ctx.state !== 'running') return;
     const now = this.ctx.currentTime;
     const activeUrl = this.activeBufferUrl ?? this.activeMusicUrl;
-    const trim = getTrackTrimGain(activeUrl);
-    const normalizedTrim = Math.min(2.5, trim);
-    this.musicTrimGain?.gain.setTargetAtTime(normalizedTrim, now, 0.06);
+    const rawTrim = getTrackTrimGain(activeUrl);
+    const effectiveTrim = Math.min(1.6, rawTrim);
 
-    let targetCutoff = 7600;
+    if (this.activeBufferGain && now >= this.activeBufferFadeEndCtxTime) {
+      this.activeBufferGain.gain.setTargetAtTime(effectiveTrim, now, 0.08);
+    }
+
+    let targetCutoff = 15200;
     let targetQ = 0.72;
-    let targetBusGain = 0.46;
-    let lowBand = 0.92;
-    let midBand = 0.9;
-    let highBand = 0.88;
+    let targetBusGain = 0.5;
+    let lowBand = 0.96;
+    let midBand = 0.95;
+    let highBand = 0.92;
 
     if (this.desiredMode === 'paused') {
-      targetCutoff = 520;
-      targetBusGain = 0.28;
-      lowBand = 0.85;
-      midBand = 0.55;
-      highBand = 0.35;
+      targetCutoff = 680;
+      targetQ = 0.7;
+      targetBusGain = 0.3;
+      lowBand = 0.88;
+      midBand = 0.62;
+      highBand = 0.42;
+      this.transitionBloomUntilCtxTime = 0;
     } else if (this.desiredMode === 'title') {
-      targetCutoff = 8400;
-      targetBusGain = 0.48;
-      lowBand = 0.95;
-      midBand = 0.92;
-      highBand = 0.88;
+      targetCutoff = 15800;
+      targetBusGain = 0.5;
+      lowBand = 0.96;
+      midBand = 0.96;
+      highBand = 0.94;
     } else if (this.desiredMode === 'playing') {
       const intensity = clamp(
-        this.lastStems.lead * 0.55 +
-          this.lastStems.vocal * 0.45 +
+        this.lastStems.lead * 0.52 +
+          this.lastStems.vocal * 0.48 +
           Math.min(0.4, this.lastComboLevel * 0.1),
         0,
         1.15
       );
-      targetCutoff = 8200 + Math.min(1, intensity) * 11000;
+      targetCutoff = 12400 + Math.min(1, intensity) * 7400;
       targetBusGain = clamp(
-        0.58 + this.lastStems.lead * 0.12 + this.lastStems.vocal * 0.1,
-        0.55,
-        0.75
+        0.6 + this.lastStems.lead * 0.1 + this.lastStems.vocal * 0.09,
+        0.58,
+        0.76
       );
 
       lowBand = clamp(
-        0.74 +
-          (this.lastStems.bass - 0.36) * 0.58 +
-          Math.min(0.2, this.lastComboLevel * 0.05),
-        0.72,
-        1.18
+        0.9 +
+          (this.lastStems.bass - 0.36) * 0.34 +
+          Math.min(0.14, this.lastComboLevel * 0.035),
+        0.88,
+        1.14
       );
       midBand = clamp(
-        0.64 + this.lastStems.lead * 0.44 + this.lastStems.vocal * 0.22,
-        0.64,
-        1.18
+        0.88 + this.lastStems.lead * 0.24 + this.lastStems.vocal * 0.12,
+        0.88,
+        1.14
       );
       highBand = clamp(
-        0.56 +
-          this.lastStems.percussion * 0.34 +
-          this.lastStems.vocal * 0.38 +
-          Math.min(0.18, this.lastComboLevel * 0.045),
-        0.56,
-        1.20
+        0.86 +
+          this.lastStems.percussion * 0.18 +
+          this.lastStems.vocal * 0.2 +
+          Math.min(0.14, this.lastComboLevel * 0.035),
+        0.86,
+        1.16
       );
 
       if (this.shiftRiserProgress > 0.01 && now >= this.transitionBloomUntilCtxTime) {
         const r = this.shiftRiserProgress;
-        targetCutoff = targetCutoff * (1 - r) + 640 * r;
-        targetQ = 0.72 + r * 2.5;
+        targetCutoff = targetCutoff * (1 - r) + 740 * r;
+        targetQ = 0.72 + r * 2.2;
       }
     }
 
-    if (now >= this.transitionBloomUntilCtxTime) {
+    if (this.desiredMode === 'paused' || now >= this.transitionBloomUntilCtxTime) {
       this.musicFilter?.frequency.setTargetAtTime(targetCutoff, now, 0.09);
       this.musicFilter?.Q.setTargetAtTime(targetQ, now, 0.08);
     }
     this.musicLowBandGain?.gain.setTargetAtTime(lowBand, now, 0.14);
     this.musicMidBandGain?.gain.setTargetAtTime(midBand, now, 0.14);
     this.musicHighBandGain?.gain.setTargetAtTime(highBand, now, 0.14);
-    const trimComp = normalizedTrim > 1.4 ? 1.4 / normalizedTrim : 1.0;
-    this.musicBusGain?.gain.setTargetAtTime(targetBusGain * trimComp * this.musicVolume, now, 0.08);
+    this.musicBusGain?.gain.setTargetAtTime(targetBusGain * this.musicVolume, now, 0.08);
+
+    if (this.sfxSpaceDelay && this.desiredSkin) {
+      const beatSec = 60 / Math.max(60, this.desiredSkin.bpm || 120);
+      const syncedDelay = clamp(beatSec * 0.375, 0.09, 0.24);
+      this.sfxSpaceDelay.delayTime.setTargetAtTime(syncedDelay, now, 0.12);
+    }
   }
 
   private startDecodedBufferTrack(
@@ -1007,16 +1096,25 @@ export class IluminadoAudioEngine {
         timing.firstBeatSec + ((explicitOffsetSec - timing.firstBeatSec) % loopLen);
     }
 
+    const targetTrim = Math.min(1.6, getTrackTrimGain(url));
     const gain = this.ctx.createGain();
-    const fadeSec = Math.max(0.04, fadeMs / 1000);
+    const fadeSec = Math.max(0.06, fadeMs / 1000);
     this.cancelAudioParamSafe(gain.gain, now);
     try {
-      gain.gain.setValueAtTime(0.0001, now);
-      gain.gain.linearRampToValueAtTime(1, now + fadeSec);
-      this.activeBufferFadeEndCtxTime = now + fadeSec + 0.02;
+      if (typeof gain.gain.setValueCurveAtTime === 'function') {
+        gain.gain.setValueCurveAtTime(
+          buildEqualPowerFadeCurve('in', targetTrim, 32),
+          now,
+          fadeSec
+        );
+      } else {
+        gain.gain.setValueAtTime(0.0001, now);
+        gain.gain.linearRampToValueAtTime(targetTrim, now + fadeSec);
+      }
+      this.activeBufferFadeEndCtxTime = now + fadeSec + 0.04;
     } catch {
-      gain.gain.setValueAtTime(1, now);
-      this.activeBufferFadeEndCtxTime = now + 0.02;
+      gain.gain.setValueAtTime(targetTrim, now);
+      this.activeBufferFadeEndCtxTime = now + 0.04;
     }
 
     src.connect(gain);
@@ -1038,7 +1136,7 @@ export class IluminadoAudioEngine {
     if (typeof window === 'undefined') return;
 
     if (this.desiredMode === 'gameover' || !this.desiredTrackUrl) {
-      this.stopActiveMusic(this.desiredMode === 'gameover' ? 380 : 260);
+      this.stopActiveMusic(this.desiredMode === 'gameover' ? 420 : 280);
       return;
     }
 
@@ -1058,12 +1156,13 @@ export class IluminadoAudioEngine {
             this.activeBufferGain &&
             this.ctx.currentTime >= this.activeBufferFadeEndCtxTime
           ) {
+            const targetTrim = Math.min(1.6, getTrackTrimGain(targetUrl));
             this.cancelAudioParamSafe(
               this.activeBufferGain.gain,
               this.ctx.currentTime
             );
             this.activeBufferGain.gain.setTargetAtTime(
-              1,
+              targetTrim,
               this.ctx.currentTime,
               0.08
             );
@@ -1072,15 +1171,22 @@ export class IluminadoAudioEngine {
           return;
         }
 
+        const hadPreviousTrack = Boolean(this.activeBufferNode);
         const isSameTrack = this.activeBufferUrl === targetUrl;
-        const swapFadeMs = this.desiredMode === 'playing' ? 280 : 260;
+        const swapFadeMs = hadPreviousTrack
+          ? this.desiredMode === 'playing'
+            ? 1400
+            : 650
+          : 260;
 
-        if (!isSameTrack && this.musicFilter && this.activeBufferNode && this.desiredMode !== 'paused') {
+        if (!isSameTrack && this.musicFilter && hadPreviousTrack && this.desiredMode !== 'paused') {
           const now = this.ctx.currentTime;
+          const fadeSec = swapFadeMs / 1000;
           this.cancelAudioParamSafe(this.musicFilter.frequency, now);
-          this.musicFilter.frequency.setTargetAtTime(900, now, 0.03);
-          this.musicFilter.frequency.setTargetAtTime(14500, now + 0.12, 0.22);
-          this.transitionBloomUntilCtxTime = now + 0.5;
+          this.musicFilter.Q.setTargetAtTime(0.85, now, 0.04);
+          this.musicFilter.frequency.setTargetAtTime(2200, now, 0.09);
+          this.musicFilter.frequency.setTargetAtTime(16500, now + fadeSec * 0.35, 0.28);
+          this.transitionBloomUntilCtxTime = now + fadeSec * 0.95;
         }
 
         this.stopActiveBufferSource(swapFadeMs);
@@ -1307,6 +1413,26 @@ export class IluminadoAudioEngine {
     return now + delay;
   }
 
+  private connectWithOptionalPan(
+    source: AudioNode,
+    dest: GainNode,
+    pan = 0
+  ): StereoPannerNode | null {
+    if (
+      this.ctx &&
+      Math.abs(pan) > 0.01 &&
+      typeof this.ctx.createStereoPanner === 'function'
+    ) {
+      const panner = this.ctx.createStereoPanner();
+      panner.pan.value = clamp(pan, -0.9, 0.9);
+      source.connect(panner);
+      panner.connect(dest);
+      return panner;
+    }
+    source.connect(dest);
+    return null;
+  }
+
   private scheduleTone(
     when: number,
     dest: GainNode | null,
@@ -1317,7 +1443,8 @@ export class IluminadoAudioEngine {
     attack = 0.008,
     filterFreq = 2600,
     distortion = 0,
-    pitchEndFreq?: number
+    pitchEndFreq?: number,
+    pan = 0
   ): void {
     if (!this.canSchedule() || !this.ctx || !dest) return;
 
@@ -1357,7 +1484,7 @@ export class IluminadoAudioEngine {
     }
 
     filter.connect(gain);
-    gain.connect(dest);
+    const panner = this.connectWithOptionalPan(gain, dest, pan);
 
     osc.onended = () => {
       try {
@@ -1365,6 +1492,7 @@ export class IluminadoAudioEngine {
         shaper?.disconnect();
         filter.disconnect();
         gain.disconnect();
+        panner?.disconnect();
       } catch {}
     };
 
@@ -1379,7 +1507,8 @@ export class IluminadoAudioEngine {
     filterType: BiquadFilterType,
     filterFreq: number,
     q: number,
-    volume: number
+    volume: number,
+    pan = 0
   ): void {
     if (!this.canSchedule() || !this.ctx || !dest || !this.noiseBuffer) return;
 
@@ -1395,18 +1524,22 @@ export class IluminadoAudioEngine {
     filter.Q.setValueAtTime(q, startTime);
 
     const gain = this.ctx.createGain();
-    gain.gain.setValueAtTime(Math.max(0.0002, volume), startTime);
+    const peakVol = Math.max(0.0002, volume);
+    const attack = Math.min(0.0025, duration * 0.25);
+    gain.gain.setValueAtTime(0.0001, startTime);
+    gain.gain.linearRampToValueAtTime(peakVol, startTime + attack);
     gain.gain.exponentialRampToValueAtTime(0.0001, startTime + duration);
 
     src.connect(filter);
     filter.connect(gain);
-    gain.connect(dest);
+    const panner = this.connectWithOptionalPan(gain, dest, pan);
 
     src.onended = () => {
       try {
         src.disconnect();
         filter.disconnect();
         gain.disconnect();
+        panner?.disconnect();
       } catch {}
     };
 
@@ -1563,7 +1696,7 @@ export class IluminadoAudioEngine {
     );
   }
 
-  private scheduleVocalPad(when: number, midi: number, dur: number, vol: number): void {
+  private scheduleVocalPad(when: number, midi: number, dur: number, vol: number, pan = 0): void {
     if (!this.canSchedule() || !this.ctx || !this.stemVocalGain) return;
 
     const startTime = Math.max(this.ctx.currentTime + 0.002, when);
@@ -1587,13 +1720,14 @@ export class IluminadoAudioEngine {
 
     osc.connect(f1);
     f1.connect(gain);
-    gain.connect(this.stemVocalGain);
+    const panner = this.connectWithOptionalPan(gain, this.stemVocalGain, pan);
 
     osc.onended = () => {
       try {
         osc.disconnect();
         f1.disconnect();
         gain.disconnect();
+        panner?.disconnect();
       } catch {}
     };
 
@@ -1881,7 +2015,7 @@ export class IluminadoAudioEngine {
     };
   }
 
-  public playMove(skin?: SkinConfig, nowMsOverride?: number): boolean {
+  public playMove(skin?: SkinConfig, nowMsOverride?: number, pan = 0): boolean {
     const nowMs = nowMsOverride ?? (typeof performance !== 'undefined' ? performance.now() : Date.now());
     const deltaMs = nowMs - this.lastMoveSfxMs;
     if (deltaMs < 78) return false;
@@ -1903,29 +2037,29 @@ export class IluminadoAudioEngine {
     const rootTickFreq = midiToFreq(root + 24 + Math.min(12, ladderSemi));
 
     if (profile.family === 'chip_minimal') {
-      this.scheduleTone(now, this.stemPercGain, rootTickFreq * 1.12, 0.022, 'square', 0.036 * ladderGain, 0.002, 2600);
+      this.scheduleTone(now, this.stemPercGain, rootTickFreq * 1.12, 0.022, 'square', 0.036 * ladderGain, 0.002, 2600, 0, undefined, pan);
     } else if (profile.family === 'wood_marimba') {
-      this.scheduleTone(now, this.stemPercGain, rootTickFreq, 0.032, 'triangle', 0.062 * ladderGain, 0.002, 2400, 0, rootTickFreq * 0.85);
+      this.scheduleTone(now, this.stemPercGain, rootTickFreq, 0.032, 'triangle', 0.062 * ladderGain, 0.002, 2400, 0, rootTickFreq * 0.85, pan);
     } else if (profile.family === 'rock_crunch') {
-      this.scheduleNoise(now, this.stemPercGain, 0.024, 'bandpass', 2300 + this.moveLadderStep * 120, 2.0, 0.072 * ladderGain);
-      this.scheduleTone(now, this.stemPercGain, midiToFreq(root + ladderSemi), 0.028, 'triangle', 0.034 * ladderGain, 0.002, 1100, 0.2);
+      this.scheduleNoise(now, this.stemPercGain, 0.024, 'bandpass', 2300 + this.moveLadderStep * 120, 2.0, 0.072 * ladderGain, pan);
+      this.scheduleTone(now, this.stemPercGain, midiToFreq(root + ladderSemi), 0.028, 'triangle', 0.034 * ladderGain, 0.002, 1100, 0.2, undefined, pan);
     } else if (profile.family === 'analog_synth') {
-      this.scheduleNoise(now, this.stemPercGain, 0.02, 'highpass', 6800, 1.4, 0.062 * ladderGain);
-      this.scheduleTone(now, this.stemPercGain, rootTickFreq * 1.5, 0.02, 'sawtooth', 0.024 * ladderGain, 0.002, 3200, 0, rootTickFreq);
+      this.scheduleNoise(now, this.stemPercGain, 0.02, 'highpass', 6800, 1.4, 0.062 * ladderGain, pan);
+      this.scheduleTone(now, this.stemPercGain, rootTickFreq * 1.5, 0.02, 'sawtooth', 0.024 * ladderGain, 0.002, 3200, 0, rootTickFreq, pan);
     } else if (profile.family === 'jazz_fender') {
-      this.scheduleNoise(now, this.stemPercGain, 0.024, 'bandpass', 4300 + this.moveLadderStep * 140, 1.6, 0.056 * ladderGain);
-      this.scheduleTone(now, this.stemPercGain, rootTickFreq, 0.022, 'sine', 0.028 * ladderGain, 0.002, 2200);
+      this.scheduleNoise(now, this.stemPercGain, 0.024, 'bandpass', 4300 + this.moveLadderStep * 140, 1.6, 0.056 * ladderGain, pan);
+      this.scheduleTone(now, this.stemPercGain, rootTickFreq, 0.022, 'sine', 0.028 * ladderGain, 0.002, 2200, 0, undefined, pan);
     } else if (profile.family === 'dub_club') {
-      this.scheduleNoise(now, this.stemPercGain, 0.02, 'highpass', 7200, 1.4, 0.065 * ladderGain);
-      this.scheduleTone(now, this.stemPercGain, rootTickFreq, 0.02, 'sine', 0.022 * ladderGain, 0.002, 2600);
+      this.scheduleNoise(now, this.stemPercGain, 0.02, 'highpass', 7200, 1.4, 0.065 * ladderGain, pan);
+      this.scheduleTone(now, this.stemPercGain, rootTickFreq, 0.02, 'sine', 0.022 * ladderGain, 0.002, 2600, 0, undefined, pan);
     } else {
-      this.scheduleTone(now, this.stemPercGain, rootTickFreq * 1.5, 0.036, 'sine', 0.04 * ladderGain, 0.002, 4200);
-      this.scheduleNoise(now, this.stemPercGain, 0.018, 'highpass', 5800, 1.2, 0.032 * ladderGain);
+      this.scheduleTone(now, this.stemPercGain, rootTickFreq * 1.5, 0.036, 'sine', 0.04 * ladderGain, 0.002, 4200, 0, undefined, pan);
+      this.scheduleNoise(now, this.stemPercGain, 0.018, 'highpass', 5800, 1.2, 0.032 * ladderGain, pan);
     }
     return true;
   }
 
-  public playRotate(skin: SkinConfig): void {
+  public playRotate(skin: SkinConfig, pan = 0): void {
     if (!this.canSchedule() || !this.ctx) return;
     const now = this.ctx.currentTime;
     const { music } = skin;
@@ -1937,20 +2071,20 @@ export class IluminadoAudioEngine {
     const freq = midiToFreq(music.rootMidi + 12 + deg);
 
     if (profile.family === 'chip_minimal') {
-      this.scheduleTone(now, this.stemLeadGain, freq, 0.045, 'square', 0.068, 0.002, 3200);
-      this.scheduleTone(now + 0.028, this.stemLeadGain, freq * 1.25, 0.055, 'square', 0.052, 0.002, 3400);
+      this.scheduleTone(now, this.stemLeadGain, freq, 0.045, 'square', 0.068, 0.002, 3200, 0, undefined, pan);
+      this.scheduleTone(now + 0.028, this.stemLeadGain, freq * 1.25, 0.055, 'square', 0.052, 0.002, 3400, 0, undefined, pan);
     } else if (profile.family === 'wood_marimba') {
-      this.scheduleTone(now, this.stemLeadGain, freq, 0.11, 'triangle', 0.115, 0.002, 2600);
-      this.scheduleTone(now, this.stemLeadGain, freq * 2, 0.045, 'sine', 0.04, 0.001, 4200);
+      this.scheduleTone(now, this.stemLeadGain, freq, 0.11, 'triangle', 0.115, 0.002, 2600, 0, undefined, pan);
+      this.scheduleTone(now, this.stemLeadGain, freq * 2, 0.045, 'sine', 0.04, 0.001, 4200, 0, undefined, pan);
     } else if (profile.family === 'jazz_fender') {
-      this.scheduleTone(now, this.stemLeadGain, freq, 0.13, 'sine', 0.105, 0.003, 2800);
-      this.scheduleTone(now, this.stemLeadGain, freq * 3, 0.035, 'sine', 0.03, 0.002, 4600);
+      this.scheduleTone(now, this.stemLeadGain, freq, 0.13, 'sine', 0.105, 0.003, 2800, 0, undefined, pan);
+      this.scheduleTone(now, this.stemLeadGain, freq * 3, 0.035, 'sine', 0.03, 0.002, 4600, 0, undefined, pan);
     } else if (profile.family === 'cathedral_glass') {
-      this.scheduleTone(now, this.stemLeadGain, freq, 0.16, 'sine', 0.095, 0.008, 4200);
-      this.scheduleTone(now + 0.014, this.stemLeadGain, freq * 1.5, 0.14, 'triangle', 0.042, 0.008, 4400);
+      this.scheduleTone(now, this.stemLeadGain, freq, 0.16, 'sine', 0.095, 0.008, 4200, 0, undefined, pan);
+      this.scheduleTone(now + 0.014, this.stemLeadGain, freq * 1.5, 0.14, 'triangle', 0.042, 0.008, 4400, 0, undefined, pan);
     } else if (profile.family === 'rock_crunch') {
-      this.scheduleTone(now, this.stemLeadGain, freq, 0.09, 'sawtooth', 0.082, 0.002, 2900, profile.drive);
-      this.scheduleTone(now, this.stemLeadGain, freq * 1.5, 0.08, 'sawtooth', 0.052, 0.002, 2700, profile.drive * 0.7);
+      this.scheduleTone(now, this.stemLeadGain, freq, 0.09, 'sawtooth', 0.082, 0.002, 2900, profile.drive, undefined, pan);
+      this.scheduleTone(now, this.stemLeadGain, freq * 1.5, 0.08, 'sawtooth', 0.052, 0.002, 2700, profile.drive * 0.7, undefined, pan);
     } else {
       this.scheduleTone(
         now,
@@ -1961,12 +2095,14 @@ export class IluminadoAudioEngine {
         0.105,
         0.003,
         profile.brightnessHz,
-        profile.drive * 0.5
+        profile.drive * 0.5,
+        undefined,
+        pan
       );
     }
   }
 
-  public playLand(skin?: SkinConfig, effectiveBpm?: number, beatPos?: number): void {
+  public playLand(skin?: SkinConfig, effectiveBpm?: number, beatPos?: number, pan = 0): void {
     this.triggerHaptic(8);
     if (!this.canSchedule() || !this.ctx) return;
     const when = this.getScheduledSfxTime(effectiveBpm ?? skin?.bpm, beatPos);
@@ -1975,17 +2111,17 @@ export class IluminadoAudioEngine {
     const subGain = skin?.music.subBassGain ?? 0.5;
 
     if (profile.family === 'wood_marimba') {
-      this.scheduleTone(when, this.stemPercGain, midiToFreq(root + 5), 0.045, 'triangle', 0.068, 0.002, 1600, 0, midiToFreq(root - 2));
-      this.scheduleTone(when, this.stemPercGain, midiToFreq(root - 12) * 1.4, 0.13, 'sine', 0.14, 0.003, 720, 0, midiToFreq(root - 24));
+      this.scheduleTone(when, this.stemPercGain, midiToFreq(root + 5), 0.045, 'triangle', 0.068, 0.002, 1600, 0, midiToFreq(root - 2), pan);
+      this.scheduleTone(when, this.stemPercGain, midiToFreq(root - 12) * 1.4, 0.13, 'sine', 0.14, 0.003, 720, 0, midiToFreq(root - 24), pan);
     } else if (profile.family === 'chip_minimal') {
-      this.scheduleTone(when, this.stemPercGain, midiToFreq(root + 7), 0.036, 'square', 0.048, 0.002, 1800, 0, midiToFreq(root - 12));
-      this.scheduleTone(when, this.stemPercGain, midiToFreq(root - 12), 0.09, 'triangle', 0.12, 0.002, 900);
+      this.scheduleTone(when, this.stemPercGain, midiToFreq(root + 7), 0.036, 'square', 0.048, 0.002, 1800, 0, midiToFreq(root - 12), pan);
+      this.scheduleTone(when, this.stemPercGain, midiToFreq(root - 12), 0.09, 'triangle', 0.12, 0.002, 900, 0, undefined, pan);
     } else if (profile.family === 'cathedral_glass') {
-      this.scheduleTone(when, this.stemPercGain, midiToFreq(root), 0.09, 'sine', 0.075, 0.004, 1500);
-      this.scheduleTone(when, this.stemPercGain, midiToFreq(root - 12), 0.14, 'sine', 0.115, 0.006, 620);
+      this.scheduleTone(when, this.stemPercGain, midiToFreq(root), 0.09, 'sine', 0.075, 0.004, 1500, 0, undefined, pan);
+      this.scheduleTone(when, this.stemPercGain, midiToFreq(root - 12), 0.14, 'sine', 0.115, 0.006, 620, 0, undefined, pan);
     } else if (profile.family === 'rock_crunch') {
-      this.scheduleNoise(when, this.stemPercGain, 0.02, 'bandpass', 2600, 1.8, 0.065);
-      this.scheduleTone(when, this.stemPercGain, midiToFreq(root - 12) * 1.5, 0.11, 'triangle', 0.145, 0.002, 820, 0.22, midiToFreq(root - 24));
+      this.scheduleNoise(when, this.stemPercGain, 0.02, 'bandpass', 2600, 1.8, 0.065, pan);
+      this.scheduleTone(when, this.stemPercGain, midiToFreq(root - 12) * 1.5, 0.11, 'triangle', 0.145, 0.002, 820, 0.22, midiToFreq(root - 24), pan);
     } else {
       this.scheduleTone(
         when,
@@ -1997,7 +2133,8 @@ export class IluminadoAudioEngine {
         0.002,
         1400,
         0,
-        midiToFreq(root - 5)
+        midiToFreq(root - 5),
+        pan
       );
       this.scheduleTone(
         when,
@@ -2009,7 +2146,8 @@ export class IluminadoAudioEngine {
         0.003,
         680,
         profile.drive * 0.4,
-        midiToFreq(root - 24)
+        midiToFreq(root - 24),
+        pan
       );
     }
     if (subGain >= 0.78) {
@@ -2023,7 +2161,8 @@ export class IluminadoAudioEngine {
         0.004,
         240,
         0,
-        38
+        38,
+        pan * 0.3
       );
     }
   }
@@ -2085,6 +2224,7 @@ export class IluminadoAudioEngine {
     const root = skin.music.rootMidi + 12;
     const scale = skin.music.scale.length >= 4 ? skin.music.scale : [0, 2, 4, 7, 9];
     const profile = this.getSkinSfxProfile(skin);
+    const spread = [-0.34, 0.34, -0.2, 0.2, -0.1, 0.1];
 
     const intervals =
       kind === 'all_deleted'
@@ -2102,10 +2242,13 @@ export class IluminadoAudioEngine {
         kind === 'all_deleted' ? 0.115 : 0.095,
         0.006,
         5200,
-        profile.drive * 0.2
+        profile.drive * 0.2,
+        undefined,
+        spread[idx % spread.length]
       );
     });
     this.scheduleVocalPad(now + 0.03, root + 12, beatDurSec * 0.9, 0.12);
+    this.triggerMusicDuck(0.8, 0.18);
 
     if (this.musicFilter) {
       this.cancelAudioParamSafe(this.musicFilter.frequency, now);
@@ -2121,7 +2264,8 @@ export class IluminadoAudioEngine {
   public playSweepColumnNote(
     skin: SkinConfig,
     sweepSquareCount: number,
-    cellsCleared: number
+    cellsCleared: number,
+    pan = 0
   ): void {
     if (!this.canSchedule() || !this.ctx) return;
     const now = this.ctx.currentTime;
@@ -2142,7 +2286,9 @@ export class IluminadoAudioEngine {
       profile.family === 'chip_minimal' ? 0.068 : 0.088,
       profile.family === 'cathedral_glass' ? 0.01 : 0.004,
       profile.brightnessHz,
-      profile.drive * 0.25
+      profile.drive * 0.25,
+      undefined,
+      pan
     );
     if (cellsCleared >= 4 || profile.family === 'jazz_fender' || profile.family === 'cathedral_glass') {
       this.scheduleTone(
@@ -2153,7 +2299,10 @@ export class IluminadoAudioEngine {
         'sine',
         cellsCleared >= 4 ? 0.06 : 0.036,
         0.006,
-        4000
+        4000,
+        0,
+        undefined,
+        pan * 0.7
       );
     }
   }
@@ -2165,6 +2314,7 @@ export class IluminadoAudioEngine {
     const { music } = skin;
     const profile = this.getSkinSfxProfile(skin);
     const chord = music.chords[0] ?? [0, 4, 7];
+    const spread = [-0.28, 0.28, -0.14, 0.14];
     chord.slice(0, 4).forEach((semi, idx) => {
       this.scheduleTone(
         now + idx * 0.035,
@@ -2175,10 +2325,12 @@ export class IluminadoAudioEngine {
         profile.family === 'chip_minimal' ? 0.06 : 0.082,
         0.006,
         profile.brightnessHz,
-        profile.drive * 0.25
+        profile.drive * 0.25,
+        undefined,
+        spread[idx % spread.length]
       );
     });
-    if (this.musicFilter) {
+    if (this.musicFilter && now >= this.transitionBloomUntilCtxTime) {
       this.cancelAudioParamSafe(this.musicFilter.frequency, now);
       this.musicFilter.Q.setTargetAtTime(0.72, now, 0.03);
       this.musicFilter.frequency.setTargetAtTime(17500, now, 0.035);
@@ -2195,6 +2347,7 @@ export class IluminadoAudioEngine {
     const { music } = skin;
     const profile = this.getSkinSfxProfile(skin);
     const intervals = [0, 7, 12, 19];
+    const spread = [-0.26, 0.26, -0.14, 0.14];
     intervals.forEach((semi, i) => {
       const t = now + i * 0.04;
       this.scheduleTone(
@@ -2205,7 +2358,10 @@ export class IluminadoAudioEngine {
         profile.family === 'chip_minimal' ? 'square' : 'triangle',
         profile.family === 'chip_minimal' ? 0.055 : 0.072,
         0.008,
-        profile.brightnessHz
+        profile.brightnessHz,
+        0,
+        undefined,
+        spread[i % spread.length]
       );
     });
     this.triggerHaptic([10, 14]);
@@ -2220,6 +2376,7 @@ export class IluminadoAudioEngine {
     const scale = music.scale;
     const stepCount = squares >= 4 ? 5 : 3;
     const bonusOffset = Math.min(comboLevel, 3);
+    const spread = [-0.32, 0.32, -0.18, 0.18, 0];
 
     for (let idx = 0; idx < stepCount; idx++) {
       const interval = scale[(idx + bonusOffset) % scale.length];
@@ -2233,15 +2390,20 @@ export class IluminadoAudioEngine {
         profile.family === 'chip_minimal' ? 0.088 : 0.12,
         0.005,
         profile.brightnessHz,
-        profile.drive * 0.35
+        profile.drive * 0.35,
+        undefined,
+        spread[idx % spread.length]
       );
       if (idx === stepCount - 1) {
         this.scheduleVocalPad(t, root + interval, 0.44, 0.12);
       }
     }
-    if (squares >= 2 && this.musicFilter) {
+    if (squares >= 3) {
+      this.triggerMusicDuck(0.84, 0.14);
+    }
+    if (squares >= 2 && this.musicFilter && now >= this.transitionBloomUntilCtxTime) {
       this.musicFilter.frequency.setTargetAtTime(
-        Math.min(19500, 11000 + squares * 1400),
+        Math.min(19500, 12800 + squares * 1400),
         now,
         0.06
       );
@@ -2256,9 +2418,11 @@ export class IluminadoAudioEngine {
     const profile = this.getSkinSfxProfile(skin);
     const chord = skin.music.chords[1] ?? skin.music.chords[0] ?? [0, 4, 7, 11];
     const chainIntervals = [0, chord[1] ?? 4, chord[2] ?? 7, chord[3] ?? 11, 14];
+    const spread = [-0.3, 0.3, -0.18, 0.18, 0];
     chainIntervals.forEach((semi, i) => {
       const t = now + i * 0.036;
-      this.scheduleVocalPad(t, root + semi, 0.36, 0.105);
+      const notePan = spread[i % spread.length];
+      this.scheduleVocalPad(t, root + semi, 0.36, 0.105, notePan * 0.7);
       this.scheduleTone(
         t,
         this.stemLeadGain,
@@ -2267,9 +2431,13 @@ export class IluminadoAudioEngine {
         profile.leadWave,
         profile.family === 'chip_minimal' ? 0.05 : 0.065,
         0.008,
-        profile.brightnessHz
+        profile.brightnessHz,
+        0,
+        undefined,
+        notePan
       );
     });
+    this.triggerMusicDuck(0.85, 0.14);
     this.triggerHaptic([12, 18, 24]);
   }
 
@@ -2285,6 +2453,7 @@ export class IluminadoAudioEngine {
       root + (scale[3] ?? 7),
       root + 12,
     ];
+    const spread = [-0.34, 0.34, -0.18, 0.18];
     shimmerNotes.forEach((midi, i) => {
       const t = now + i * 0.095;
       this.scheduleTone(
@@ -2295,25 +2464,36 @@ export class IluminadoAudioEngine {
         'triangle',
         0.055,
         0.025,
-        4200
+        4200,
+        0,
+        undefined,
+        spread[i % spread.length]
       );
     });
-    this.scheduleVocalPad(now + 0.06, root, 1.45, 0.048);
-    this.scheduleVocalPad(now + 0.24, root + 7, 1.45, 0.042);
+    this.scheduleVocalPad(now + 0.06, root, 1.45, 0.048, -0.2);
+    this.scheduleVocalPad(now + 0.24, root + 7, 1.45, 0.042, 0.2);
 
-    if (this.musicFilter) {
+    if (this.musicFilter && !this.activeBufferNode) {
       this.cancelAudioParamSafe(this.musicFilter.frequency, now);
       this.musicFilter.Q.setTargetAtTime(0.72, now, 0.04);
       this.musicFilter.frequency.setTargetAtTime(1400, now, 0.03);
-      this.musicFilter.frequency.setTargetAtTime(14500, now + 0.05, 0.28);
+      this.musicFilter.frequency.setTargetAtTime(15500, now + 0.05, 0.28);
       this.transitionBloomUntilCtxTime = now + 0.85;
     }
   }
 
-  public playGameOver(): void {
+  public playGameOver(skin?: SkinConfig): void {
     if (!this.canSchedule() || !this.ctx) return;
     const now = this.ctx.currentTime;
-    [60, 57, 53, 48].forEach((midi, i) => {
+    const root = skin?.music.rootMidi ?? 60;
+    const scale = skin?.music.scale?.length ? skin.music.scale : [0, 2, 4, 7, 9];
+    const cadence = [
+      root,
+      root - 12 + (scale[Math.min(4, scale.length - 1)] ?? 7),
+      root - 12 + (scale[Math.min(2, scale.length - 1)] ?? 4),
+      root - 12,
+    ];
+    cadence.forEach((midi, i) => {
       this.scheduleTone(
         now + i * 0.095,
         this.stemLeadGain,

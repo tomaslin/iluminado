@@ -34,7 +34,7 @@ Five `1280 × 720 px` lossless PNGs captured directly from live game builds—id
 | **2** | `02-tetromino-shift.png` | *Gouache Meadow* — `Tetrominoes` Shift active (`I/T/L` shapes mid-sweep) |
 | **3** | `03-split-canyon-shift.png` | *Aquarelle Choir* — `Split Canyon` impassable stone chasm dividing the courtyard |
 | **4** | `04-splitscreen-versus.png` | *Webline Rooftops* — Competitive split-screen *VS CPU* / *2P Battle* duel |
-| **5** | `05-52-shifts-codex.png` | *Mesa Twilight* — *Board Shift Rules* codex showing all 52 Shifts |
+| **5** | `05-72-shifts-codex.png` | *Mesa Twilight* — *Board Shift Rules* codex showing all 72 Shifts |
 
 ---
 

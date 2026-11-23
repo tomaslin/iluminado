@@ -54,7 +54,9 @@ import { computeCpuBestMove, checkPuzzlePatternMatch, PUZZLE_LEVELS } from './mo
 import {
   IluminadoAudioEngine,
   MAX_DECODED_BUFFER_CACHE,
+  buildEqualPowerFadeCurve,
   computeBeatFromBufferPosition,
+  computeBoardStereoPan,
   computeQuantizedSfxDelaySec,
   computeStemLevels,
   getTrackTrimGain,
@@ -3008,6 +3010,26 @@ test('stepPassiveGravity honors custom lockDelaySec and records activeLockDelayS
   assert.equal(tick2.landed, true);
 });
 
+test('buildEqualPowerFadeCurve, computeBoardStereoPan, and key-matched playGameOver behave accurately', () => {
+  const fadeIn = buildEqualPowerFadeCurve('in', 0.8, 33);
+  const fadeOut = buildEqualPowerFadeCurve('out', 0.8, 33);
+  assert.equal(fadeIn.length, 33);
+  assert.equal(fadeOut.length, 33);
+  assert.ok(fadeIn[0] <= 0.001 && Math.abs(fadeIn[32] - 0.8) < 1e-5);
+  assert.ok(Math.abs(fadeOut[0] - 0.8) < 1e-5 && fadeOut[32] <= 0.001);
+  // Equal-power midpoint preserves combined energy (sin^2(pi/4) + cos^2(pi/4) == 1)
+  const midEnergy = fadeIn[16] * fadeIn[16] + fadeOut[16] * fadeOut[16];
+  assert.ok(Math.abs(midEnergy - 0.64) < 0.01, `Equal-power midpoint energy ${midEnergy} should approximate 0.64`);
 
+  // Board stereo pan spans [-maxPan, +maxPan] symmetrically
+  assert.ok(Math.abs(computeBoardStereoPan(0, 16, 0.48) - -0.48) < 1e-6);
+  assert.ok(Math.abs(computeBoardStereoPan(15, 16, 0.48) - 0.48) < 1e-6);
+  assert.ok(Math.abs(computeBoardStereoPan(7.5, 16, 0.48)) < 1e-6);
+  assert.equal(computeBoardStereoPan(2, 1, 0.48), 0);
 
-
+  // playGameOver safely accepts a SkinConfig or undefined even without Web Audio in Node
+  const engine = new IluminadoAudioEngine();
+  assert.doesNotThrow(() => engine.playGameOver(SKINS[0]));
+  assert.doesNotThrow(() => engine.playGameOver());
+  engine.dispose();
+});

@@ -11,7 +11,7 @@ In **Dashboard -> Edit Game**:
 | Setting | Recommended Value | Why |
 | :--- | :--- | :--- |
 | **Title** | `Iluminado` | Clean primary title |
-| **Short description / Tagline** | `Drop on the beat. Align 2×2 squares. Outlast 52 rule-bending shifts across 50 genre-fusion worlds.` | Concise hook under 140 chars |
+| **Short description / Tagline** | `Drop on the beat. Align 2×2 squares. Outlast 72 rule-bending shifts across 50 genre-fusion worlds.` | Concise hook under 140 chars |
 | **Classification** | `Games` | Standard game listing |
 | **Kind of project** | `HTML` (Play in browser) | Enables in-browser iframe player |
 | **Primary Genre** | `Puzzle` | Core discoverability |
@@ -46,7 +46,7 @@ Alongside the full gameplay video (**https://youtu.be/BUGGmayKcXU**), the `itch/
    * `02-tetromino-shift.png` — *Tetrominoes* brick mutation in *Gouache Meadow*
    * `03-split-canyon-shift.png` — *Split Canyon* chasm divider in *Aquarelle Choir*
    * `04-splitscreen-versus.png` — Head-to-head *VS CPU* split-screen duel in *Webline Rooftops*
-   * `05-52-shifts-codex.png` — *Board Shift Rules* codex showcasing all 52 Shifts
+   * `05-72-shifts-codex.png` — *Board Shift Rules* codex showcasing all 72 Shifts
 4. **3 Description GIF Clips (`itch/media/clips/`, `600 × 338 px`, 1.7–2.2 MB each)**:
    * `clip-01-beat-sweep-combo.gif` — Beat-locked 2×2 sweep clear
    * `clip-02-tetromino-shift.gif` — Tetromino pieces rotating into place

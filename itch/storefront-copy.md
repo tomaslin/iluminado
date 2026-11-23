@@ -9,7 +9,7 @@ Paste the metadata fields and formatted HTML/Markdown description below directly
 | Field | Value |
 | :--- | :--- |
 | **Title** | `Iluminado` |
-| **Short description / Tagline** | `Drop on the beat. Align 2×2 squares. Outlast 52 rule-bending shifts across 50 genre-fusion worlds.` |
+| **Short description / Tagline** | `Drop on the beat. Align 2×2 squares. Outlast 72 rule-bending shifts across 50 genre-fusion worlds.` |
 | **Classification** | `Games` |
 | **Kind of project** | `HTML` (Play in browser) |
 | **Embed size** | `1280 × 720` (Desktop 16:9) · Also responds cleanly in mobile Portrait (`10×14`) |
@@ -26,7 +26,7 @@ Paste the metadata fields and formatted HTML/Markdown description below directly
 | **Video URL / Trailer** | `https://youtu.be/BUGGmayKcXU` | Auto-docks first in the itch carousel |
 | **Cover Image** | `itch/media/cover.png` | `1260 × 1000 px` (exact 1.26:1 ratio) |
 | **Theme -> Header Banner** | `itch/media/header-banner.png` | `1200 × 360 px` panoramic banner |
-| **Screenshots (5 recommended)** | `itch/media/screenshots/01-core-rhythm-flow.png`<br>`itch/media/screenshots/02-tetromino-shift.png`<br>`itch/media/screenshots/03-split-canyon-shift.png`<br>`itch/media/screenshots/04-splitscreen-versus.png`<br>`itch/media/screenshots/05-52-shifts-codex.png` | `1280 × 720 px` lossless PNG |
+| **Screenshots (5 recommended)** | `itch/media/screenshots/01-core-rhythm-flow.png`<br>`itch/media/screenshots/02-tetromino-shift.png`<br>`itch/media/screenshots/03-split-canyon-shift.png`<br>`itch/media/screenshots/04-splitscreen-versus.png`<br>`itch/media/screenshots/05-72-shifts-codex.png` | `1280 × 720 px` lossless PNG |
 | **Description Body GIFs (3 recommended)** | `itch/media/clips/clip-01-beat-sweep-combo.gif`<br>`itch/media/clips/clip-02-tetromino-shift.gif`<br>`itch/media/clips/clip-03-slab-bricks-shift.gif` | `600 × 338 px` looping GIF (`1.7–2.2 MB`, under itch's 3MB limit) |
 
 ---
@@ -57,9 +57,9 @@ Paste the metadata fields and formatted HTML/Markdown description below directly
   <img src="media/clips/clip-01-beat-sweep-combo.gif" alt="2x2 squares clearing across the beat-locked timeline sweep in Alabaster Courtyard" />
 </p>
 
-<h2>52 Shifts That Rewrite the Game</h2>
+<h2>72 Shifts That Rewrite the Game</h2>
 <p>
-  No two runs stay polite for long. Every level triggers a curated rule mutation from a catalog of <strong>52 playable Shifts</strong>—or open the <strong>Board Shift Rules</strong> codex before starting to customize your favorite mix.
+  No two runs stay polite for long. Every level triggers a curated rule mutation from a catalog of <strong>72 playable Shifts</strong>—or open the <strong>Board Shift Rules</strong> codex before starting to customize your favorite mix.
 </p>
 
 <div class="ilu-grid-2">

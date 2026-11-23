@@ -4,7 +4,11 @@ import { GameModals } from './components/GameModals';
 import { OfflineIndicator } from './components/OfflineIndicator';
 import { ShiftSettingsModal } from './components/ShiftSettingsModal';
 import { TitleScreen } from './components/TitleScreen';
-import { IluminadoAudioEngine, computeStemLevels } from './game/audio';
+import {
+  IluminadoAudioEngine,
+  computeBoardStereoPan,
+  computeStemLevels,
+} from './game/audio';
 import { IluminadoCanvasRenderer } from './game/canvasRenderer';
 import {
   createSeededRng,
@@ -610,7 +614,7 @@ export default function App() {
       if (isVictory) {
         audioRef.current.playSkinTransition(getSkinByIndex(sim.skinIndex));
       } else {
-        audioRef.current.playGameOver();
+        audioRef.current.playGameOver(getSkinByIndex(sim.skinIndex));
       }
       audioRef.current.syncWorldMusic(getSkinByIndex(sim.skinIndex), 'gameover');
 
@@ -1079,34 +1083,6 @@ export default function App() {
     [buildHudSnapshot, dailySpec.skinIndex]
   );
 
-  const stepPreviewSkin = useCallback(
-    (delta: -1 | 1) => {
-      audioRef.current.unlock();
-      const sim = simRef.current;
-      const total = SKINS.length;
-      const nextIdx = (((sim.skinIndex + delta) % total) + total) % total;
-      setPreviewSkinIdx(nextIdx);
-      if (sim.status === 'title') {
-        sim.prevSkinIndex = sim.skinIndex;
-        sim.skinIndex = nextIdx;
-        sim.transitionAlpha = 0;
-        const nextSkin = getSkinByIndex(nextIdx);
-        audioRef.current.resetStepTrack();
-        audioRef.current.syncWorldMusic(nextSkin, 'title');
-        audioRef.current.preloadTrack(
-          getSkinByIndex((nextIdx + delta + total) % total).music.audioTrackUrl
-        );
-        setHud(buildHudSnapshot(sim));
-      }
-    },
-    [buildHudSnapshot]
-  );
-
-  const getTitleSpectrumSnapshot = useCallback(
-    () => audioRef.current.getSpectrumSnapshot(),
-    []
-  );
-
   const emitLandingFeedback = useCallback(
     (
       sim: SimState,
@@ -1153,7 +1129,8 @@ export default function App() {
         );
       }
       rendererRef.current.triggerLandRipple(boardIdx, landCol, landRow);
-      audioRef.current.playLand(skin, effectiveBpm, sim.beatAccum);
+      const landPan = computeBoardStereoPan(landCol, targetBoard.cols || BOARD_COLS);
+      audioRef.current.playLand(skin, effectiveBpm, sim.beatAccum, landPan);
       const met = applyMetronomeChargeBonus(
         targetBoard,
         ((sim.beatAccum % 1) + 1) % 1
@@ -1200,20 +1177,37 @@ export default function App() {
       const chainFreq = sim.mode === 'puzzle' ? 0 : skin.chainFrequency;
       const boardIdx: 0 | 1 = player === 1 ? 0 : 1;
 
+      const activeCenterCol = (): number =>
+        targetBoard.activePiece
+          ? targetBoard.activePiece.x + (targetBoard.activePiece.cells[0]?.length ?? 2) * 0.5 - 0.5
+          : (targetBoard.cols || BOARD_COLS) * 0.5;
+      const activeCols = targetBoard.cols || BOARD_COLS;
+
       if (action === 'left') {
         if (steerPiece(targetBoard, -1)) {
-          audioRef.current.playMove(skin);
+          audioRef.current.playMove(
+            skin,
+            undefined,
+            computeBoardStereoPan(activeCenterCol(), activeCols)
+          );
           if (player === 1) rendererRef.current.triggerMoveShift(-1);
         }
       } else if (action === 'right') {
         if (steerPiece(targetBoard, 1)) {
-          audioRef.current.playMove(skin);
+          audioRef.current.playMove(
+            skin,
+            undefined,
+            computeBoardStereoPan(activeCenterCol(), activeCols)
+          );
           if (player === 1) rendererRef.current.triggerMoveShift(1);
         }
       } else if (action === 'rotate' || action === 'rotate_ccw') {
         const rotDir = action === 'rotate_ccw' ? 'ccw' : 'cw';
         if (rotateActivePiece(targetBoard, rotDir)) {
-          audioRef.current.playRotate(skin);
+          audioRef.current.playRotate(
+            skin,
+            computeBoardStereoPan(activeCenterCol(), activeCols)
+          );
           rendererRef.current.triggerPieceRotateTween(boardIdx, rotDir);
         }
       } else if (action === 'hold') {
@@ -1222,7 +1216,10 @@ export default function App() {
             ? sim.dailyRng
             : Math.random;
         if (swapHeldPiece(targetBoard, chainFreq, pieceRng)) {
-          audioRef.current.playRotate(skin);
+          audioRef.current.playRotate(
+            skin,
+            computeBoardStereoPan(activeCenterCol(), activeCols)
+          );
           setHud(buildHudSnapshot(sim));
         }
       } else if (action === 'hard_drop') {
@@ -1241,7 +1238,10 @@ export default function App() {
           zenNoLoss: isZen && player === 1,
         });
         if (res.bouncePositions?.length) {
-          audioRef.current.playRotate(skin);
+          audioRef.current.playRotate(
+            skin,
+            computeBoardStereoPan(res.bouncePositions[0]?.x ?? preX, activeCols)
+          );
           for (const pt of res.bouncePositions) {
             rendererRef.current.spawnSpringBounce(boardIdx, pt.x, pt.y, skin);
           }
@@ -1807,7 +1807,8 @@ export default function App() {
                 audioRef.current.playSweepColumnNote(
                   skin,
                   sim.board.sweepState.squaresThisSweep,
-                  r1.cellsRemovedNow
+                  r1.cellsRemovedNow,
+                  computeBoardStereoPan(sweepCol, liveCols)
                 );
                 if (activeMission?.type === 'chain_cells') {
                   sim.missionChainCleared += Math.max(
@@ -2286,10 +2287,12 @@ export default function App() {
               const r1 = stepLighthouseSweep(sim.board, fromA, toA, cf);
               if (r1.cellsRemovedNow > 0) {
                 sim.hadClearsThisSweep = true;
+                const lhCol = (1 - ((fromA + toA) * 0.5) / Math.PI) * Math.max(1, liveCols - 1);
                 audioRef.current.playSweepColumnNote(
                   skin,
                   sim.board.sweepState.squaresThisSweep,
-                  r1.cellsRemovedNow
+                  r1.cellsRemovedNow,
+                  computeBoardStereoPan(lhCol, liveCols)
                 );
                 const activeMission =
                   sim.mode === 'mission'
@@ -2374,7 +2377,14 @@ export default function App() {
             const p1Dir: -1 | 0 | 1 =
               p1LeftHeld && !p1RightHeld ? -1 : p1RightHeld && !p1LeftHeld ? 1 : 0;
             stepDasControl(p1DasRef.current, p1Dir, dt, sim.board, (moveDir) => {
-              audioRef.current.playMove(skin);
+              const centerCol = sim.board?.activePiece
+                ? sim.board.activePiece.x + (sim.board.activePiece.cells[0]?.length ?? 2) * 0.5 - 0.5
+                : liveCols * 0.5;
+              audioRef.current.playMove(
+                skin,
+                undefined,
+                computeBoardStereoPan(centerCol, liveCols)
+              );
               rendererRef.current.triggerMoveShift(moveDir);
             });
 
@@ -2394,7 +2404,10 @@ export default function App() {
                 { zenNoLoss: isZen, lockDelaySec: levelPacing.lockDelaySec }
               );
               if (res.bouncePositions?.length) {
-                audioRef.current.playRotate(skin);
+                audioRef.current.playRotate(
+                  skin,
+                  computeBoardStereoPan(res.bouncePositions[0]?.x ?? preX, liveCols)
+                );
                 for (const pt of res.bouncePositions) {
                   rendererRef.current.spawnSpringBounce(0, pt.x, pt.y, skin);
                 }
@@ -2632,8 +2645,6 @@ export default function App() {
           onChangeMusicVolume={handleChangeMusicVolume}
           onChangeSfxVolume={handleChangeSfxVolume}
           previewSkin={getSkinByIndex(previewSkinIdx)}
-          onStepPreviewSkin={stepPreviewSkin}
-          getSpectrumSnapshot={getTitleSpectrumSnapshot}
           dailySpec={dailySpec}
           onStart={() => startNewGame()}
           onOpenShiftSettings={() => setIsShiftSettingsOpen(true)}

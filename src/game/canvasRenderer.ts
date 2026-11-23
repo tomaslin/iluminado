@@ -5027,7 +5027,7 @@ export class IluminadoCanvasRenderer {
         this.roundRect(ctx, x + 2, y - 28, 28, 15, 4);
         ctx.fill();
         ctx.fillStyle = '#faf6ee';
-        ctx.font = '700 9.5px "JetBrains Mono", monospace';
+        ctx.font = '700 9.5px "Plus Jakarta Sans", sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillText(rateBadge, x + 16, y - 20.5);
@@ -5065,7 +5065,7 @@ export class IluminadoCanvasRenderer {
               ? '#faf7f2'
               : fallbackMeasureInk;
             ctx.globalAlpha = isCurrMeasure ? 0.92 : 0.56;
-            ctx.font = '600 9.5px "JetBrains Mono", monospace';
+            ctx.font = '600 9.5px "Plus Jakarta Sans", sans-serif';
             ctx.textAlign = 'center';
             ctx.fillText(`${measureNum}`, dx, y - 22);
           }
@@ -5372,7 +5372,7 @@ export class IluminadoCanvasRenderer {
       ctx.lineWidth = 1;
       ctx.stroke();
       ctx.fillStyle = '#faf6ee';
-      ctx.font = '700 9.5px "JetBrains Mono", monospace';
+      ctx.font = '700 9.5px "Plus Jakarta Sans", sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(`SHUTTER ${lockRows}/3`, x + 40, badgeY + 8.5);
@@ -5402,7 +5402,7 @@ export class IluminadoCanvasRenderer {
       ctx.fillStyle = sunMoonStyle.fill;
       this.fillCircle(ctx, x + 13, badgeY + 8, 4);
       ctx.fillStyle = '#faf6ee';
-      ctx.font = '700 9px "JetBrains Mono", monospace';
+      ctx.font = '700 9px "Plus Jakarta Sans", sans-serif';
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
       ctx.fillText(sunMoonActiveColor === 0 ? 'SUN' : 'MOON', x + 22, badgeY + 8.5);
@@ -5423,7 +5423,7 @@ export class IluminadoCanvasRenderer {
         ctx.fillStyle = swatch;
         this.fillCircle(ctx, cx - 11, badgeY + 7.5, 3.6);
         ctx.fillStyle = '#faf6ee';
-        ctx.font = '700 8.5px "JetBrains Mono", monospace';
+        ctx.font = '700 8.5px "Plus Jakarta Sans", sans-serif';
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
         ctx.fillText(txt, cx - 3, badgeY + 8);
@@ -5443,7 +5443,7 @@ export class IluminadoCanvasRenderer {
       ctx.fillStyle = lighthouseStyle.fill;
       this.fillCircle(ctx, x + 13, badgeY + 8, 4);
       ctx.fillStyle = '#faf6ee';
-      ctx.font = '700 9px "JetBrains Mono", monospace';
+      ctx.font = '700 9px "Plus Jakarta Sans", sans-serif';
       ctx.textAlign = 'left';
       ctx.textBaseline = 'middle';
       ctx.fillText('BEAM CLR', x + 22, badgeY + 8.5);
@@ -5466,7 +5466,7 @@ export class IluminadoCanvasRenderer {
       this.roundRect(ctx, bx - 13, by - 10, 26, 20, 6);
       ctx.fill();
       ctx.fillStyle = '#faf6ee';
-      ctx.font = '700 12px "JetBrains Mono", monospace';
+      ctx.font = '700 12px "Plus Jakarta Sans", sans-serif';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.fillText(badgeText, bx, by + 0.5);
@@ -7892,7 +7892,7 @@ export class IluminadoCanvasRenderer {
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
 
-      ctx.font = '700 20px "Fraunces", Georgia, serif';
+      ctx.font = '700 20px "Plus Jakarta Sans", sans-serif';
       const titleW = ctx.measureText(pop.text).width;
       let subW = 0;
       if (pop.subtext) {
@@ -7912,7 +7912,7 @@ export class IluminadoCanvasRenderer {
       ctx.stroke();
 
       ctx.fillStyle = pop.color;
-      ctx.font = '700 20px "Fraunces", Georgia, serif';
+      ctx.font = '700 20px "Plus Jakarta Sans", sans-serif';
       ctx.fillText(pop.text, 0, pop.subtext ? -5 : 0);
       if (pop.subtext) {
         ctx.fillStyle = isBrightText ? 'rgba(252, 248, 242, 0.94)' : 'rgba(24, 21, 34, 0.88)';
