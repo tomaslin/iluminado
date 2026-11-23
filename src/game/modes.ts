@@ -3,6 +3,7 @@ import {
   canPlacePiece,
   createEmptyGrid,
   detectBoardMarks,
+  getActiveWellRegion,
   getSpawnColForWidth,
   rotatePieceCellsCW,
   settleBoard,
@@ -324,9 +325,26 @@ function toSimCell(pCell: NonNullable<Piece['cells'][number][number]>): Cell {
 export function computeCpuBestMove(state: BoardState): CpuTargetPlan {
   const rows = state.grid.length;
   const cols = state.grid[0]?.length ?? state.cols ?? BOARD_COLS;
-  const dir = state.gravityDirection ?? 'down';
-  const centerX = getSpawnColForWidth(cols);
-  const centerY = Math.max(0, Math.floor((rows - 2) / 2));
+  const region = getActiveWellRegion(state);
+  const dir = region?.gravity ?? state.gravityDirection ?? 'down';
+  const minRowBound = region ? region.minRow : 0;
+  const maxRowBound = region ? region.maxRow : rows - 1;
+  const minColBound = region
+    ? Math.max(state.lockedColumnsLeft, region.minCol)
+    : state.lockedColumnsLeft;
+  const maxColBound = region
+    ? Math.min(cols - 1 - state.lockedColumnsRight, region.maxCol)
+    : cols - 1 - state.lockedColumnsRight;
+  const centerX = region
+    ? Math.floor((region.minCol + region.maxCol) / 2)
+    : getSpawnColForWidth(cols);
+  const centerY = region
+    ? Math.floor((region.minRow + region.maxRow) / 2)
+    : Math.max(0, Math.floor((rows - 2) / 2));
+  const splitSeamRow =
+    state.activeShift === 'clamshell' && state.wellRegions?.length
+      ? state.wellRegions[0].maxRow
+      : undefined;
   const piece = state.activePiece;
   if (!piece) return { targetX: centerX, targetY: centerY, targetRotations: 0 };
 
@@ -365,27 +383,30 @@ export function computeCpuBestMove(state: BoardState): CpuTargetPlan {
     overflowed: boolean,
     centerDist: number
   ): number => {
-    const squares = detectBoardMarks(simGrid);
+    const squares = detectBoardMarks(
+      simGrid,
+      splitSeamRow !== undefined ? { splitSeamRow } : undefined
+    );
     let maxDepth = 0;
     let chainCount = 0;
     let sameAdj = 0;
-    for (let r = 0; r < rows; r++) {
-      for (let c = 0; c < cols; c++) {
+    for (let r = minRowBound; r <= maxRowBound; r++) {
+      for (let c = minColBound; c <= maxColBound; c++) {
         const cell = simGrid[r][c];
         if (!cell || cell.isObstacle) continue;
         const depth =
           dir === 'down'
-            ? rows - r
+            ? maxRowBound - r + 1
             : dir === 'up'
-            ? r + 1
+            ? r - minRowBound + 1
             : dir === 'right'
-            ? cols - c
-            : c + 1;
+            ? maxColBound - c + 1
+            : c - minColBound + 1;
         if (depth > maxDepth) maxDepth = depth;
         if (cell.chainMarked) chainCount++;
-        const right = c + 1 < cols ? simGrid[r][c + 1] : null;
+        const right = c + 1 <= maxColBound ? simGrid[r][c + 1] : null;
         if (right && !right.isObstacle && right.color === cell.color) sameAdj++;
-        const down = r + 1 < rows ? simGrid[r + 1][c] : null;
+        const down = r + 1 <= maxRowBound ? simGrid[r + 1][c] : null;
         if (down && !down.isObstacle && down.color === cell.color) sameAdj++;
       }
     }
@@ -400,7 +421,6 @@ export function computeCpuBestMove(state: BoardState): CpuTargetPlan {
     );
   };
 
-  const minCol = state.lockedColumnsLeft;
   let testPiece: Piece = {
     ...piece,
     cells: piece.cells.map((row) =>
@@ -413,8 +433,8 @@ export function computeCpuBestMove(state: BoardState): CpuTargetPlan {
     const pieceCols = testPiece.cells[0]?.length ?? 2;
 
     if (dir === 'down' || dir === 'up') {
-      const maxCol = Math.max(minCol, cols - pieceCols - state.lockedColumnsRight);
-      for (let col = minCol; col <= maxCol; col++) {
+      const maxStartCol = Math.max(minColBound, maxColBound - pieceCols + 1);
+      for (let col = minColBound; col <= maxStartCol; col++) {
         const candidate: Piece = { ...testPiece, x: col, y: piece.y };
         if (!canPlacePiece(state, candidate, 0, 0)) continue;
 
@@ -423,7 +443,7 @@ export function computeCpuBestMove(state: BoardState): CpuTargetPlan {
 
         for (let px = 0; px < pieceCols; px++) {
           const gx = col + px;
-          if (gx < 0 || gx >= cols) continue;
+          if (gx < minColBound || gx > maxColBound || gx < 0 || gx >= cols) continue;
 
           if (dir === 'down') {
             let lowestPy = -1;
@@ -434,9 +454,9 @@ export function computeCpuBestMove(state: BoardState): CpuTargetPlan {
               }
             }
             if (lowestPy < 0) continue;
-            const startScan = Math.max(0, candidate.y + lowestPy);
-            let stopRow = rows;
-            for (let scan = startScan; scan < rows; scan++) {
+            const startScan = Math.max(minRowBound, candidate.y + lowestPy);
+            let stopRow = maxRowBound + 1;
+            for (let scan = startScan; scan <= maxRowBound; scan++) {
               if (simGrid[scan][gx] !== null) {
                 stopRow = scan;
                 break;
@@ -446,7 +466,7 @@ export function computeCpuBestMove(state: BoardState): CpuTargetPlan {
             for (let py = pieceRows - 1; py >= 0; py--) {
               const pCell = candidate.cells[py]?.[px];
               if (!pCell) continue;
-              if (writeRow < 0) {
+              if (writeRow < minRowBound) {
                 overflowed = true;
                 continue;
               }
@@ -463,9 +483,9 @@ export function computeCpuBestMove(state: BoardState): CpuTargetPlan {
               }
             }
             if (highestPy < 0) continue;
-            const startScan = Math.min(rows - 1, candidate.y + highestPy);
-            let stopRow = -1;
-            for (let scan = startScan; scan >= 0; scan--) {
+            const startScan = Math.min(maxRowBound, candidate.y + highestPy);
+            let stopRow = minRowBound - 1;
+            for (let scan = startScan; scan >= minRowBound; scan--) {
               if (simGrid[scan][gx] !== null) {
                 stopRow = scan;
                 break;
@@ -475,7 +495,7 @@ export function computeCpuBestMove(state: BoardState): CpuTargetPlan {
             for (let py = 0; py < pieceRows; py++) {
               const pCell = candidate.cells[py]?.[px];
               if (!pCell) continue;
-              if (writeRow >= rows) {
+              if (writeRow > maxRowBound) {
                 overflowed = true;
                 continue;
               }
@@ -495,8 +515,8 @@ export function computeCpuBestMove(state: BoardState): CpuTargetPlan {
         }
       }
     } else {
-      const maxRow = Math.max(0, rows - pieceRows);
-      for (let row = 0; row <= maxRow; row++) {
+      const maxStartRow = Math.max(minRowBound, maxRowBound - pieceRows + 1);
+      for (let row = minRowBound; row <= maxStartRow; row++) {
         const candidate: Piece = { ...testPiece, x: piece.x, y: row };
         if (!canPlacePiece(state, candidate, 0, 0)) continue;
 
@@ -505,7 +525,7 @@ export function computeCpuBestMove(state: BoardState): CpuTargetPlan {
 
         for (let py = 0; py < pieceRows; py++) {
           const gy = row + py;
-          if (gy < 0 || gy >= rows) continue;
+          if (gy < minRowBound || gy > maxRowBound || gy < 0 || gy >= rows) continue;
 
           if (dir === 'right') {
             let rightPx = -1;
@@ -516,9 +536,9 @@ export function computeCpuBestMove(state: BoardState): CpuTargetPlan {
               }
             }
             if (rightPx < 0) continue;
-            const startScan = Math.max(0, candidate.x + rightPx);
-            let stopCol = cols;
-            for (let scan = startScan; scan < cols; scan++) {
+            const startScan = Math.max(minColBound, candidate.x + rightPx);
+            let stopCol = maxColBound + 1;
+            for (let scan = startScan; scan <= maxColBound; scan++) {
               if (simGrid[gy][scan] !== null) {
                 stopCol = scan;
                 break;
@@ -528,7 +548,7 @@ export function computeCpuBestMove(state: BoardState): CpuTargetPlan {
             for (let px = pieceCols - 1; px >= 0; px--) {
               const pCell = candidate.cells[py]?.[px];
               if (!pCell) continue;
-              if (writeCol < 0) {
+              if (writeCol < minColBound) {
                 overflowed = true;
                 continue;
               }
@@ -545,9 +565,9 @@ export function computeCpuBestMove(state: BoardState): CpuTargetPlan {
               }
             }
             if (leftPx < 0) continue;
-            const startScan = Math.min(cols - 1, candidate.x + leftPx);
-            let stopCol = -1;
-            for (let scan = startScan; scan >= 0; scan--) {
+            const startScan = Math.min(maxColBound, candidate.x + leftPx);
+            let stopCol = minColBound - 1;
+            for (let scan = startScan; scan >= minColBound; scan--) {
               if (simGrid[gy][scan] !== null) {
                 stopCol = scan;
                 break;
@@ -557,7 +577,7 @@ export function computeCpuBestMove(state: BoardState): CpuTargetPlan {
             for (let px = 0; px < pieceCols; px++) {
               const pCell = candidate.cells[py]?.[px];
               if (!pCell) continue;
-              if (writeCol >= cols) {
+              if (writeCol > maxColBound) {
                 overflowed = true;
                 continue;
               }

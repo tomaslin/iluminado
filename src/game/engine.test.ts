@@ -13,6 +13,7 @@ import {
   advanceTimedStageProgression,
   applyMetronomeChargeBonus,
   calculateSweepScore,
+  canPlacePiece,
   computeBeamProximity,
   computeEncoreState,
   computeStageProgressMetrics,
@@ -24,7 +25,9 @@ import {
   finalizeSweep,
   flushPendingGarbage,
   generateRandomPiece,
+  getActiveWellRegion,
   getDiagonalSlantSpan,
+  getPieceInitialPos,
   getPieceLandingColumns,
   getSweepColumnForRow,
   hardDropPiece,
@@ -38,6 +41,8 @@ import {
   softDropStep,
   steerPiece,
   stepCeilingPressSweep,
+  stepKaleidoscopePiece,
+  stepLighthouseSweep,
   stepPassiveGravity,
   stepRisingTideSweep,
   stepTimelineColumn,
@@ -49,8 +54,8 @@ import {
   IluminadoAudioEngine,
   MAX_DECODED_BUFFER_CACHE,
   computeBeatFromBufferPosition,
-  computeMusicIntensity,
   computeQuantizedSfxDelaySec,
+  computeStemLevels,
   getTrackTrimGain,
   resolveLoopTiming,
 } from './audio';
@@ -81,6 +86,7 @@ import {
   NEW_V5_SHIFTS,
   NEW_V6_SHIFTS,
   NEW_V7_SHIFTS,
+  NEW_V8_SHIFTS,
   applyDailyResultToProgress,
   applyTimeAttackSplitsToProgress,
   getEffectiveDailyStreak,
@@ -104,6 +110,9 @@ import {
   pickStartShift,
   stepConveyorFloor,
   stepPatrollingBumper,
+  stepPistonWalls,
+  stepShellGameSwap,
+  stepWindmill,
 } from './shifts';
 import { Cell, CellColor, SavedProgress, ShiftType } from './types';
 
@@ -346,17 +355,18 @@ test('puzzle pattern detection recognizes framed archway silhouette', () => {
   assert.equal(checkPuzzlePatternMatch(state.grid, arch), true);
 });
 
-test('computeMusicIntensity dynamically scales single-track occupancy and tension with board state', () => {
-  const skin = SKINS[3];
-  const nullIntensity = computeMusicIntensity(null, skin);
-  assert.ok(nullIntensity.occupancy > 0.2);
-  assert.ok(nullIntensity.tension < 0.4);
-  assert.equal(nullIntensity.comboLevel, 0);
+test('computeStemLevels dynamically scales percussion, bass, lead, and vocal stems with board state', () => {
+  const skin = SKINS[3]; // Dark Zouk
+  const nullStems = computeStemLevels(null, skin);
+  assert.ok(nullStems.percussion > 0.7);
+  assert.ok(nullStems.vocal < 0.2);
 
   const emptyState = createInitialBoardState(0);
-  const baseIntensity = computeMusicIntensity(emptyState, skin);
-  assert.equal(baseIntensity.occupancy, 0);
-  assert.equal(baseIntensity.tension, 0.18);
+  const baseStems = computeStemLevels(emptyState, skin);
+  assert.equal(baseStems.percussion, 0.75);
+  assert.equal(baseStems.bass, 0.36);
+  assert.equal(baseStems.lead, 0.14);
+  assert.equal(baseStems.vocal, 0.06);
 
   // Add formed 2x2 squares + occupied cells + combo + stage progress
   for (let r = 6; r < 10; r++) {
@@ -369,10 +379,11 @@ test('computeMusicIntensity dynamically scales single-track occupancy and tensio
   emptyState.sweepState.squaresThisSweep = 3;
   emptyState.stageSquaresCleared = skin.squaresToAdvance;
 
-  const peakIntensity = computeMusicIntensity(emptyState, skin);
-  assert.ok(peakIntensity.occupancy > baseIntensity.occupancy);
-  assert.ok(peakIntensity.tension > 0.9);
-  assert.equal(peakIntensity.comboLevel, 2);
+  const peakStems = computeStemLevels(emptyState, skin);
+  assert.ok(peakStems.percussion > baseStems.percussion);
+  assert.ok(peakStems.bass > baseStems.bass);
+  assert.ok(peakStems.lead > 0.9);
+  assert.ok(peakStems.vocal > 0.85);
 });
 
 test('all 50 worlds define valid music configs covering all requested genres', () => {
@@ -1446,9 +1457,9 @@ test('Dramatic swaps (inside_out_swap, horizon_shear, zipper_merge) preserve exa
   }
 });
 
-test('All 52 shift types execute cleanly without crashing or causing premature game over', () => {
+test('All 72 shift types execute cleanly without crashing or causing premature game over', () => {
   const rng = createSeededRng('all-shifts-smoke');
-  assert.equal(ALL_SHIFT_TYPES.length, 52);
+  assert.equal(ALL_SHIFT_TYPES.length, 72);
   for (const shiftType of ALL_SHIFT_TYPES) {
     const state = createInitialBoardState(0);
     for (let c = 3; c < state.cols - 3; c++) {
@@ -1867,15 +1878,26 @@ test('storage.ts persists and sanitizes enabledShifts including explicit empty a
       assert.ok(migratedV5.enabledShifts.includes(s), `v5->v7 migration should enable ${s}`);
     }
 
-    // v6 save merges NEW_V7_SHIFTS without overriding v6 choices
+    // v6 save merges NEW_V7_SHIFTS & NEW_V8_SHIFTS without overriding v6 choices
     store.set(
       'iluminado_progress_v2',
       JSON.stringify({ enabledShifts: ['rotate_90', 'split_half_sweep'], shiftCatalogVersion: 6 })
     );
     const migratedV6 = loadProgress();
     assert.equal(migratedV6.enabledShifts.includes('diagonal_slant_sweep'), false);
-    for (const s of NEW_V7_SHIFTS) {
-      assert.ok(migratedV6.enabledShifts.includes(s), `v6->v7 migration should enable ${s}`);
+    for (const s of [...NEW_V7_SHIFTS, ...NEW_V8_SHIFTS]) {
+      assert.ok(migratedV6.enabledShifts.includes(s), `v6->v8 migration should enable ${s}`);
+    }
+
+    // v7 save merges NEW_V8_SHIFTS without overriding v7 choices
+    store.set(
+      'iluminado_progress_v2',
+      JSON.stringify({ enabledShifts: ['rotate_90', 'stash_hold'], shiftCatalogVersion: 7 })
+    );
+    const migratedV7 = loadProgress();
+    assert.equal(migratedV7.enabledShifts.includes('split_half_sweep'), false);
+    for (const s of NEW_V8_SHIFTS) {
+      assert.ok(migratedV7.enabledShifts.includes(s), `v7->v8 migration should enable ${s}`);
     }
 
     assert.equal(getPreviousDateKey('2026-11-16'), '2026-11-15');
@@ -2302,7 +2324,7 @@ test('partial 1x1 overflow entry forms a 2x2 square at row 0 and continues until
   assert.equal(state1x1.activePiece, null);
 });
 
-test('Shift classification partitions all 52 shifts into Start-Ready vs Needs-Bricks and pickStartShift prioritizes Start-Ready on opening boards', () => {
+test('Shift classification partitions all 72 shifts into Start-Ready vs Needs-Bricks and pickStartShift prioritizes Start-Ready on opening boards', () => {
   assert.equal(
     START_FRIENDLY_SHIFTS.length + POPULATED_BOARD_SHIFTS.length,
     ALL_SHIFT_TYPES.length
@@ -2644,5 +2666,279 @@ test('All 50 skins pass strict WCAG contrast checks for blocks, borders, emblems
     );
   }
 });
+
+test('V8 Multi-Well & Dual-Deck shifts (twin_wells, dual_screen, clamshell, triptych, chromatic_wells, shell_game) work cleanly', () => {
+  const rng = createSeededRng('v8-multiwell');
+
+  // 1. Twin Wells (7 + 2 + 7) + alternating well + gutter confinement
+  const tw = createInitialBoardState(0, rng);
+  applyBoardShift(tw, 'twin_wells', { animateBricks: false, rng });
+  assert.equal(tw.wellRegions?.length, 2);
+  assert.equal(tw.wellRegions?.[0].maxCol, 6);
+  assert.equal(tw.wellRegions?.[1].minCol, 9);
+  assert.equal(tw.grid[0][7]?.obstacleStyle, 'chasm');
+  assert.equal(tw.grid[0][8]?.obstacleStyle, 'chasm');
+  assert.equal(tw.activeWellIndex, 0);
+  // Cannot cross gutter into right well while activeWellIndex === 0
+  tw.activePiece!.x = 5;
+  assert.equal(steerPiece(tw, 1), false);
+  hardDropPiece(tw, 0, rng);
+  assert.equal(tw.activeWellIndex, 1);
+  assert.ok((tw.activePiece?.x ?? 0) >= 9, '2nd piece must spawn inside right well');
+  assert.equal(tw.isGameOver, false);
+
+  // 2. Dual Screen (10x16 DS decks + staging through hinge)
+  const ds = createInitialBoardState(0, rng);
+  applyBoardShift(ds, 'dual_screen', { animateBricks: false, rng });
+  assert.equal(ds.cols, 10);
+  assert.equal(ds.rows, 16);
+  assert.equal(ds.wellRegions?.length, 2);
+  assert.equal(ds.wellRegions?.[0].maxRow, 6);
+  assert.equal(ds.wellRegions?.[1].minRow, 9);
+  assert.equal(ds.wellRegions?.[1].stagingMinRow, 7);
+  assert.equal(ds.grid[7][4]?.obstacleStyle, 'girder');
+  hardDropPiece(ds, 0, rng);
+  assert.equal(ds.activeWellIndex, 1);
+  assert.equal(ds.activePiece?.y, 7, 'lower deck piece spawns inside DS hinge staging [7,8] without collision');
+  assert.equal(canPlacePiece(ds, ds.activePiece!, 0, 2), true, 'staging exemption lets piece pass through hinge into lower deck');
+  hardDropPiece(ds, 0, rng);
+  assert.equal(ds.isGameOver, false);
+  assert.equal(ds.activeWellIndex, 0);
+
+  // 3. Clamshell (10x16 outward center-seam dual gravity)
+  const clam = createInitialBoardState(0, rng);
+  applyBoardShift(clam, 'clamshell', { animateBricks: false, rng });
+  assert.equal(clam.cols, 10);
+  assert.equal(clam.rows, 16);
+  assert.equal(clam.wellRegions?.[0].gravity, 'up');
+  assert.equal(clam.wellRegions?.[1].gravity, 'down');
+  assert.equal(clam.activeWellIndex, 0);
+  hardDropPiece(clam, 0, rng);
+  // Top deck piece settles upward against row 0!
+  const topOccupied = clam.grid[0].some((c) => c !== null && !c.isObstacle);
+  assert.equal(topOccupied, true, 'top clamshell deck must settle upward against ceiling row 0');
+  assert.equal(clam.activeWellIndex, 1);
+  hardDropPiece(clam, 0, rng);
+  // Bottom deck piece settles downward against row 15!
+  const botOccupied = clam.grid[15].some((c) => c !== null && !c.isObstacle);
+  assert.equal(botOccupied, true, 'bottom clamshell deck must settle downward against floor row 15');
+  assert.equal(clam.isGameOver, false);
+
+  // 4. Triptych (4 + 2 + 4 + 2 + 4)
+  const trip = createInitialBoardState(0, rng);
+  applyBoardShift(trip, 'triptych', { animateBricks: false, rng });
+  assert.equal(trip.wellRegions?.length, 3);
+  assert.deepEqual(
+    trip.wellRegions?.map((r) => r.maxCol - r.minCol + 1),
+    [4, 4, 4]
+  );
+  hardDropPiece(trip, 0, rng);
+  assert.equal(trip.activeWellIndex, 1);
+  hardDropPiece(trip, 0, rng);
+  assert.equal(trip.activeWellIndex, 2);
+  hardDropPiece(trip, 0, rng);
+  assert.equal(trip.activeWellIndex, 0);
+
+  // 5. Chromatic Wells (left clears A / right clears B, swapping every 2 sweeps)
+  const cw = createInitialBoardState(0, rng);
+  applyBoardShift(cw, 'chromatic_wells', { animateBricks: false, rng });
+  // Place a B square in left well (col 1..2) -> untouched on pass 0
+  for (let r = 8; r <= 9; r++) {
+    for (let c = 1; c <= 2; c++) cw.grid[r][c] = makeCell(1);
+  }
+  cw.sweepPassCount = 0;
+  let clearedPass0 = 0;
+  for (let c = 0; c < cw.cols; c++) {
+    const flip = Math.floor((cw.sweepPassCount ?? 0) / 2) % 2;
+    const cf = (c <= cw.wellRegions![0].maxCol ? flip : 1 - flip) as CellColor;
+    clearedPass0 += stepTimelineColumn(cw, c, 'ltr', { colorFilter: cf }).cellsRemovedNow;
+  }
+  finalizeSweep(cw, clearedPass0 > 0);
+  assert.equal(clearedPass0, 0, 'chromatic_wells pass 0 left well must not clear color 1');
+  // Flip after 2 sweeps (sweepPassCount = 2) -> now left well clears color 1
+  cw.sweepPassCount = 2;
+  let clearedPass2 = 0;
+  for (let c = 0; c < cw.cols; c++) {
+    const flip = Math.floor((cw.sweepPassCount ?? 0) / 2) % 2;
+    const cf = (c <= cw.wellRegions![0].maxCol ? flip : 1 - flip) as CellColor;
+    clearedPass2 += stepTimelineColumn(cw, c, 'ltr', { colorFilter: cf }).cellsRemovedNow;
+  }
+  finalizeSweep(cw, clearedPass2 > 0);
+  assert.equal(clearedPass2, 4, 'chromatic_wells pass 2 flips left well to clear color 1');
+
+  // 6. Shell Game swaps and mirrors left vs right stacks across gutter
+  const sg = createInitialBoardState(0, rng);
+  applyBoardShift(sg, 'shell_game', { animateBricks: false, rng });
+  sg.grid[9][1] = makeCell(0);
+  assert.equal(stepShellGameSwap(sg, false), true);
+  assert.equal(sg.grid[9][sg.cols - 2]?.color, 0, 'col 1 mirrors across to cols - 2');
+  assert.equal(sg.grid[9][1], null);
+  assert.equal(sg.shiftEffect?.type, 'shell_game');
+});
+
+test('V8 Color-filtered beam shifts (dueling_beams, sun_moon, trichroma_beams, lighthouse) filter and clear accurately', () => {
+  const rng = createSeededRng('v8-beams');
+
+  // Dueling beams: LTR clears 0, RTL clears 1 into same sweep total
+  const db = createInitialBoardState(0, rng);
+  applyBoardShift(db, 'dueling_beams', { animateBricks: false, rng });
+  for (let r = 8; r <= 9; r++) {
+    for (let c = 2; c <= 3; c++) db.grid[r][c] = makeCell(0);
+    for (let c = 11; c <= 12; c++) db.grid[r][c] = makeCell(1);
+  }
+  let dbCleared = 0;
+  for (let c = 0; c < db.cols; c++) {
+    dbCleared += stepTimelineColumn(db, c, 'ltr', { colorFilter: 0 }).cellsRemovedNow;
+    dbCleared += stepTimelineColumn(db, db.cols - 1 - c, 'rtl', { colorFilter: 1 }).cellsRemovedNow;
+  }
+  const dbEv = finalizeSweep(db, dbCleared > 0);
+  assert.equal(dbCleared, 8);
+  assert.equal(dbEv?.squaresCleared, 2);
+
+  // Sun & Moon: even sweep clears 0, odd clears 1
+  const sm = createInitialBoardState(0, rng);
+  applyBoardShift(sm, 'sun_moon', { animateBricks: false, rng });
+  for (let r = 8; r <= 9; r++) {
+    for (let c = 4; c <= 5; c++) sm.grid[r][c] = makeCell(1);
+  }
+  let smPass0 = 0;
+  for (let c = 0; c < sm.cols; c++) {
+    smPass0 += stepTimelineColumn(sm, c, 'ltr', { colorFilter: 0 }).cellsRemovedNow;
+  }
+  finalizeSweep(sm, smPass0 > 0);
+  assert.equal(smPass0, 0);
+  let smPass1 = 0;
+  for (let c = 0; c < sm.cols; c++) {
+    smPass1 += stepTimelineColumn(sm, c, 'ltr', { colorFilter: 1 }).cellsRemovedNow;
+  }
+  finalizeSweep(sm, smPass1 > 0);
+  assert.equal(smPass1, 4);
+
+  // Trichroma beams forces 3 colors and resets on switch
+  const tri = createInitialBoardState(0, rng);
+  applyBoardShift(tri, 'trichroma_beams', { animateBricks: false, rng });
+  assert.equal(tri.colorCount, 3);
+  for (let r = 8; r <= 9; r++) {
+    for (let c = 6; c <= 7; c++) tri.grid[r][c] = makeCell(2);
+  }
+  let tri2Cleared = 0;
+  for (let c = 0; c < tri.cols; c++) {
+    tri2Cleared += stepTimelineColumn(tri, c, 'ltr', { colorFilter: 2 }).cellsRemovedNow;
+  }
+  finalizeSweep(tri, tri2Cleared > 0);
+  assert.equal(tri2Cleared, 4);
+  applyBoardShift(tri, 'sun_moon', { animateBricks: false, rng });
+  assert.equal(tri.colorCount, 2);
+
+  // Lighthouse angular sweep clears matching color across arc
+  const lh = createInitialBoardState(0, rng);
+  applyBoardShift(lh, 'lighthouse', { animateBricks: false, rng });
+  for (let r = 8; r <= 9; r++) {
+    for (let c = 3; c <= 4; c++) lh.grid[r][c] = makeCell(0);
+  }
+  let lhCleared = 0;
+  const steps = 16;
+  const startA = Math.PI + 0.06;
+  const endA = -0.06;
+  for (let s = 0; s < steps; s++) {
+    const prevA = startA * (1 - s / steps) + endA * (s / steps);
+    const nextA = startA * (1 - (s + 1) / steps) + endA * ((s + 1) / steps);
+    lhCleared += stepLighthouseSweep(lh, prevA, nextA, 0).cellsRemovedNow;
+  }
+  finalizeSweep(lh, lhCleared > 0);
+  assert.equal(lhCleared, 4);
+});
+
+test('V8 Silhouette, Obstacle, and Brick shifts (windmill, pistons, pentomino, colossus, kaleidoscope) function safely', () => {
+  const rng = createSeededRng('v8-obstacles-bricks');
+
+  for (const sil of ['diamond_arena', 'cross_arena', 'hillside_ramp', 'archipelago', 'stalactites'] as const) {
+    const b = createInitialBoardState(0, rng);
+    applyBoardShift(b, sil, { animateBricks: false, rng });
+    assert.ok(b.grid.flat().some((c) => c?.isObstacle), `${sil} must place obstacles`);
+    assert.equal(b.isGameOver, false);
+    const init = getPieceInitialPos(b, b.activePiece!);
+    assert.equal(canPlacePiece(b, { ...b.activePiece!, x: init.x, y: 0 }, 0, 0), true, `${sil} must keep center drop open`);
+  }
+
+  // Windmill turns 90 deg only when open, never crushing blocks
+  const wm = createInitialBoardState(0, rng);
+  applyBoardShift(wm, 'windmill', { animateBricks: false, rng });
+  assert.equal(wm.windmillState?.orientation, 'horizontal');
+  assert.equal(stepWindmill(wm), true);
+  assert.equal(wm.windmillState?.orientation, 'vertical');
+  // Place a cell blocking the horizontal blade arm -> turn back refuses without crushing
+  const wmx = wm.windmillState!.cx;
+  const wmy = wm.windmillState!.cy;
+  wm.grid[wmy][wmx + 1] = makeCell(0);
+  assert.equal(stepWindmill(wm), false);
+  assert.equal(wm.grid[wmy][wmx + 1]?.color, 0);
+
+  // Piston walls extend inward into empty space without crushing blocks
+  const pw = createInitialBoardState(0, rng);
+  applyBoardShift(pw, 'piston_walls', { animateBricks: false, rng });
+  assert.equal(pw.pistonState?.leftDepth, 1);
+  assert.equal(stepPistonWalls(pw), true);
+  assert.equal(pw.pistonState?.leftDepth, 2);
+
+  // Pentomino generates 5-tile shapes cleanly
+  const pent = createInitialBoardState(0, rng);
+  applyBoardShift(pent, 'brick_pentomino', { animateBricks: false, rng });
+  assert.equal(pent.pieceShapeMode, 'pentomino');
+  assert.equal(pent.activePiece!.cells.flat().filter(Boolean).length, 5);
+  rotateActivePiece(pent, 'cw');
+  assert.equal(pent.activePiece!.cells.flat().filter(Boolean).length, 5);
+
+  // Colossus spawns 4x4 bricks whose columns split and settle independently on lock
+  const colossus = createInitialBoardState(0, rng);
+  applyBoardShift(colossus, 'brick_colossus', { animateBricks: false, rng });
+  let saw4x4 = false;
+  for (let i = 0; i < 30; i++) {
+    const g = generateRandomPiece(0.05, rng, 6, { shapeMode: 'colossus' });
+    if (g.cells.length === 4 && g.cells[0]?.length === 4) {
+      saw4x4 = true;
+      colossus.activePiece = { ...g, x: 6, y: -4 };
+      break;
+    }
+  }
+  assert.equal(saw4x4, true);
+  // Put an uneven pillar under col 7 -> columns 6..9 settle independently
+  colossus.grid[9][7] = makeCell(1);
+  colossus.grid[8][7] = makeCell(1);
+  hardDropPiece(colossus, 0, rng);
+  assert.equal(colossus.grid[9][6] !== null && !colossus.grid[9][6]?.isObstacle, true);
+  assert.equal(colossus.grid[7][7] !== null && !colossus.grid[7][7]?.isObstacle, true);
+
+  // Kaleidoscope brick morphs falling tetromino shape while preserving 4 blocks
+  const kal = createInitialBoardState(0, rng);
+  applyBoardShift(kal, 'kaleidoscope_brick', { animateBricks: false, rng });
+  assert.equal(kal.activePiece?.tetrominoKind !== undefined, true);
+  kal.activePiece!.y = 2;
+  const beforeKind = kal.activePiece!.tetrominoKind;
+  assert.equal(stepKaleidoscopePiece(kal), true);
+  assert.notEqual(kal.activePiece!.tetrominoKind, beforeKind);
+  assert.equal(kal.activePiece!.cells.flat().filter(Boolean).length, 4);
+});
+
+test('Non-loss guarantee: transitioning into ANY of all 72 shifts on a densely stacked board never causes premature Game Over', () => {
+  const rng = createSeededRng('non-loss-stress-72');
+  for (const shiftType of ALL_SHIFT_TYPES) {
+    const state = createInitialBoardState(0, rng);
+    // Fill bottom 6 rows (rows 4..9, 60% full) densely across all columns
+    for (let r = 4; r < state.rows; r++) {
+      for (let c = 0; c < state.cols; c++) {
+        state.grid[r][c] = makeCell(((r + c) % 2) as CellColor);
+      }
+    }
+    const res = applyBoardShift(state, shiftType, { animateBricks: false, rng });
+    assert.equal(res.applied, true, `${shiftType} must apply cleanly`);
+    assert.equal(state.isGameOver, false, `${shiftType} must never trigger Game Over on transition`);
+    assert.ok(state.activePiece !== null, `${shiftType} must preserve/spawn activePiece`);
+    // Dropping the very next active piece right after the shift must also keep play alive
+    hardDropPiece(state, 0, rng);
+    assert.equal(state.isGameOver, false, `${shiftType} must not unfairly kill on the first drop after shift`);
+  }
+});
+
 
 

@@ -1,10 +1,12 @@
 import {
   BoardOrientation,
   BoardState,
+  BoardWellRegion,
   Cell,
   CellColor,
   ClearEvent,
   GravityDirection,
+  PentominoKind,
   Piece,
   PieceCell,
   PieceShapeMode,
@@ -21,6 +23,23 @@ export const PORTRAIT_COLS = 10;
 export const PORTRAIT_ROWS = 14;
 export const LOCK_DELAY_SEC = 0.45;
 export const MAX_LOCK_RESETS = 6;
+
+export function getActiveWellRegion(
+  state: Pick<BoardState, 'wellRegions' | 'activeWellIndex'>
+): BoardWellRegion | null {
+  if (!state.wellRegions || state.wellRegions.length === 0) return null;
+  const idx =
+    (((state.activeWellIndex ?? 0) % state.wellRegions.length) + state.wellRegions.length) %
+    state.wellRegions.length;
+  return state.wellRegions[idx] ?? null;
+}
+
+export function getActiveGravityDirection(
+  state: Pick<BoardState, 'gravityDirection' | 'wellRegions' | 'activeWellIndex'>
+): GravityDirection {
+  const region = getActiveWellRegion(state);
+  return region?.gravity ?? state.gravityDirection ?? 'down';
+}
 
 export function getGravityVector(dir?: GravityDirection): { gx: number; gy: number } {
   switch (dir) {
@@ -61,7 +80,14 @@ export function getPieceInitialY(piece: Piece): number {
 export function getPieceInitialPos(
   state: Pick<
     BoardState,
-    'cols' | 'rows' | 'grid' | 'gravityDirection' | 'lockedColumnsLeft' | 'lockedColumnsRight'
+    | 'cols'
+    | 'rows'
+    | 'grid'
+    | 'gravityDirection'
+    | 'lockedColumnsLeft'
+    | 'lockedColumnsRight'
+    | 'wellRegions'
+    | 'activeWellIndex'
   >,
   piece: Piece
 ): { x: number; y: number } {
@@ -69,9 +95,26 @@ export function getPieceInitialPos(
   const cols = state.grid[0]?.length ?? state.cols ?? BOARD_COLS;
   const pRows = Math.max(1, piece.cells.length);
   const pCols = Math.max(1, piece.cells[0]?.length ?? 1);
-  const dir = state.gravityDirection ?? 'down';
-  const minCol = state.lockedColumnsLeft;
-  const maxCol = Math.max(minCol, cols - pCols - state.lockedColumnsRight);
+  const region = getActiveWellRegion(state);
+  const dir = region?.gravity ?? state.gravityDirection ?? 'down';
+  const minCol = region
+    ? Math.max(state.lockedColumnsLeft, region.minCol)
+    : state.lockedColumnsLeft;
+  const maxCol = region
+    ? Math.max(minCol, Math.min(cols - 1 - state.lockedColumnsRight, region.maxCol) - pCols + 1)
+    : Math.max(minCol, cols - pCols - state.lockedColumnsRight);
+
+  if (region) {
+    const wellSpan = Math.max(1, region.maxCol - region.minCol + 1);
+    const spawnX = Math.max(
+      minCol,
+      Math.min(maxCol, region.minCol + getSpawnColForWidth(wellSpan, pCols))
+    );
+    if (dir === 'up') {
+      return { x: spawnX, y: region.maxRow + 1 };
+    }
+    return { x: spawnX, y: region.minRow - pRows };
+  }
 
   if (dir === 'right') {
     return {
@@ -98,14 +141,21 @@ export function getPieceInitialPos(
 }
 
 export function isPieceInStaging(
-  state: Pick<BoardState, 'cols' | 'rows' | 'grid' | 'gravityDirection'>,
+  state: Pick<BoardState, 'cols' | 'rows' | 'grid' | 'gravityDirection' | 'wellRegions' | 'activeWellIndex'>,
   piece: Piece
 ): boolean {
   const rows = state.grid.length || state.rows || BOARD_ROWS;
   const cols = state.grid[0]?.length ?? state.cols ?? BOARD_COLS;
   const pRows = Math.max(1, piece.cells.length);
   const pCols = Math.max(1, piece.cells[0]?.length ?? 1);
-  const dir = state.gravityDirection ?? 'down';
+  const region = getActiveWellRegion(state);
+  const dir = region?.gravity ?? state.gravityDirection ?? 'down';
+  if (region) {
+    if (dir === 'up') return piece.y + pRows - 1 > region.maxRow;
+    if (dir === 'down') return piece.y < region.minRow;
+    if (dir === 'right') return piece.x < region.minCol;
+    return piece.x + pCols - 1 > region.maxCol;
+  }
   if (dir === 'right') return piece.x < 0;
   if (dir === 'left') return piece.x + pCols > cols;
   if (dir === 'up') return piece.y + pRows > rows;
@@ -225,6 +275,71 @@ const TETROMINO_MASKS: Record<TetrominoKind, number[][]> = {
 
 const TETROMINO_KINDS: TetrominoKind[] = ['I', 'O', 'T', 'S', 'Z', 'J', 'L'];
 
+const PENTOMINO_MASKS: Record<PentominoKind, number[][]> = {
+  F: [
+    [0, 1, 1],
+    [1, 1, 0],
+    [0, 1, 0],
+  ],
+  I: [[1, 1, 1, 1, 1]],
+  L: [
+    [1, 0],
+    [1, 0],
+    [1, 0],
+    [1, 1],
+  ],
+  P: [
+    [1, 1],
+    [1, 1],
+    [1, 0],
+  ],
+  N: [
+    [0, 1],
+    [1, 1],
+    [1, 0],
+    [1, 0],
+  ],
+  T: [
+    [1, 1, 1],
+    [0, 1, 0],
+    [0, 1, 0],
+  ],
+  U: [
+    [1, 0, 1],
+    [1, 1, 1],
+  ],
+  V: [
+    [1, 0, 0],
+    [1, 0, 0],
+    [1, 1, 1],
+  ],
+  W: [
+    [1, 0, 0],
+    [1, 1, 0],
+    [0, 1, 1],
+  ],
+  X: [
+    [0, 1, 0],
+    [1, 1, 1],
+    [0, 1, 0],
+  ],
+  Y: [
+    [0, 1],
+    [1, 1],
+    [0, 1],
+    [0, 1],
+  ],
+  Z: [
+    [1, 1, 0],
+    [0, 1, 0],
+    [0, 1, 1],
+  ],
+};
+
+export const PENTOMINO_KINDS: PentominoKind[] = [
+  'F', 'I', 'L', 'P', 'N', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
+];
+
 function pickPieceColor(colorCount: 2 | 3, rng: () => number): CellColor {
   if (colorCount === 3) {
     const r = rng();
@@ -242,6 +357,7 @@ export interface GeneratePieceOptions {
   ensureBlocked?: boolean;
   ensureWild?: boolean;
   ensureCrashGem?: boolean;
+  ensureColossus?: boolean;
   allowCrashGem?: boolean;
 }
 
@@ -384,6 +500,70 @@ export function generateRandomPiece(
       tetrominoKind: kind,
       cells,
     };
+  }
+
+  if (shapeMode === 'pentomino') {
+    const kind = PENTOMINO_KINDS[Math.floor(rng() * PENTOMINO_KINDS.length) % PENTOMINO_KINDS.length];
+    const mask = PENTOMINO_MASKS[kind];
+    const primary = pickPieceColor(colorCount, rng);
+    const secondary = pickPieceColor(colorCount, rng);
+    const mono = rng() < 0.28;
+    const occupiedCoords: Array<[number, number]> = [];
+    const cells: PieceCell[][] = mask.map((row, r) =>
+      row.map((val, c) => {
+        if (!val) return null;
+        occupiedCoords.push([r, c]);
+        const color: CellColor = mono
+          ? primary
+          : rng() < 0.58
+          ? primary
+          : secondary;
+        return { color, isChain: false };
+      })
+    );
+    if (rng() < chainFrequency && occupiedCoords.length > 0) {
+      const [cr, cc] = occupiedCoords[Math.floor(rng() * occupiedCoords.length)];
+      if (cells[cr][cc]) {
+        cells[cr][cc]!.isChain = true;
+      }
+    }
+    const pieceCols = mask[0]?.length ?? 3;
+    return {
+      x: resolveSpawnX(pieceCols),
+      y: -mask.length,
+      shapeMode,
+      pentominoKind: kind,
+      cells,
+    };
+  }
+
+  if (shapeMode === 'colossus') {
+    const isBig = Boolean(options?.ensureColossus) || rng() < 0.28;
+    if (isBig) {
+      const q00 = pickPieceColor(colorCount, rng);
+      const q01 = rng() < 0.5 ? q00 : (((q00 + 1) % colorCount) as CellColor);
+      const q10 = rng() < 0.5 ? (((q00 + 1) % colorCount) as CellColor) : q00;
+      const q11 = rng() < 0.4 ? q01 : pickPieceColor(colorCount, rng);
+      const quadColor = (r: number, c: number): CellColor =>
+        r < 2 ? (c < 2 ? q00 : q01) : c < 2 ? q10 : q11;
+      const cells: PieceCell[][] = Array.from({ length: 4 }, (_, r) =>
+        Array.from({ length: 4 }, (__, c) => ({
+          color: quadColor(r, c),
+          isChain: false,
+        }))
+      );
+      if (rng() < chainFrequency) {
+        const cr = Math.floor(rng() * 4);
+        const cc = Math.floor(rng() * 4);
+        cells[cr][cc]!.isChain = true;
+      }
+      return {
+        x: resolveSpawnX(4),
+        y: -4,
+        shapeMode: 'colossus',
+        cells,
+      };
+    }
   }
 
   if (shapeMode === 'l_trio_2x2') {
@@ -543,6 +723,7 @@ export function refreshQueueForBoardRules(
       ...opts,
       ensureBlocked: i === 0 && state.pieceShapeMode === 'blocked_2x2',
       ensureWild: i === 0 && state.pieceShapeMode === 'prism_wild_2x2',
+      ensureColossus: i === 0 && state.pieceShapeMode === 'colossus',
       ensureCrashGem: i === 0 && state.activeShift === 'crash_gem',
     });
     const pos = getPieceInitialPos(state, p);
@@ -553,6 +734,7 @@ export function refreshQueueForBoardRules(
       ...opts,
       ensureBlocked: state.pieceShapeMode === 'blocked_2x2',
       ensureWild: state.pieceShapeMode === 'prism_wild_2x2',
+      ensureColossus: state.pieceShapeMode === 'colossus',
       ensureCrashGem: state.activeShift === 'crash_gem',
     });
     const pos = getPieceInitialPos(state, candidate);
@@ -679,10 +861,15 @@ export function canPlacePiece(
 ): boolean {
   const rows = state.grid.length;
   const cols = state.grid[0]?.length ?? state.cols ?? BOARD_COLS;
-  const minCol = state.lockedColumnsLeft;
-  const maxCol = cols - 1 - state.lockedColumnsRight;
+  const region = getActiveWellRegion(state);
+  const minCol = region
+    ? Math.max(state.lockedColumnsLeft, region.minCol)
+    : state.lockedColumnsLeft;
+  const maxCol = region
+    ? Math.min(cols - 1 - state.lockedColumnsRight, region.maxCol)
+    : cols - 1 - state.lockedColumnsRight;
   const pieceRows = piece.cells.length;
-  const dir = state.gravityDirection ?? 'down';
+  const dir = region?.gravity ?? state.gravityDirection ?? 'down';
 
   for (let py = 0; py < pieceRows; py++) {
     const rowCells = piece.cells[py];
@@ -690,6 +877,44 @@ export function canPlacePiece(
       if (rowCells[px] === null) continue;
       const gx = piece.x + px + dx;
       const gy = piece.y + py + dy;
+      if (region) {
+        if (dir === 'down') {
+          if (gx < minCol || gx > maxCol) return false;
+          if (gy > region.maxRow) return false;
+          const minLegalY = region.stagingMinRow ?? (region.minRow > 0 ? region.minRow - 4 : -8);
+          if (region.minRow > 0 && gy < minLegalY) return false;
+          const inRegionStaging =
+            region.stagingMinRow !== undefined && region.stagingMaxRow !== undefined
+              ? gy >= region.stagingMinRow && gy <= region.stagingMaxRow
+              : gy < region.minRow;
+          if (!inRegionStaging && gy >= 0 && gy < rows && state.grid[gy][gx] !== null) {
+            return false;
+          }
+        } else if (dir === 'up') {
+          if (gx < minCol || gx > maxCol) return false;
+          if (gy < region.minRow) return false;
+          const maxLegalY =
+            region.stagingMaxRow ?? (region.maxRow < rows - 1 ? region.maxRow + 4 : rows + 8);
+          if (region.maxRow < rows - 1 && gy > maxLegalY) return false;
+          const inRegionStaging =
+            region.stagingMinRow !== undefined && region.stagingMaxRow !== undefined
+              ? gy >= region.stagingMinRow && gy <= region.stagingMaxRow
+              : gy > region.maxRow;
+          if (!inRegionStaging && gy >= 0 && gy < rows && state.grid[gy][gx] !== null) {
+            return false;
+          }
+        } else if (dir === 'right') {
+          if (gy < region.minRow || gy > region.maxRow) return false;
+          if (gx > maxCol) return false;
+          if (gx >= minCol && state.grid[gy][gx] !== null) return false;
+        } else {
+          if (gy < region.minRow || gy > region.maxRow) return false;
+          if (gx < minCol) return false;
+          if (gx <= maxCol && state.grid[gy][gx] !== null) return false;
+        }
+        continue;
+      }
+
       if (dir === 'down') {
         if (gx < minCol || gx > maxCol) return false;
         if (gy >= rows) return false;
@@ -714,7 +939,7 @@ export function canPlacePiece(
 
 export function isActivePieceGrounded(state: BoardState): boolean {
   if (!state.activePiece) return false;
-  const { gx, gy } = getGravityVector(state.gravityDirection);
+  const { gx, gy } = getGravityVector(getActiveGravityDirection(state));
   return !canPlacePiece(state, state.activePiece, gx, gy);
 }
 
@@ -742,7 +967,10 @@ export function getPieceLandingColumns(
 ): PieceLandingInfo {
   const rows = state.grid.length;
   const cols = state.grid[0]?.length ?? state.cols ?? BOARD_COLS;
-  const dir = state.gravityDirection ?? 'down';
+  const region = getActiveWellRegion(state);
+  const dir = region?.gravity ?? state.gravityDirection ?? 'down';
+  const minRow = region?.minRow ?? 0;
+  const maxRow = region?.maxRow ?? rows - 1;
   const { gx: vecX, gy: vecY } = getGravityVector(dir);
 
   let rigidDy = 0;
@@ -776,12 +1004,12 @@ export function getPieceLandingColumns(
       }
       const col = piece.x + px;
       if (col < 0 || col >= cols) {
-        colBottomRows.push(rows - 1);
+        colBottomRows.push(maxRow);
         continue;
       }
-      const startRow = Math.max(0, piece.y + rigidDy + lowestPy + 1);
-      let stopRow = rows;
-      for (let r = startRow; r < rows; r++) {
+      const startRow = Math.max(minRow, piece.y + rigidDy + lowestPy + 1);
+      let stopRow = maxRow + 1;
+      for (let r = startRow; r <= maxRow; r++) {
         if (state.grid[r][col] !== null) {
           stopRow = r;
           break;
@@ -795,7 +1023,7 @@ export function getPieceLandingColumns(
         const py = occRows[idx];
         const gy = bot - (occRows.length - 1 - idx);
         const pCell = piece.cells[py]?.[px];
-        if (pCell && gy >= 0 && gy < rows) {
+        if (pCell && gy >= minRow && gy <= maxRow) {
           ghostCells.push({
             x: col,
             y: gy,
@@ -807,7 +1035,7 @@ export function getPieceLandingColumns(
       }
     }
 
-    const leftBottomRow = colBottomRows[0] ?? rows - 1;
+    const leftBottomRow = colBottomRows[0] ?? maxRow;
     const rightBottomRow =
       colBottomRows[Math.min(1, Math.max(0, colBottomRows.length - 1))] ?? leftBottomRow;
     const isSplit =
@@ -840,12 +1068,12 @@ export function getPieceLandingColumns(
       const topPy = occRows[0];
       const col = piece.x + px;
       if (col < 0 || col >= cols) {
-        colTopRows.push(0);
+        colTopRows.push(minRow);
         continue;
       }
-      const startRow = Math.min(rows - 1, piece.y - rigidDy + topPy - 1);
-      let stopRow = -1;
-      for (let r = startRow; r >= 0; r--) {
+      const startRow = Math.min(maxRow, piece.y - rigidDy + topPy - 1);
+      let stopRow = minRow - 1;
+      for (let r = startRow; r >= minRow; r--) {
         if (state.grid[r][col] !== null) {
           stopRow = r;
           break;
@@ -858,7 +1086,7 @@ export function getPieceLandingColumns(
         const py = occRows[idx];
         const gy = topR + idx;
         const pCell = piece.cells[py]?.[px];
-        if (pCell && gy >= 0 && gy < rows) {
+        if (pCell && gy >= minRow && gy <= maxRow) {
           ghostCells.push({
             x: col,
             y: gy,
@@ -874,8 +1102,8 @@ export function getPieceLandingColumns(
       relativeOffsets.some((off) => off !== relativeOffsets[0]);
     return {
       rigidDy,
-      leftBottomRow: colTopRows[0] ?? 0,
-      rightBottomRow: colTopRows[Math.min(1, Math.max(0, colTopRows.length - 1))] ?? 0,
+      leftBottomRow: colTopRows[0] ?? minRow,
+      rightBottomRow: colTopRows[Math.min(1, Math.max(0, colTopRows.length - 1))] ?? minRow,
       colBottomRows: colTopRows,
       isSplit,
       gravityDirection: dir,
@@ -973,7 +1201,7 @@ export function getPieceLandingColumns(
 
 function refreshLockResetOnManipulate(state: BoardState, wasGrounded: boolean): void {
   if (!state.activePiece) return;
-  const { gx, gy } = getGravityVector(state.gravityDirection);
+  const { gx, gy } = getGravityVector(getActiveGravityDirection(state));
   const nowGrounded = !canPlacePiece(state, state.activePiece, gx, gy);
   if (!nowGrounded) {
     state.lockTimer = 0;
@@ -985,8 +1213,9 @@ function refreshLockResetOnManipulate(state: BoardState, wasGrounded: boolean): 
 
 export function movePieceHorizontal(state: BoardState, dx: -1 | 1): boolean {
   if (!state.activePiece || state.isGameOver) return false;
+  const dir = getActiveGravityDirection(state);
   if (canPlacePiece(state, state.activePiece, dx, 0)) {
-    const { gx, gy } = getGravityVector(state.gravityDirection);
+    const { gx, gy } = getGravityVector(dir);
     const wasGrounded = !canPlacePiece(state, state.activePiece, gx, gy);
     state.activePiece = {
       ...state.activePiece,
@@ -995,12 +1224,15 @@ export function movePieceHorizontal(state: BoardState, dx: -1 | 1): boolean {
     refreshLockResetOnManipulate(state, wasGrounded);
     return true;
   }
-  const dir = state.gravityDirection ?? 'down';
   if ((dir === 'down' || dir === 'up') && state.activeShift === 'portal_wrap') {
     const cols = state.grid[0]?.length ?? state.cols ?? BOARD_COLS;
     const pieceCols = state.activePiece.cells[0]?.length ?? 1;
-    const minCol = state.lockedColumnsLeft;
-    const maxCol = Math.max(minCol, cols - pieceCols - state.lockedColumnsRight);
+    const region = getActiveWellRegion(state);
+    const minCol = region ? Math.max(state.lockedColumnsLeft, region.minCol) : state.lockedColumnsLeft;
+    const maxPlayCol = region
+      ? Math.min(cols - 1 - state.lockedColumnsRight, region.maxCol)
+      : cols - 1 - state.lockedColumnsRight;
+    const maxCol = Math.max(minCol, maxPlayCol - pieceCols + 1);
     let targetX: number | null = null;
     if (dx < 0 && state.activePiece.x <= minCol) {
       targetX = maxCol;
@@ -1010,7 +1242,7 @@ export function movePieceHorizontal(state: BoardState, dx: -1 | 1): boolean {
     if (targetX !== null && targetX !== state.activePiece.x) {
       const wrapped: Piece = { ...state.activePiece, x: targetX };
       if (canPlacePiece(state, wrapped, 0, 0)) {
-        const { gx, gy } = getGravityVector(state.gravityDirection);
+        const { gx, gy } = getGravityVector(dir);
         const wasGrounded = !canPlacePiece(state, state.activePiece, gx, gy);
         state.activePiece = wrapped;
         refreshLockResetOnManipulate(state, wasGrounded);
@@ -1023,8 +1255,9 @@ export function movePieceHorizontal(state: BoardState, dx: -1 | 1): boolean {
 
 export function movePieceVertical(state: BoardState, dy: -1 | 1): boolean {
   if (!state.activePiece || state.isGameOver) return false;
+  const dir = getActiveGravityDirection(state);
   if (canPlacePiece(state, state.activePiece, 0, dy)) {
-    const { gx, gy } = getGravityVector(state.gravityDirection);
+    const { gx, gy } = getGravityVector(dir);
     const wasGrounded = !canPlacePiece(state, state.activePiece, gx, gy);
     state.activePiece = {
       ...state.activePiece,
@@ -1033,7 +1266,6 @@ export function movePieceVertical(state: BoardState, dy: -1 | 1): boolean {
     refreshLockResetOnManipulate(state, wasGrounded);
     return true;
   }
-  const dir = state.gravityDirection ?? 'down';
   if ((dir === 'left' || dir === 'right') && state.activeShift === 'portal_wrap') {
     const rows = state.grid.length || state.rows || BOARD_ROWS;
     const pieceRows = Math.max(1, state.activePiece.cells.length);
@@ -1047,7 +1279,7 @@ export function movePieceVertical(state: BoardState, dy: -1 | 1): boolean {
     if (targetY !== null && targetY !== state.activePiece.y) {
       const wrapped: Piece = { ...state.activePiece, y: targetY };
       if (canPlacePiece(state, wrapped, 0, 0)) {
-        const { gx, gy } = getGravityVector(state.gravityDirection);
+        const { gx, gy } = getGravityVector(dir);
         const wasGrounded = !canPlacePiece(state, state.activePiece, gx, gy);
         state.activePiece = wrapped;
         refreshLockResetOnManipulate(state, wasGrounded);
@@ -1059,7 +1291,7 @@ export function movePieceVertical(state: BoardState, dy: -1 | 1): boolean {
 }
 
 export function steerPiece(state: BoardState, delta: -1 | 1): boolean {
-  const dir = state.gravityDirection ?? 'down';
+  const dir = getActiveGravityDirection(state);
   if (dir === 'left' || dir === 'right') {
     return movePieceVertical(state, delta);
   }
@@ -1073,7 +1305,7 @@ export function rotateActivePiece(state: BoardState, direction: 'cw' | 'ccw' = '
     direction === 'cw'
       ? rotatePieceCellsCW(state.activePiece)
       : rotatePieceCellsCCW(state.activePiece);
-  const { gx, gy } = getGravityVector(state.gravityDirection);
+  const { gx, gy } = getGravityVector(getActiveGravityDirection(state));
   const px = Math.abs(gy);
   const py = Math.abs(gx);
   const kickOffsets: Array<[number, number]> = [
@@ -1109,6 +1341,62 @@ export function rotateActivePiece(state: BoardState, direction: 'cw' | 'ccw' = '
       }
       state.activePiece = candidate;
       refreshLockResetOnManipulate(state, wasGrounded);
+      return true;
+    }
+  }
+  return false;
+}
+
+export function stepKaleidoscopePiece(state: BoardState): boolean {
+  if (!state.activePiece || state.isGameOver || state.activeShift !== 'kaleidoscope_brick') {
+    return false;
+  }
+  const piece = state.activePiece;
+  const flatTiles: Exclude<PieceCell, null>[] = [];
+  for (let py = 0; py < piece.cells.length; py++) {
+    for (let px = 0; px < (piece.cells[py]?.length ?? 0); px++) {
+      const c = piece.cells[py][px];
+      if (c) flatTiles.push(clonePieceCell(c)!);
+    }
+  }
+  if (flatTiles.length === 0) return false;
+
+  const currKind = piece.tetrominoKind ?? 'O';
+  const currIdx = TETROMINO_KINDS.indexOf(currKind);
+  const nextKind = TETROMINO_KINDS[(currIdx + 1) % TETROMINO_KINDS.length];
+  const mask = TETROMINO_MASKS[nextKind];
+  let tileIdx = 0;
+  const newCells: PieceCell[][] = mask.map((row) =>
+    row.map((v) => {
+      if (!v) return null;
+      const src = flatTiles[tileIdx % flatTiles.length];
+      tileIdx++;
+      return clonePieceCell(src);
+    })
+  );
+
+  const dir = getActiveGravityDirection(state);
+  const { gx: gravX, gy: gravY } = getGravityVector(dir);
+  const offsets: Array<[number, number]> = [
+    [0, 0],
+    [-1, 0],
+    [1, 0],
+    [-2, 0],
+    [2, 0],
+    [-gravX, -gravY],
+    [-1 - gravX, -gravY],
+    [1 - gravX, -gravY],
+  ];
+  for (const [dx, dy] of offsets) {
+    const candidate: Piece = {
+      ...piece,
+      x: piece.x + dx,
+      y: piece.y + dy,
+      tetrominoKind: nextKind,
+      cells: newCells,
+    };
+    if (canPlacePiece(state, candidate, 0, 0)) {
+      state.activePiece = candidate;
       return true;
     }
   }
@@ -1224,6 +1512,64 @@ export function settleBoardForDirection(
   return moved;
 }
 
+export function settleBoardForState(
+  state: BoardState,
+  recordOffsets: boolean = true
+): boolean {
+  if (state.activeShift === 'clamshell' && state.wellRegions && state.wellRegions.length >= 2) {
+    const grid = state.grid;
+    const rows = grid.length;
+    const cols = grid[0]?.length ?? state.cols ?? BOARD_COLS;
+    let moved = false;
+    const topMax = state.wellRegions[0].maxRow;
+    const botMin = state.wellRegions[1].minRow;
+
+    for (let col = 0; col < cols; col++) {
+      let writeUp = 0;
+      for (let row = 0; row <= topMax && row < rows; row++) {
+        const cell = grid[row][col];
+        if (cell !== null) {
+          if ((cell.isObstacle && cell.obstacleFixed) || cell.isVirus) {
+            writeUp = row + 1;
+            continue;
+          }
+          if (row !== writeUp) {
+            if (recordOffsets) {
+              cell.animOffsetY = -(row - writeUp);
+            }
+            grid[writeUp][col] = cell;
+            grid[row][col] = null;
+            moved = true;
+          }
+          writeUp++;
+        }
+      }
+
+      let writeDown = rows - 1;
+      for (let row = rows - 1; row >= botMin && row >= 0; row--) {
+        const cell = grid[row][col];
+        if (cell !== null) {
+          if ((cell.isObstacle && cell.obstacleFixed) || cell.isVirus) {
+            writeDown = row - 1;
+            continue;
+          }
+          if (row !== writeDown) {
+            if (recordOffsets) {
+              cell.fallOffset = Math.max(cell.fallOffset, writeDown - row);
+            }
+            grid[writeDown][col] = cell;
+            grid[row][col] = null;
+            moved = true;
+          }
+          writeDown--;
+        }
+      }
+    }
+    return moved;
+  }
+  return settleBoardForDirection(state.grid, state.gravityDirection ?? 'down', recordOffsets);
+}
+
 export function settleBoard(grid: (Cell | null)[][]): boolean {
   return settleBoardForDirection(grid, 'down', true);
 }
@@ -1235,9 +1581,13 @@ const MARK_DIRS: ReadonlyArray<readonly [number, number]> = [
   [-1, 0],
 ];
 
-export function detectBoardMarks(grid: (Cell | null)[][]): SquareCoord[] {
+export function detectBoardMarks(
+  grid: (Cell | null)[][],
+  options?: { splitSeamRow?: number }
+): SquareCoord[] {
   const rows = grid.length;
   const cols = grid[0]?.length ?? BOARD_COLS;
+  const splitSeamRow = options?.splitSeamRow;
   const total = rows * cols;
   if (total > bfsVisited.length) {
     const nextCap = Math.max(total, bfsVisited.length * 2);
@@ -1257,6 +1607,9 @@ export function detectBoardMarks(grid: (Cell | null)[][]): SquareCoord[] {
     }
   }
 
+  const sameSideOfSeam = (r1: number, r2: number): boolean =>
+    splitSeamRow === undefined || (r1 <= splitSeamRow) === (r2 <= splitSeamRow);
+
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const start = grid[r][c];
@@ -1269,7 +1622,7 @@ export function detectBoardMarks(grid: (Cell | null)[][]): SquareCoord[] {
         for (let d = 0; d < 4; d++) {
           const nr = r + MARK_DIRS[d][0];
           const nc = c + MARK_DIRS[d][1];
-          if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
+          if (nr >= 0 && nr < rows && nc >= 0 && nc < cols && sameSideOfSeam(r, nr)) {
             const neighbor = grid[nr][nc];
             if (neighbor && !neighbor.isObstacle && !neighbor.isWild) {
               targetColor = neighbor.color;
@@ -1282,7 +1635,7 @@ export function detectBoardMarks(grid: (Cell | null)[][]): SquareCoord[] {
           for (let d = 0; d < 4; d++) {
             const nr = r + MARK_DIRS[d][0];
             const nc = c + MARK_DIRS[d][1];
-            if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
+            if (nr >= 0 && nr < rows && nc >= 0 && nc < cols && sameSideOfSeam(r, nr)) {
               const neighbor = grid[nr][nc];
               if (neighbor && !neighbor.isObstacle) {
                 touchesSameColor = true;
@@ -1295,7 +1648,7 @@ export function detectBoardMarks(grid: (Cell | null)[][]): SquareCoord[] {
         for (let d = 0; d < 4; d++) {
           const nr = r + MARK_DIRS[d][0];
           const nc = c + MARK_DIRS[d][1];
-          if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
+          if (nr >= 0 && nr < rows && nc >= 0 && nc < cols && sameSideOfSeam(r, nr)) {
             const neighbor = grid[nr][nc];
             if (
               neighbor &&
@@ -1325,7 +1678,7 @@ export function detectBoardMarks(grid: (Cell | null)[][]): SquareCoord[] {
         for (let d = 0; d < 4; d++) {
           const nr = cr + MARK_DIRS[d][0];
           const nc = cc + MARK_DIRS[d][1];
-          if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) {
+          if (nr >= 0 && nr < rows && nc >= 0 && nc < cols && sameSideOfSeam(cr, nr)) {
             const nIdx = nr * cols + nc;
             if (!bfsVisited[nIdx]) {
               const neighbor = grid[nr][nc];
@@ -1346,6 +1699,7 @@ export function detectBoardMarks(grid: (Cell | null)[][]): SquareCoord[] {
 
   const squares: SquareCoord[] = [];
   for (let r = 0; r < rows - 1; r++) {
+    if (splitSeamRow !== undefined && r === splitSeamRow) continue;
     const row0 = grid[r];
     const row1 = grid[r + 1];
     for (let c = 0; c < cols - 1; c++) {
@@ -1397,13 +1751,59 @@ export function detectBoardMarks(grid: (Cell | null)[][]): SquareCoord[] {
   return squares;
 }
 
+export function detectBoardMarksForState(state: BoardState): SquareCoord[] {
+  return detectBoardMarks(
+    state.grid,
+    state.activeShift === 'clamshell' && state.wellRegions?.length
+      ? { splitSeamRow: state.wellRegions[0].maxRow }
+      : undefined
+  );
+}
+
 export function trimOverflowForZenFlow(state: BoardState): number {
   const rows = state.grid.length;
   const cols = state.grid[0]?.length ?? state.cols ?? BOARD_COLS;
+  let trimmed = 0;
+
+  if (state.wellRegions && state.wellRegions.length > 0) {
+    for (const region of state.wellRegions) {
+      const regionW = region.maxCol - region.minCol + 1;
+      const spawnX = region.minCol + Math.max(0, Math.floor((regionW - 2) / 2));
+      if (region.gravity === 'up') {
+        for (let c = region.minCol; c <= region.maxCol; c++) {
+          const depth = c === spawnX || c === spawnX + 1 ? 3 : 2;
+          const minR = Math.max(region.minRow, region.maxRow - depth + 1);
+          for (let r = minR; r <= region.maxRow; r++) {
+            const cell = state.grid[r][c];
+            if (cell !== null && !cell.isObstacle) {
+              state.grid[r][c] = null;
+              trimmed++;
+            }
+          }
+        }
+      } else {
+        for (let c = region.minCol; c <= region.maxCol; c++) {
+          const depth = c === spawnX || c === spawnX + 1 ? 3 : 2;
+          const maxR = Math.min(region.maxRow, region.minRow + depth - 1);
+          for (let r = region.minRow; r <= maxR; r++) {
+            const cell = state.grid[r][c];
+            if (cell !== null && !cell.isObstacle) {
+              state.grid[r][c] = null;
+              trimmed++;
+            }
+          }
+        }
+      }
+    }
+    settleBoardForState(state, true);
+    state.squares = detectBoardMarksForState(state);
+    state.isGameOver = false;
+    return trimmed;
+  }
+
   const dir = state.gravityDirection ?? 'down';
   const spawnX = getSpawnColForWidth(cols);
   const spawnY = Math.max(0, Math.floor((rows - 2) / 2));
-  let trimmed = 0;
 
   if (dir === 'down') {
     for (let c = 0; c < cols; c++) {
@@ -1451,8 +1851,8 @@ export function trimOverflowForZenFlow(state: BoardState): number {
     }
   }
 
-  settleBoardForDirection(state.grid, dir);
-  state.squares = detectBoardMarks(state.grid);
+  settleBoardForState(state, true);
+  state.squares = detectBoardMarksForState(state);
   state.isGameOver = false;
   return trimmed;
 }
@@ -1509,9 +1909,14 @@ export function lockActivePiece(
   const cols = state.grid[0]?.length ?? state.cols ?? BOARD_COLS;
   const pieceRows = piece.cells.length;
   const pieceCols = piece.cells[0]?.length ?? 0;
-  const dir = state.gravityDirection ?? 'down';
+  const region = getActiveWellRegion(state);
+  const dir: GravityDirection = region?.gravity ?? state.gravityDirection ?? 'down';
+  const minRowBound = region ? region.minRow : 0;
+  const maxRowBound = region ? region.maxRow : rows - 1;
+  const minColBound = region ? region.minCol : 0;
+  const maxColBound = region ? region.maxCol : cols - 1;
 
-  settleBoardForDirection(state.grid, dir);
+  settleBoardForState(state, true);
 
   let totalPieceCells = 0;
   for (let py = 0; py < pieceRows; py++) {
@@ -1526,7 +1931,7 @@ export function lockActivePiece(
   if (dir === 'down') {
     for (let px = 0; px < pieceCols; px++) {
       const gx = piece.x + px;
-      if (gx < 0 || gx >= cols) continue;
+      if (gx < minColBound || gx > maxColBound || gx < 0 || gx >= cols) continue;
 
       let lowestPy = -1;
       for (let py = pieceRows - 1; py >= 0; py--) {
@@ -1537,9 +1942,9 @@ export function lockActivePiece(
       }
       if (lowestPy < 0) continue;
 
-      const startScan = Math.max(0, piece.y + lowestPy);
-      let stopRow = rows;
-      for (let scan = startScan; scan < rows; scan++) {
+      const startScan = Math.max(minRowBound, piece.y + lowestPy);
+      let stopRow = maxRowBound + 1;
+      for (let scan = startScan; scan <= maxRowBound; scan++) {
         if (state.grid[scan][gx] !== null) {
           stopRow = scan;
           break;
@@ -1551,7 +1956,7 @@ export function lockActivePiece(
         const pCell = piece.cells[py]?.[px];
         if (!pCell) continue;
         const sourceRow = piece.y + py;
-        if (writeRow < 0) {
+        if (writeRow < minRowBound) {
           overflowed = true;
           continue;
         }
@@ -1565,7 +1970,7 @@ export function lockActivePiece(
         writeRow--;
       }
 
-      if (stopRow < rows) {
+      if (stopRow <= maxRowBound) {
         const hitCell = state.grid[stopRow][gx];
         if (hitCell && hitCell.isObstacle && hitCell.obstacleStyle === 'crumble') {
           const nextHp = (hitCell.crumbleHp ?? 2) - 1;
@@ -1582,7 +1987,7 @@ export function lockActivePiece(
   } else if (dir === 'up') {
     for (let px = 0; px < pieceCols; px++) {
       const gx = piece.x + px;
-      if (gx < 0 || gx >= cols) continue;
+      if (gx < minColBound || gx > maxColBound || gx < 0 || gx >= cols) continue;
 
       let topPy = -1;
       for (let py = 0; py < pieceRows; py++) {
@@ -1593,9 +1998,9 @@ export function lockActivePiece(
       }
       if (topPy < 0) continue;
 
-      const startScan = Math.min(rows - 1, piece.y + topPy);
-      let stopRow = -1;
-      for (let scan = startScan; scan >= 0; scan--) {
+      const startScan = Math.min(maxRowBound, piece.y + topPy);
+      let stopRow = minRowBound - 1;
+      for (let scan = startScan; scan >= minRowBound; scan--) {
         if (state.grid[scan][gx] !== null) {
           stopRow = scan;
           break;
@@ -1607,7 +2012,7 @@ export function lockActivePiece(
         const pCell = piece.cells[py]?.[px];
         if (!pCell) continue;
         const sourceRow = piece.y + py;
-        if (writeRow >= rows) {
+        if (writeRow > maxRowBound) {
           overflowed = true;
           continue;
         }
@@ -1624,7 +2029,7 @@ export function lockActivePiece(
   } else if (dir === 'right') {
     for (let py = 0; py < pieceRows; py++) {
       const gy = piece.y + py;
-      if (gy < 0 || gy >= rows) continue;
+      if (gy < minRowBound || gy > maxRowBound || gy < 0 || gy >= rows) continue;
 
       let rightPx = -1;
       for (let px = pieceCols - 1; px >= 0; px--) {
@@ -1635,9 +2040,9 @@ export function lockActivePiece(
       }
       if (rightPx < 0) continue;
 
-      const startScan = Math.max(0, piece.x + rightPx);
-      let stopCol = cols;
-      for (let scan = startScan; scan < cols; scan++) {
+      const startScan = Math.max(minColBound, piece.x + rightPx);
+      let stopCol = maxColBound + 1;
+      for (let scan = startScan; scan <= maxColBound; scan++) {
         if (state.grid[gy][scan] !== null) {
           stopCol = scan;
           break;
@@ -1649,7 +2054,7 @@ export function lockActivePiece(
         const pCell = piece.cells[py]?.[px];
         if (!pCell) continue;
         const sourceCol = piece.x + px;
-        if (writeCol < 0) {
+        if (writeCol < minColBound) {
           overflowed = true;
           continue;
         }
@@ -1666,7 +2071,7 @@ export function lockActivePiece(
   } else {
     for (let py = 0; py < pieceRows; py++) {
       const gy = piece.y + py;
-      if (gy < 0 || gy >= rows) continue;
+      if (gy < minRowBound || gy > maxRowBound || gy < 0 || gy >= rows) continue;
 
       let leftPx = -1;
       for (let px = 0; px < pieceCols; px++) {
@@ -1677,9 +2082,9 @@ export function lockActivePiece(
       }
       if (leftPx < 0) continue;
 
-      const startScan = Math.min(cols - 1, piece.x + leftPx);
-      let stopCol = -1;
-      for (let scan = startScan; scan >= 0; scan--) {
+      const startScan = Math.min(maxColBound, piece.x + leftPx);
+      let stopCol = minColBound - 1;
+      for (let scan = startScan; scan >= minColBound; scan--) {
         if (state.grid[gy][scan] !== null) {
           stopCol = scan;
           break;
@@ -1691,7 +2096,7 @@ export function lockActivePiece(
         const pCell = piece.cells[py]?.[px];
         if (!pCell) continue;
         const sourceCol = piece.x + px;
-        if (writeCol >= cols) {
+        if (writeCol > maxColBound) {
           overflowed = true;
           continue;
         }
@@ -1716,7 +2121,7 @@ export function lockActivePiece(
   }
 
   if (crumbleChanged) {
-    settleBoardForDirection(state.grid, dir, true);
+    settleBoardForState(state, true);
   }
 
   if ((!noCellsEntered || options?.zenNoLoss) && state.activeShift === 'cyclotron_flow') {
@@ -1847,8 +2252,12 @@ export function lockActivePiece(
     settleBoardForDirection(state.grid, nextDir, false);
   }
 
+  if (state.wellRegions && state.wellRegions.length > 0 && (!noCellsEntered || options?.zenNoLoss)) {
+    state.activeWellIndex = ((state.activeWellIndex ?? 0) + 1) % state.wellRegions.length;
+  }
+
   const prevSquaresCount = state.squares.length;
-  state.squares = detectBoardMarks(state.grid);
+  state.squares = detectBoardMarksForState(state);
   const chainActivated = state.grid.some((row) =>
     row.some((c) => c !== null && c.chainMarked)
   );
@@ -1911,7 +2320,7 @@ function trySpringBouncePiece(
     !piece ||
     state.activeShift !== 'spring_bounce' ||
     piece.springBounced ||
-    (state.gravityDirection ?? 'down') !== 'down'
+    getActiveGravityDirection(state) !== 'down'
   ) {
     return false;
   }
@@ -1991,7 +2400,7 @@ export function softDropStep(
   }
   state.orientationGraceTimer = 0;
 
-  const { gx, gy } = getGravityVector(state.gravityDirection);
+  const { gx, gy } = getGravityVector(getActiveGravityDirection(state));
   if (canPlacePiece(state, state.activePiece, gx, gy)) {
     state.activePiece = {
       ...state.activePiece,
@@ -2048,7 +2457,7 @@ export function hardDropPiece(
   let rowsDropped = 0;
   const bouncePositions: Array<{ x: number; y: number }> = [];
 
-  const { gx, gy } = getGravityVector(state.gravityDirection);
+  const { gx, gy } = getGravityVector(getActiveGravityDirection(state));
   const maxSteps = state.cols + state.rows + 8;
   while (rowsDropped < maxSteps && canPlacePiece(state, state.activePiece, gx, gy)) {
     state.activePiece = {
@@ -2116,7 +2525,7 @@ export function stepPassiveGravity(
     return { moved: false, landed: false, squaresFormed: 0, chainActivated: false, zenTrimmed: false };
   }
 
-  const { gx, gy } = getGravityVector(state.gravityDirection);
+  const { gx, gy } = getGravityVector(getActiveGravityDirection(state));
 
   if (state.spawnTimer < spawnDelay) {
     const nextSpawn = state.spawnTimer + dt;
@@ -2218,7 +2627,32 @@ const SHATTER_DIRS: ReadonlyArray<readonly [number, number]> = [
   [-1, 0],
 ];
 
-function flushPendingClearCells(state: BoardState): {
+function getChainCellEffectiveColor(
+  grid: (Cell | null)[][],
+  r: number,
+  c: number
+): CellColor {
+  const cell = grid[r]?.[c];
+  if (!cell) return 0;
+  if (!cell.isWild) return cell.color;
+  const rows = grid.length;
+  const cols = grid[0]?.length ?? 0;
+  for (let d = 0; d < 4; d++) {
+    const nr = r + SHATTER_DIRS[d][0];
+    const nc = c + SHATTER_DIRS[d][1];
+    if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) continue;
+    const neighbor = grid[nr][nc];
+    if (neighbor && !neighbor.isObstacle && !neighbor.isWild) {
+      return neighbor.color;
+    }
+  }
+  return cell.color;
+}
+
+function flushPendingClearCells(
+  state: BoardState,
+  colorFilter?: CellColor | null
+): {
   cellsRemoved: number;
   clearedPositions: Array<{ x: number; y: number; color: CellColor }>;
 } {
@@ -2242,9 +2676,16 @@ function flushPendingClearCells(state: BoardState): {
     for (let c = 0; c < cols; c++) {
       const cell = rowArr[c];
       if (cell && cell.pendingClear) {
+        if (colorFilter !== undefined && colorFilter !== null) {
+          const effectivePendingColor = cell.pendingClearColor ?? cell.color;
+          if (effectivePendingColor !== colorFilter) {
+            continue;
+          }
+        }
         if ((cell.frostHp ?? 0) > 1) {
           cell.frostHp = 1;
           cell.pendingClear = false;
+          cell.pendingClearColor = undefined;
           cell.landFlash = 0.95;
           continue;
         }
@@ -2312,9 +2753,9 @@ function flushPendingClearCells(state: BoardState): {
 
   if (clearedPositions.length > 0 || pendingIndices.length === 0) {
     if (clearedPositions.length > 0) {
-      settleBoardForDirection(state.grid, state.gravityDirection);
+      settleBoardForState(state, true);
     }
-    state.squares = detectBoardMarks(state.grid);
+    state.squares = detectBoardMarksForState(state);
   }
 
   return { cellsRemoved, clearedPositions };
@@ -2350,7 +2791,8 @@ export function getSweepColumnForRow(
 export function stepTimelineColumn(
   state: BoardState,
   col: number,
-  direction: 'ltr' | 'rtl' = 'ltr'
+  direction: 'ltr' | 'rtl' = 'ltr',
+  options?: { colorFilter?: CellColor | null }
 ): { cellsRemovedNow: number; clearedPositions: Array<{ x: number; y: number; color: CellColor }> } {
   const rows = state.grid.length;
   const cols = state.grid[0]?.length ?? state.cols ?? BOARD_COLS;
@@ -2358,7 +2800,8 @@ export function stepTimelineColumn(
     return { cellsRemovedNow: 0, clearedPositions: [] };
   }
 
-  state.squares = detectBoardMarks(state.grid);
+  const colorFilter = options?.colorFilter ?? null;
+  state.squares = detectBoardMarksForState(state);
 
   const isModifiedLineSweep =
     direction === 'ltr' &&
@@ -2368,11 +2811,15 @@ export function stepTimelineColumn(
   for (let r = 0; r < rows; r++) {
     const rowCol = isModifiedLineSweep ? getSweepColumnForRow(state, r, col) : col;
     const cell = state.grid[r][rowCol];
-    if (cell && (cell.inSquare || cell.chainMarked)) {
+    if (!cell || cell.isObstacle) continue;
+    const effColor = getChainCellEffectiveColor(state.grid, r, rowCol);
+    const matchesColor = colorFilter === null || effColor === colorFilter;
+    if ((cell.inSquare || cell.chainMarked) && matchesColor) {
       cell.sweptCol = true;
     }
-    if (cell && cell.chainMarked && !cell.pendingClear) {
+    if (cell.chainMarked && !cell.pendingClear && matchesColor) {
       cell.pendingClear = true;
+      cell.pendingClearColor = colorFilter ?? effColor;
       state.sweepState.chainClearedThisSweep++;
     }
   }
@@ -2384,6 +2831,7 @@ export function stepTimelineColumn(
 
   for (let i = 0; i < state.squares.length; i++) {
     const sq = state.squares[i];
+    if (colorFilter !== null && sq.color !== colorFilter) continue;
     const sqCol = isModifiedLineSweep
       ? getSweepColumnForRow(state, getSquareOwnerRow(sq.y), col)
       : col;
@@ -2394,14 +2842,27 @@ export function stepTimelineColumn(
         state.sweepState.countedSquareKeys.add(key);
         state.sweepState.squaresThisSweep++;
       }
+      const markColor = colorFilter ?? sq.color;
       const c00 = state.grid[sq.y][sq.x];
       const c01 = state.grid[sq.y][sq.x + 1];
       const c10 = state.grid[sq.y + 1][sq.x];
       const c11 = state.grid[sq.y + 1][sq.x + 1];
-      if (c00) c00.pendingClear = true;
-      if (c01) c01.pendingClear = true;
-      if (c10) c10.pendingClear = true;
-      if (c11) c11.pendingClear = true;
+      if (c00) {
+        c00.pendingClear = true;
+        c00.pendingClearColor = markColor;
+      }
+      if (c01) {
+        c01.pendingClear = true;
+        c01.pendingClearColor = markColor;
+      }
+      if (c10) {
+        c10.pendingClear = true;
+        c10.pendingClearColor = markColor;
+      }
+      if (c11) {
+        c11.pendingClear = true;
+        c11.pendingClearColor = markColor;
+      }
     }
   }
 
@@ -2414,7 +2875,11 @@ export function stepTimelineColumn(
     for (let r = 0; r < rows && !hasPendingCells; r++) {
       const rowArr = state.grid[r];
       for (let c = 0; c < cols; c++) {
-        if (rowArr[c]?.pendingClear) {
+        const cell = rowArr[c];
+        if (
+          cell?.pendingClear &&
+          (colorFilter === null || (cell.pendingClearColor ?? cell.color) === colorFilter)
+        ) {
           hasPendingCells = true;
           break;
         }
@@ -2423,6 +2888,7 @@ export function stepTimelineColumn(
     if (hasPendingCells) {
       for (let i = 0; i < state.squares.length; i++) {
         const sq = state.squares[i];
+        if (colorFilter !== null && sq.color !== colorFilter) continue;
         const c00 = state.grid[sq.y][sq.x];
         const c01 = state.grid[sq.y][sq.x + 1];
         const c10 = state.grid[sq.y + 1][sq.x];
@@ -2459,7 +2925,8 @@ export function stepTimelineColumn(
             nxt &&
             nxt.chainMarked &&
             !nxt.pendingClear &&
-            (cur.isWild || nxt.isWild || cur.color === nxt.color)
+            (cur.isWild || nxt.isWild || cur.color === nxt.color) &&
+            (colorFilter === null || getChainCellEffectiveColor(state.grid, r, rowCol) === colorFilter)
           ) {
             bridgesNext = true;
           }
@@ -2469,7 +2936,9 @@ export function stepTimelineColumn(
   } else if (direction === 'rtl') {
     if (col > minActiveCol) {
       for (let i = 0; i < state.squares.length; i++) {
-        if (state.squares[i].x + 1 === col) {
+        const sq = state.squares[i];
+        if (colorFilter !== null && sq.color !== colorFilter) continue;
+        if (sq.x + 1 === col) {
           bridgesNext = true;
           break;
         }
@@ -2483,7 +2952,8 @@ export function stepTimelineColumn(
             nxt &&
             cur.chainMarked &&
             nxt.chainMarked &&
-            (cur.isWild || nxt.isWild || cur.color === nxt.color)
+            (cur.isWild || nxt.isWild || cur.color === nxt.color) &&
+            (colorFilter === null || getChainCellEffectiveColor(state.grid, r, col) === colorFilter)
           ) {
             bridgesNext = true;
             break;
@@ -2493,7 +2963,9 @@ export function stepTimelineColumn(
     }
   } else if (col < maxActiveCol) {
     for (let i = 0; i < state.squares.length; i++) {
-      if (state.squares[i].x === col) {
+      const sq = state.squares[i];
+      if (colorFilter !== null && sq.color !== colorFilter) continue;
+      if (sq.x === col) {
         bridgesNext = true;
         break;
       }
@@ -2507,7 +2979,8 @@ export function stepTimelineColumn(
           nxt &&
           cur.chainMarked &&
           nxt.chainMarked &&
-          (cur.isWild || nxt.isWild || cur.color === nxt.color)
+          (cur.isWild || nxt.isWild || cur.color === nxt.color) &&
+          (colorFilter === null || getChainCellEffectiveColor(state.grid, r, col) === colorFilter)
         ) {
           bridgesNext = true;
           break;
@@ -2519,7 +2992,129 @@ export function stepTimelineColumn(
   state.sweepState.lastCol = col;
 
   if (!bridgesNext) {
-    const flushed = flushPendingClearCells(state);
+    const flushed = flushPendingClearCells(state, colorFilter);
+    state.sweepState.cellsClearedThisSweep += flushed.cellsRemoved;
+    return {
+      cellsRemovedNow: flushed.cellsRemoved,
+      clearedPositions: flushed.clearedPositions,
+    };
+  }
+
+  return { cellsRemovedNow: 0, clearedPositions: [] };
+}
+
+export function stepLighthouseSweep(
+  state: BoardState,
+  prevAngle: number,
+  currAngle: number,
+  colorFilter: CellColor
+): { cellsRemovedNow: number; clearedPositions: Array<{ x: number; y: number; color: CellColor }> } {
+  const rows = state.grid.length;
+  const cols = state.grid[0]?.length ?? state.cols ?? BOARD_COLS;
+  if (rows === 0 || cols === 0) {
+    return { cellsRemovedNow: 0, clearedPositions: [] };
+  }
+
+  state.squares = detectBoardMarksForState(state);
+  const hiAngle = Math.max(prevAngle, currAngle) + 1e-6;
+  const loAngle = Math.min(prevAngle, currAngle) - 1e-6;
+  const originX = cols / 2;
+  const originY = rows;
+  const cellAngle = (cx: number, cy: number): number =>
+    Math.atan2(originY - cy, cx - originX);
+
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const cell = state.grid[r][c];
+      if (!cell || cell.isObstacle) continue;
+      const effColor = getChainCellEffectiveColor(state.grid, r, c);
+      if (effColor !== colorFilter) continue;
+      const theta = cellAngle(c + 0.5, r + 0.5);
+      if (theta <= hiAngle && theta >= loAngle) {
+        if (cell.inSquare || cell.chainMarked) {
+          cell.sweptCol = true;
+        }
+        if (cell.chainMarked && !cell.pendingClear) {
+          cell.pendingClear = true;
+          cell.pendingClearColor = colorFilter;
+          state.sweepState.chainClearedThisSweep++;
+        }
+      }
+    }
+  }
+
+  let bridgesNext = false;
+  for (let i = 0; i < state.squares.length; i++) {
+    const sq = state.squares[i];
+    if (sq.color !== colorFilter) continue;
+    const sqTheta = cellAngle(sq.x + 1, sq.y + 1);
+    if (sqTheta <= hiAngle && sqTheta >= loAngle) {
+      const key = `${sq.x},${sq.y}`;
+      if (!state.sweepState.countedSquareKeys.has(key)) {
+        state.sweepState.countedSquareKeys.add(key);
+        state.sweepState.squaresThisSweep++;
+      }
+      const c00 = state.grid[sq.y][sq.x];
+      const c01 = state.grid[sq.y][sq.x + 1];
+      const c10 = state.grid[sq.y + 1][sq.x];
+      const c11 = state.grid[sq.y + 1][sq.x + 1];
+      if (c00) {
+        c00.pendingClear = true;
+        c00.pendingClearColor = colorFilter;
+      }
+      if (c01) {
+        c01.pendingClear = true;
+        c01.pendingClearColor = colorFilter;
+      }
+      if (c10) {
+        c10.pendingClear = true;
+        c10.pendingClearColor = colorFilter;
+      }
+      if (c11) {
+        c11.pendingClear = true;
+        c11.pendingClearColor = colorFilter;
+      }
+    } else if (sqTheta < currAngle) {
+      const c00 = state.grid[sq.y][sq.x];
+      const c01 = state.grid[sq.y][sq.x + 1];
+      const c10 = state.grid[sq.y + 1][sq.x];
+      const c11 = state.grid[sq.y + 1][sq.x + 1];
+      if (c00?.pendingClear || c01?.pendingClear || c10?.pendingClear || c11?.pendingClear) {
+        bridgesNext = true;
+      }
+    }
+  }
+
+  if (!bridgesNext && currAngle > -0.02) {
+    for (let r = 0; r < rows && !bridgesNext; r++) {
+      for (let c = 0; c < cols; c++) {
+        const cur = state.grid[r][c];
+        if (!cur?.pendingClear || !cur.chainMarked) continue;
+        for (let d = 0; d < 4; d++) {
+          const nr = r + SHATTER_DIRS[d][0];
+          const nc = c + SHATTER_DIRS[d][1];
+          if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) continue;
+          const nxt = state.grid[nr][nc];
+          if (
+            nxt &&
+            nxt.chainMarked &&
+            !nxt.pendingClear &&
+            getChainCellEffectiveColor(state.grid, nr, nc) === colorFilter &&
+            cellAngle(nc + 0.5, nr + 0.5) < currAngle
+          ) {
+            bridgesNext = true;
+            break;
+          }
+        }
+        if (bridgesNext) break;
+      }
+    }
+  }
+
+  state.lighthouseAngle = currAngle;
+
+  if (!bridgesNext) {
+    const flushed = flushPendingClearCells(state, colorFilter);
     state.sweepState.cellsClearedThisSweep += flushed.cellsRemoved;
     return {
       cellsRemovedNow: flushed.cellsRemoved,
@@ -2613,6 +3208,7 @@ export function finalizeSweep(state: BoardState, hadClearsDuringSweep: boolean):
   if (singleColorBonus) state.singleColorCount += 1;
   if (allDeletedBonus) state.allClearCount += 1;
 
+  state.sweepPassCount = (state.sweepPassCount ?? 0) + 1;
   state.sweepState = createSweepState();
 
   if (!anyCleared && totalSquares === 0) {
@@ -2709,8 +3305,8 @@ export function stepRisingTideSweep(
       state.grid[0][c] = null;
     }
     state.risingTideRows = Math.max(0, currTide - 1);
-    settleBoardForDirection(state.grid, state.gravityDirection, true);
-    state.squares = detectBoardMarks(state.grid);
+    settleBoardForState(state, true);
+    state.squares = detectBoardMarksForState(state);
     return true;
   }
 
@@ -2748,7 +3344,7 @@ export function stepRisingTideSweep(
     };
   }
   state.risingTideRows = currTide + 1;
-  state.squares = detectBoardMarks(state.grid);
+  state.squares = detectBoardMarksForState(state);
   return true;
 }
 
@@ -2808,8 +3404,8 @@ export function stepCeilingPressSweep(
     }
   }
   state.ceilingLockRows = nextLock;
-  settleBoardForDirection(state.grid, state.gravityDirection, true);
-  state.squares = detectBoardMarks(state.grid);
+  settleBoardForState(state, true);
+  state.squares = detectBoardMarksForState(state);
   return true;
 }
 
@@ -2885,8 +3481,8 @@ export function applyGarbageToBoard(
       landFlash: 0.6,
     };
   }
-  settleBoardForDirection(state.grid, state.gravityDirection);
-  state.squares = detectBoardMarks(state.grid);
+  settleBoardForState(state, true);
+  state.squares = detectBoardMarksForState(state);
 }
 
 export function resolveBattleGarbageSwap(
@@ -3063,6 +3659,13 @@ export function transformBoardForOrientation(
   state.gravityDirection = 'down';
   state.activeShift = null;
   state.patrollingBumper = null;
+  state.windmillState = null;
+  state.pistonState = null;
+  state.wellRegions = undefined;
+  state.activeWellIndex = 0;
+  state.lighthouseAngle = undefined;
+  state.pieceShapeMode = 'standard_2x2';
+  state.colorCount = 2;
   state.shiftEffect = null;
   state.score += displacedBonusPoints;
   state.isGameOver = false;

@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
+  ChevronLeft,
+  ChevronRight,
   SlidersHorizontal,
   Volume2,
   VolumeX,
@@ -43,6 +45,8 @@ interface TitleScreenProps {
   onChangeMusicVolume: (val: number) => void;
   onChangeSfxVolume: (val: number) => void;
   previewSkin: SkinConfig;
+  onStepPreviewSkin: (delta: -1 | 1) => void;
+  getSpectrumSnapshot?: () => { bands: number[]; hasLiveAudio: boolean };
   dailySpec: DailyChallengeSpec;
   onStart: () => void;
   onOpenShiftSettings: () => void;
@@ -96,6 +100,8 @@ const MODE_LIST: Array<{ id: GameMode; label: string; shortLabel: string; summar
     summary: 'Shared-screen two-player showdown with sweep attacks.',
   },
 ];
+
+const EQ_HEIGHTS = [35, 58, 42, 82, 64, 95, 52, 74, 46, 62];
 
 const VolumeSlider: React.FC<{
   id: string;
@@ -399,6 +405,8 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
   onChangeMusicVolume,
   onChangeSfxVolume,
   previewSkin,
+  onStepPreviewSkin,
+  getSpectrumSnapshot,
   dailySpec,
   onStart,
   onOpenShiftSettings,
@@ -412,6 +420,8 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
   );
   const [audioMenuOpen, setAudioMenuOpen] = useState(false);
   const audioMenuRef = React.useRef<HTMLDivElement | null>(null);
+  const eqBarRefs = React.useRef<Array<HTMLSpanElement | null>>([]);
+  const smoothedBarsRef = React.useRef<number[]>(EQ_HEIGHTS.map((h) => h / 100));
 
   useEffect(() => {
     if (!audioMenuOpen) return;
@@ -441,6 +451,35 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
     }, 1000);
     return () => window.clearInterval(id);
   }, [selectedMode, dailySpec.dateKey]);
+
+  useEffect(() => {
+    let rafId = 0;
+    const beatHz = Math.max(40, previewSkin.bpm) / 60;
+    const updateBars = (nowMs: number) => {
+      const t = nowMs / 1000;
+      const spec = getSpectrumSnapshot?.();
+      const useLive = Boolean(spec?.hasLiveAudio && !muted);
+      const bars = smoothedBarsRef.current;
+
+      for (let i = 0; i < EQ_HEIGHTS.length; i++) {
+        const el = eqBarRefs.current[i];
+        if (!el) continue;
+        const target = useLive
+          ? Math.max(0.16, Math.min(1, spec!.bands[i] * 1.45))
+          : 0.24 +
+            0.56 *
+              Math.pow(
+                0.5 + 0.5 * Math.sin(t * beatHz * Math.PI * 1.5 - i * 0.55),
+                1.6
+              );
+        bars[i] += (target - bars[i]) * (useLive ? 0.34 : 0.16);
+        el.style.transform = `scaleY(${bars[i].toFixed(3)})`;
+      }
+      rafId = window.requestAnimationFrame(updateBars);
+    };
+    rafId = window.requestAnimationFrame(updateBars);
+    return () => window.cancelAnimationFrame(rafId);
+  }, [getSpectrumSnapshot, muted, previewSkin.bpm]);
 
   const { palette } = previewSkin;
   const activeModeObj =
@@ -544,6 +583,63 @@ export const TitleScreen: React.FC<TitleScreenProps> = ({
         </div>
 
         <div className="flex items-center gap-2 pointer-events-auto">
+          <div
+            className="hidden sm:flex items-center gap-1.5 rounded-xl px-2 py-1 transition-colors duration-300"
+            style={{
+              backgroundColor: topChipBg,
+              color: heroInk,
+              border: topChipBorder,
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => onStepPreviewSkin(-1)}
+              aria-label="Previous world soundtrack"
+              className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-[#201c2c]/10 transition-colors cursor-pointer"
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+
+            <div className="flex items-center gap-2 px-1">
+              <div
+                className="flex items-end gap-[2px] h-3.5 shrink-0"
+                aria-hidden="true"
+              >
+                {EQ_HEIGHTS.slice(0, 5).map((h, i) => (
+                  <span
+                    key={i}
+                    ref={(el) => {
+                      eqBarRefs.current[i] = el;
+                    }}
+                    className="w-[2.5px] h-3.5 rounded-t-xs origin-bottom"
+                    style={{
+                      transform: `scaleY(${(h / 100).toFixed(2)})`,
+                      backgroundColor: darkSky ? '#faf6ee' : palette.hudAccent,
+                    }}
+                  />
+                ))}
+              </div>
+              <span className="text-xs font-semibold whitespace-nowrap">
+                {previewSkin.name}
+              </span>
+              <span
+                className="text-[11px] font-mono-tabular whitespace-nowrap hidden md:inline"
+                style={{ color: heroMuted }}
+              >
+                · {previewSkin.music.genreLabel}
+              </span>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => onStepPreviewSkin(1)}
+              aria-label="Next world soundtrack"
+              className="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-[#201c2c]/10 transition-colors cursor-pointer"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </div>
+
           <button
             type="button"
             data-testid="open-shift-settings-title"

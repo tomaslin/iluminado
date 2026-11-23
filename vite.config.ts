@@ -125,8 +125,9 @@ export default defineConfig(() => {
           ],
         },
         devOptions: {
-          enabled: true,
-          type: 'module',
+          // Dev SW registration calls import.meta.hot.send() unconditionally, which throws
+          // when HMR WebSockets are disabled or blocked behind the dev preview proxy.
+          enabled: false,
         },
       }),
     ],

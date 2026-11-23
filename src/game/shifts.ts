@@ -4,7 +4,8 @@ import {
   createEmptyGrid,
   createShiftSchedulerState,
   createSweepState,
-  detectBoardMarks,
+  detectBoardMarksForState,
+  getActiveWellRegion,
   getPieceDimensions,
   getPieceInitialPos,
   getSpawnColForWidth,
@@ -12,16 +13,19 @@ import {
   rotateBoard90,
   settleBoard,
   settleBoardForDirection,
+  settleBoardForState,
   stepCeilingPressSweep,
   stepRisingTideSweep,
 } from './engine';
 import {
   BoardState,
+  BoardWellRegion,
   Cell,
   CellColor,
   GravityDirection,
   ObstacleVisualStyle,
   PatrollingBumperState,
+  Piece,
   PieceShapeMode,
   ShiftDraftOption,
   ShiftPolarity,
@@ -569,6 +573,206 @@ export const SHIFT_DEFINITIONS: ShiftDefinition[] = [
     description:
       'Locking a piece on the beat awards +150 bonus points and charges Veto Tokens every 3 beat-locks.',
   },
+  {
+    id: 'twin_wells',
+    name: 'Twin Wells',
+    shortLabel: 'Twin Wells',
+    category: 'silhouette',
+    polarity: 'neutral',
+    requiresBricks: false,
+    description:
+      'Cleaves the playfield into twin 7-wide wells separated by a glowing 2-col divider; bricks alternate left and right.',
+  },
+  {
+    id: 'dual_screen',
+    name: 'Dual Screen',
+    shortLabel: 'Dual Screen',
+    category: 'silhouette',
+    polarity: 'neutral',
+    requiresBricks: false,
+    description:
+      'Stacks two 10×7 decks vertically across a central hinge divider; bricks alternate decks under one vertical sweep.',
+  },
+  {
+    id: 'clamshell',
+    name: 'Clamshell',
+    shortLabel: 'Clamshell',
+    category: 'silhouette',
+    polarity: 'neutral',
+    requiresBricks: false,
+    description:
+      'Mirrors two 10×8 decks away from a central seam: top bricks fall upward and bottom bricks fall downward.',
+  },
+  {
+    id: 'triptych',
+    name: 'Triptych',
+    shortLabel: 'Triptych',
+    category: 'silhouette',
+    polarity: 'neutral',
+    requiresBricks: false,
+    description:
+      'Carves a three-panel 4 + 4 + 4 altarpiece with two stone dividers; bricks rotate left, middle, and right.',
+  },
+  {
+    id: 'chromatic_wells',
+    name: 'Chromatic Wells',
+    shortLabel: 'Chroma Wells',
+    category: 'silhouette',
+    polarity: 'neutral',
+    requiresBricks: false,
+    description:
+      'Splits into twin chromatic wells where left clears A and right clears B; roles flip every 2 sweeps.',
+  },
+  {
+    id: 'shell_game',
+    name: 'Shell Game',
+    shortLabel: 'Shell Game',
+    category: 'swaps',
+    polarity: 'neutral',
+    requiresBricks: false,
+    description:
+      'Divides play into twin wells that trade and mirror their stacks across the gutter every 2 sweeps.',
+  },
+  {
+    id: 'dueling_beams',
+    name: 'Dueling Beams',
+    shortLabel: 'Duel Beams',
+    category: 'core',
+    polarity: 'neutral',
+    requiresBricks: false,
+    description:
+      'Two color-tinted beams cross in opposite directions: left-to-right clears A and right-to-left clears B.',
+  },
+  {
+    id: 'sun_moon',
+    name: 'Sun & Moon',
+    shortLabel: 'Sun & Moon',
+    category: 'core',
+    polarity: 'neutral',
+    requiresBricks: false,
+    description:
+      'Day and night cycle on every pass: warm Sun sweeps clear color A while cool Moon sweeps clear color B.',
+  },
+  {
+    id: 'trichroma_beams',
+    name: 'Trichroma Beams',
+    shortLabel: 'Tri Beams',
+    category: 'core',
+    polarity: 'neutral',
+    requiresBricks: false,
+    description:
+      'Activates 3-color blocks with three evenly spaced beams, each clearing only its matching color.',
+  },
+  {
+    id: 'lighthouse',
+    name: 'Lighthouse',
+    shortLabel: 'Lighthouse',
+    category: 'core',
+    polarity: 'neutral',
+    requiresBricks: false,
+    description:
+      'A rotating searchlight sweeps from floor center, clearing only its active beam color before shifting hue.',
+  },
+  {
+    id: 'diamond_arena',
+    name: 'Diamond Arena',
+    shortLabel: 'Diamond',
+    category: 'silhouette',
+    polarity: 'bane',
+    requiresBricks: false,
+    description:
+      'Bevels all four corners with stair-stepped stone to sculpt an octagonal diamond playfield.',
+  },
+  {
+    id: 'cross_arena',
+    name: 'Cross Arena',
+    shortLabel: 'Cross Arena',
+    category: 'silhouette',
+    polarity: 'bane',
+    requiresBricks: false,
+    description:
+      'Fills all four corner quadrants with stone to open a crisp plus-shaped central arena.',
+  },
+  {
+    id: 'hillside_ramp',
+    name: 'Hillside Ramp',
+    shortLabel: 'Hill Ramp',
+    category: 'silhouette',
+    polarity: 'neutral',
+    requiresBricks: false,
+    description:
+      'Raises an ascending stone ramp from left to right, lifting stacks along a stepped diagonal slope.',
+  },
+  {
+    id: 'windmill',
+    name: 'Windmill',
+    shortLabel: 'Windmill',
+    category: 'obstacles',
+    polarity: 'bane',
+    requiresBricks: false,
+    description:
+      'Suspends rotating cross-vanes in mid-air that turn 90° every 2 beats into open cells without crushing.',
+  },
+  {
+    id: 'archipelago',
+    name: 'Archipelago',
+    shortLabel: 'Archipelago',
+    category: 'obstacles',
+    polarity: 'bane',
+    requiresBricks: false,
+    description:
+      'Suspends four staggered girder islands in mid-air while keeping main center drop lanes clear.',
+  },
+  {
+    id: 'piston_walls',
+    name: 'Piston Walls',
+    shortLabel: 'Piston Walls',
+    category: 'obstacles',
+    polarity: 'bane',
+    requiresBricks: false,
+    description:
+      'Motorized wall pistons pulse 0–2 blocks inward every 2 beats into empty space without crushing stacks.',
+  },
+  {
+    id: 'stalactites',
+    name: 'Stalactites',
+    shortLabel: 'Stalactites',
+    category: 'obstacles',
+    polarity: 'bane',
+    requiresBricks: false,
+    description:
+      'Hangs tapered rock teeth 1–3 rows from the ceiling on both wings while leaving the center spawn chute open.',
+  },
+  {
+    id: 'brick_pentomino',
+    name: 'Pentomino Parade',
+    shortLabel: 'Pentominoes',
+    category: 'bricks',
+    polarity: 'bane',
+    requiresBricks: false,
+    description:
+      'Transforms incoming pieces into all 12 classic 5-tile pentominoes (F, I, L, P, N, T, U, V, W, X, Y, Z).',
+  },
+  {
+    id: 'brick_colossus',
+    name: 'Colossus Bricks',
+    shortLabel: 'Colossus 4×4',
+    category: 'bricks',
+    polarity: 'neutral',
+    requiresBricks: false,
+    description:
+      'Drops massive 4×4 quadrant bricks made of four 2×2 blocks whose columns settle independently on impact.',
+  },
+  {
+    id: 'kaleidoscope_brick',
+    name: 'Kaleidoscope Brick',
+    shortLabel: 'Kaleidoscope',
+    category: 'bricks',
+    polarity: 'neutral',
+    requiresBricks: false,
+    description:
+      'Falling tetrominoes morph cleanly from shape to shape on every beat boundary until they lock.',
+  },
 ];
 
 export const ALL_SHIFT_TYPES: ShiftType[] = SHIFT_DEFINITIONS.map((d) => d.id);
@@ -624,6 +828,13 @@ export const OBSTACLE_SHIFT_SET = new Set<ShiftType>([
   'rising_tide',
   'ceiling_press',
   'frost_tiles',
+  'diamond_arena',
+  'cross_arena',
+  'hillside_ramp',
+  'windmill',
+  'archipelago',
+  'piston_walls',
+  'stalactites',
 ]);
 
 export const TILE_TYPE_SHIFT_SET = new Set<ShiftType>([
@@ -637,6 +848,9 @@ export const TILE_TYPE_SHIFT_SET = new Set<ShiftType>([
   'chameleon_rotate',
   'prism_wild_bricks',
   'crash_gem',
+  'brick_pentomino',
+  'brick_colossus',
+  'kaleidoscope_brick',
 ]);
 
 const ONE_TIME_SHIFT_SET = new Set<ShiftType>([
@@ -648,6 +862,9 @@ const ONE_TIME_SHIFT_SET = new Set<ShiftType>([
 ]);
 
 export function getNominalBoardDims(state: BoardState): { cols: number; rows: number } {
+  if (state.activeShift === 'dual_screen' || state.activeShift === 'clamshell') {
+    return { cols: state.baseCols, rows: state.baseRows };
+  }
   const baseIsPortrait = state.baseCols < state.baseRows;
   const currIsPortrait = state.cols < state.rows;
   const isRotated90 = baseIsPortrait !== currIsPortrait;
@@ -717,6 +934,12 @@ export function stripBoardObstacles(state: BoardState): void {
   state.ceilingLockRows = 0;
   state.risingTideRows = 0;
   state.beatChargeAccum = 0;
+  state.wellRegions = undefined;
+  state.activeWellIndex = 0;
+  state.sweepPassCount = 0;
+  state.lighthouseAngle = undefined;
+  state.windmillState = null;
+  state.pistonState = null;
 }
 
 export function resizeBoardSafely(
@@ -836,6 +1059,34 @@ function stabilizeActivePieceAfterShift(
 ): void {
   const cols = state.cols;
   const rows = state.rows;
+
+  if (state.activePiece && state.wellRegions && state.wellRegions.length > 0) {
+    const region = getActiveWellRegion(state);
+    const initPos = getPieceInitialPos(state, state.activePiece);
+    const dim = getPieceDimensions(state.activePiece);
+    const pieceCols = Math.max(1, dim.cols);
+    const minPlayCol = region ? region.minCol : 0;
+    const maxPlayCol = region
+      ? Math.max(minPlayCol, region.maxCol - pieceCols + 1)
+      : Math.max(0, cols - pieceCols);
+    const clampedX = Math.max(minPlayCol, Math.min(maxPlayCol, initPos.x));
+    state.activePiece = {
+      ...state.activePiece,
+      x: clampedX,
+      y: initPos.y,
+    };
+    state.spawnTimer = 0;
+    state.gravityAccum = 0;
+    state.lockTimer = 0;
+    state.lockResetCount = 0;
+    state.orientationGraceTimer = animateBricks ? 0.95 : 0;
+    state.nextQueue = state.nextQueue.map((p) => ({
+      ...p,
+      ...getPieceInitialPos(state, p),
+    }));
+    return;
+  }
+
   const dir = state.gravityDirection ?? 'down';
 
   if (state.activePiece) {
@@ -2055,7 +2306,7 @@ export function stepConveyorFloor(state: BoardState): boolean {
 
   if (moved) {
     settleBoardForDirection(state.grid, state.gravityDirection, true);
-    state.squares = detectBoardMarks(state.grid);
+    state.squares = detectBoardMarksForState(state);
   }
   return moved;
 }
@@ -2189,6 +2440,964 @@ function applyVortexSwirl(state: BoardState, animateBricks: boolean): void {
     maxLife: 1.4,
     swirlDir: 1,
   };
+}
+
+function distributeCellsAcrossWells(
+  grid: (Cell | null)[][],
+  cells: Cell[],
+  regions: BoardWellRegion[],
+  animateBricks: boolean
+): void {
+  if (cells.length === 0 || regions.length === 0) return;
+  const writeRows = regions.map((r) =>
+    r.gravity === 'up' ? r.minRow : r.maxRow
+  );
+  let regionCursor = 0;
+  const colCursors = regions.map((r) => r.minCol);
+
+  for (let i = 0; i < cells.length; i++) {
+    const cell = cells[i];
+    let placed = false;
+    for (let attempt = 0; attempt < regions.length && !placed; attempt++) {
+      const rIdx = (regionCursor + attempt) % regions.length;
+      const reg = regions[rIdx];
+      const safeCap =
+        reg.gravity === 'up'
+          ? Math.max(reg.minRow, reg.maxRow - 2)
+          : Math.min(reg.maxRow, reg.minRow + 2);
+      const span = Math.max(1, reg.maxCol - reg.minCol + 1);
+      for (let step = 0; step < span; step++) {
+        const c = reg.minCol + ((colCursors[rIdx] - reg.minCol + step) % span);
+        if (reg.gravity === 'up') {
+          for (let r = reg.minRow; r <= safeCap; r++) {
+            if (grid[r][c] === null) {
+              grid[r][c] = {
+                ...cell,
+                pendingClear: false,
+                sweptCol: false,
+                landFlash: animateBricks ? 0.45 : 0,
+              };
+              colCursors[rIdx] = reg.minCol + ((c - reg.minCol + 1) % span);
+              placed = true;
+              break;
+            }
+          }
+        } else {
+          for (let r = writeRows[rIdx]; r >= safeCap; r--) {
+            if (grid[r][c] === null) {
+              grid[r][c] = {
+                ...cell,
+                pendingClear: false,
+                sweptCol: false,
+                landFlash: animateBricks ? 0.45 : 0,
+              };
+              colCursors[rIdx] = reg.minCol + ((c - reg.minCol + 1) % span);
+              placed = true;
+              break;
+            }
+          }
+        }
+        if (placed) break;
+      }
+      if (placed) {
+        regionCursor = (rIdx + 1) % regions.length;
+      }
+    }
+  }
+}
+
+function applyTwinWells(state: BoardState, animateBricks: boolean): void {
+  const rows = state.rows;
+  const cols = state.cols;
+  const leftMid = Math.floor(cols / 2) - 1;
+  const rightMid = leftMid + 1;
+  const newGrid = createEmptyGrid(cols, rows);
+  const displaced: Cell[] = [];
+
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const cell = state.grid[r][c];
+      if (!cell || cell.isObstacle) continue;
+      if (c <= leftMid) {
+        const targetC = c - 1;
+        if (targetC >= 0) {
+          newGrid[r][targetC] = {
+            ...cell,
+            pendingClear: false,
+            sweptCol: false,
+            animOffsetX: animateBricks ? 1 : 0,
+            landFlash: animateBricks ? 0.4 : 0,
+          };
+        } else {
+          displaced.push(cell);
+        }
+      } else {
+        const targetC = c + 1;
+        if (targetC < cols) {
+          newGrid[r][targetC] = {
+            ...cell,
+            pendingClear: false,
+            sweptCol: false,
+            animOffsetX: animateBricks ? -1 : 0,
+            landFlash: animateBricks ? 0.4 : 0,
+          };
+        } else {
+          displaced.push(cell);
+        }
+      }
+    }
+  }
+
+  for (let r = 0; r < rows; r++) {
+    newGrid[r][leftMid] = makeObstacleCell('chasm', true);
+    newGrid[r][rightMid] = makeObstacleCell('chasm', true);
+  }
+
+  const regions: BoardWellRegion[] = [
+    { minCol: 0, maxCol: leftMid - 1, minRow: 0, maxRow: rows - 1, gravity: 'down' },
+    { minCol: rightMid + 1, maxCol: cols - 1, minRow: 0, maxRow: rows - 1, gravity: 'down' },
+  ];
+  distributeCellsAcrossWells(newGrid, displaced, regions, animateBricks);
+
+  state.grid = newGrid;
+  state.wellRegions = regions;
+  state.activeWellIndex = 0;
+  state.sweepPassCount = 0;
+  settleBoardForState(state, animateBricks);
+}
+
+function applyDualScreen(state: BoardState, animateBricks: boolean): void {
+  const portraitCols = Math.min(state.baseCols, state.baseRows);
+  const portraitRows = Math.max(16, state.baseCols, state.baseRows);
+  resizeBoardSafely(state, portraitCols, portraitRows, false);
+
+  const cols = state.cols;
+  const rows = state.rows;
+  const hingeStart = Math.max(4, Math.floor(rows / 2) - 1);
+  const hingeEnd = Math.min(rows - 4, hingeStart + 1);
+
+  const existingCells: Cell[] = [];
+  for (let r = rows - 1; r >= 0; r--) {
+    for (let c = 0; c < cols; c++) {
+      const cell = state.grid[r][c];
+      if (cell && !cell.isObstacle) {
+        existingCells.push(cell);
+      }
+    }
+  }
+
+  const newGrid = createEmptyGrid(cols, rows);
+  for (let r = hingeStart; r <= hingeEnd; r++) {
+    for (let c = 0; c < cols; c++) {
+      const g = makeObstacleCell('girder', true);
+      g.landFlash = animateBricks ? 0.6 : 0;
+      newGrid[r][c] = g;
+    }
+  }
+
+  const regions: BoardWellRegion[] = [
+    { minCol: 0, maxCol: cols - 1, minRow: 0, maxRow: hingeStart - 1, gravity: 'down' },
+    {
+      minCol: 0,
+      maxCol: cols - 1,
+      minRow: hingeEnd + 1,
+      maxRow: rows - 1,
+      gravity: 'down',
+      stagingMinRow: hingeStart,
+      stagingMaxRow: hingeEnd,
+    },
+  ];
+  distributeCellsAcrossWells(newGrid, existingCells, regions, animateBricks);
+
+  state.grid = newGrid;
+  state.wellRegions = regions;
+  state.activeWellIndex = 0;
+  settleBoardForState(state, animateBricks);
+}
+
+function applyClamshell(state: BoardState, animateBricks: boolean): void {
+  const portraitCols = Math.min(state.baseCols, state.baseRows);
+  const portraitRows = Math.max(16, state.baseCols, state.baseRows);
+  resizeBoardSafely(state, portraitCols, portraitRows, false);
+
+  const cols = state.cols;
+  const rows = state.rows;
+  const seamTop = Math.floor(rows / 2) - 1;
+  const seamBot = seamTop + 1;
+
+  const existingCells: Cell[] = [];
+  for (let r = rows - 1; r >= 0; r--) {
+    for (let c = 0; c < cols; c++) {
+      const cell = state.grid[r][c];
+      if (cell && !cell.isObstacle) {
+        existingCells.push(cell);
+      }
+    }
+  }
+
+  const newGrid = createEmptyGrid(cols, rows);
+  const regions: BoardWellRegion[] = [
+    { minCol: 0, maxCol: cols - 1, minRow: 0, maxRow: seamTop, gravity: 'up' },
+    { minCol: 0, maxCol: cols - 1, minRow: seamBot, maxRow: rows - 1, gravity: 'down' },
+  ];
+  distributeCellsAcrossWells(newGrid, existingCells, regions, animateBricks);
+
+  state.grid = newGrid;
+  state.wellRegions = regions;
+  state.activeWellIndex = 0;
+  state.activeShift = 'clamshell';
+  settleBoardForState(state, animateBricks);
+}
+
+function applyTriptych(state: BoardState, animateBricks: boolean): void {
+  const rows = state.rows;
+  const cols = state.cols;
+  const divWidth = cols >= 14 ? 2 : 1;
+  const wellW = Math.max(2, Math.floor((cols - divWidth * 2) / 3));
+  const d1Start = wellW;
+  const d1End = d1Start + divWidth - 1;
+  const midStart = d1End + 1;
+  const midEnd = Math.min(cols - wellW - divWidth - 1, midStart + wellW - 1);
+  const d2Start = midEnd + 1;
+  const d2End = d2Start + divWidth - 1;
+  const rightStart = d2End + 1;
+
+  const existingCells: Cell[] = [];
+  for (let r = rows - 1; r >= 0; r--) {
+    for (let c = 0; c < cols; c++) {
+      const cell = state.grid[r][c];
+      if (cell && !cell.isObstacle) {
+        existingCells.push(cell);
+      }
+    }
+  }
+
+  const newGrid = createEmptyGrid(cols, rows);
+  for (let r = 0; r < rows; r++) {
+    for (let c = d1Start; c <= d1End; c++) {
+      newGrid[r][c] = makeObstacleCell('stone', true);
+    }
+    for (let c = d2Start; c <= d2End; c++) {
+      newGrid[r][c] = makeObstacleCell('stone', true);
+    }
+  }
+
+  const regions: BoardWellRegion[] = [
+    { minCol: 0, maxCol: d1Start - 1, minRow: 0, maxRow: rows - 1, gravity: 'down' },
+    { minCol: midStart, maxCol: midEnd, minRow: 0, maxRow: rows - 1, gravity: 'down' },
+    { minCol: rightStart, maxCol: cols - 1, minRow: 0, maxRow: rows - 1, gravity: 'down' },
+  ];
+  distributeCellsAcrossWells(newGrid, existingCells, regions, animateBricks);
+
+  state.grid = newGrid;
+  state.wellRegions = regions;
+  state.activeWellIndex = 0;
+  settleBoardForState(state, animateBricks);
+}
+
+export function stepShellGameSwap(
+  state: BoardState,
+  animateBricks: boolean = true
+): boolean {
+  if (state.activeShift !== 'shell_game' || !state.wellRegions || state.wellRegions.length < 2) {
+    return false;
+  }
+  const left = state.wellRegions[0];
+  const right = state.wellRegions[1];
+  const rows = state.grid.length;
+  const cols = state.grid[0]?.length ?? state.cols;
+  const leftSpan = left.maxCol - left.minCol + 1;
+  const rightSpan = right.maxCol - right.minCol + 1;
+  if (leftSpan !== rightSpan || leftSpan <= 0) return false;
+
+  const newGrid = createEmptyGrid(cols, rows);
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const cell = state.grid[r][c];
+      if (cell?.isObstacle) {
+        newGrid[r][c] = cell;
+      }
+    }
+  }
+
+  let movedAny = false;
+  for (let r = 0; r < rows; r++) {
+    for (let i = 0; i < leftSpan; i++) {
+      const lc = left.minCol + i;
+      const rc = right.maxCol - i;
+      const lCell = state.grid[r][lc];
+      const rCell = state.grid[r][rc];
+      if (lCell && !lCell.isObstacle) {
+        newGrid[r][rc] = {
+          ...lCell,
+          pendingClear: false,
+          sweptCol: false,
+          animOffsetX: animateBricks ? lc - rc : 0,
+          animOffsetY: animateBricks ? -0.55 : 0,
+          landFlash: animateBricks ? 0.55 : 0,
+        };
+        movedAny = true;
+      }
+      if (rCell && !rCell.isObstacle) {
+        newGrid[r][lc] = {
+          ...rCell,
+          pendingClear: false,
+          sweptCol: false,
+          animOffsetX: animateBricks ? rc - lc : 0,
+          animOffsetY: animateBricks ? -0.55 : 0,
+          landFlash: animateBricks ? 0.55 : 0,
+        };
+        movedAny = true;
+      }
+    }
+  }
+
+  state.grid = newGrid;
+  settleBoardForState(state, false);
+  ensureShiftSpawnSafety(state, animateBricks);
+  state.squares = detectBoardMarksForState(state);
+  state.shiftEffect = {
+    type: 'shell_game',
+    life: 1.25,
+    maxLife: 1.25,
+    mirrorCol: cols / 2,
+  };
+  return movedAny;
+}
+
+function applyDiamondArena(state: BoardState, animateBricks: boolean): void {
+  const rows = state.rows;
+  const cols = state.cols;
+  const topWidth = Math.min(6, cols - 4);
+  const botWidth = Math.min(8, cols - 4);
+  const topLeftWall = Math.max(1, Math.floor((cols - topWidth) / 2));
+  const botLeftWall = Math.max(1, Math.floor((cols - botWidth) / 2));
+  const coords: Array<[number, number]> = [];
+  const forbiddenCols = new Set<number>([0, 1, cols - 2, cols - 1]);
+
+  const topSteps = Math.min(3, Math.max(2, Math.floor(rows * 0.3)));
+  for (let r = 0; r < topSteps; r++) {
+    const cut = Math.max(1, topLeftWall - r);
+    for (let k = 0; k < cut; k++) {
+      coords.push([r, k], [r, cols - 1 - k]);
+    }
+  }
+  const botSteps = Math.min(2, Math.max(1, Math.floor(rows * 0.25)));
+  for (let s = 0; s < botSteps; s++) {
+    const r = rows - 1 - s;
+    const cut = Math.max(1, botLeftWall - s * 2);
+    for (let k = 0; k < cut; k++) {
+      coords.push([r, k], [r, cols - 1 - k]);
+    }
+  }
+
+  const displaced: Cell[] = [];
+  for (const [r, c] of coords) {
+    if (r < 0 || r >= rows || c < 0 || c >= cols) continue;
+    const existing = state.grid[r][c];
+    if (existing && !existing.isObstacle) {
+      displaced.push(existing);
+    }
+    const st = makeObstacleCell('stone', true);
+    st.landFlash = animateBricks ? 0.65 : 0;
+    state.grid[r][c] = st;
+  }
+  rescueDisplacedCells(state.grid, displaced, forbiddenCols);
+  settleBoard(state.grid);
+}
+
+function applyCrossArena(state: BoardState, animateBricks: boolean): void {
+  const rows = state.rows;
+  const cols = state.cols;
+  const shaftW = Math.min(6, Math.max(4, cols - 4));
+  const wingW = Math.max(1, Math.floor((cols - shaftW) / 2));
+  const bandH = Math.min(4, Math.max(4, rows - 4));
+  const capH = Math.max(1, Math.floor((rows - bandH) / 2));
+  const displaced: Cell[] = [];
+  const forbiddenCols = new Set<number>();
+
+  for (let c = 0; c < wingW; c++) {
+    forbiddenCols.add(c);
+    forbiddenCols.add(cols - 1 - c);
+  }
+
+  for (let r = 0; r < rows; r++) {
+    if (r >= capH && r < rows - capH) continue;
+    for (let c = 0; c < wingW; c++) {
+      for (const colIdx of [c, cols - 1 - c]) {
+        const existing = state.grid[r][colIdx];
+        if (existing && !existing.isObstacle) {
+          displaced.push(existing);
+        }
+        const st = makeObstacleCell('stone', true);
+        st.landFlash = animateBricks ? 0.65 : 0;
+        state.grid[r][colIdx] = st;
+      }
+    }
+  }
+  rescueDisplacedCells(state.grid, displaced, forbiddenCols);
+  settleBoard(state.grid);
+}
+
+function applyHillsideRamp(state: BoardState, animateBricks: boolean): void {
+  const rows = state.rows;
+  const cols = state.cols;
+  const maxRampH = Math.min(5, Math.max(2, rows - 6));
+  const displaced: Cell[] = [];
+  for (let c = 0; c < cols; c++) {
+    const h = Math.min(maxRampH, Math.floor((c * (maxRampH + 1)) / Math.max(1, cols)));
+    if (h > 0) {
+      placeColumnShiftUp(state.grid, c, h, h, 'stone', displaced, animateBricks);
+    }
+  }
+  rescueDisplacedCells(state.grid, displaced);
+  settleBoard(state.grid);
+}
+
+function applyWindmill(state: BoardState, animateBricks: boolean): void {
+  const rows = state.rows;
+  const cols = state.cols;
+  const cx = Math.floor(cols / 2);
+  const cy = Math.max(4, Math.min(rows - 3, Math.floor(rows * 0.56)));
+  const armLength = cols >= 10 ? 2 : 1;
+  const displaced: Cell[] = [];
+
+  for (let dc = -armLength; dc <= armLength; dc++) {
+    const c = cx + dc;
+    if (c < 0 || c >= cols) continue;
+    const existing = state.grid[cy][c];
+    if (existing && !existing.isObstacle) {
+      if (cy - 1 >= 1 && state.grid[cy - 1][c] === null) {
+        state.grid[cy - 1][c] = {
+          ...existing,
+          animOffsetY: animateBricks ? 0.6 : 0,
+        };
+      } else {
+        displaced.push(existing);
+      }
+    }
+    const blade = makeObstacleCell('windmill', true);
+    blade.landFlash = animateBricks ? 0.75 : 0;
+    state.grid[cy][c] = blade;
+  }
+
+  state.windmillState = {
+    cx,
+    cy,
+    armLength,
+    orientation: 'horizontal',
+  };
+  rescueDisplacedCells(state.grid, displaced);
+  settleBoard(state.grid);
+}
+
+export function stepWindmill(state: BoardState): boolean {
+  const wm = state.windmillState;
+  if (!wm || state.activeShift !== 'windmill' || state.isGameOver) {
+    return false;
+  }
+  const rows = state.grid.length;
+  const cols = state.grid[0]?.length ?? state.cols;
+  const nextOri = wm.orientation === 'horizontal' ? 'vertical' : 'horizontal';
+
+  const targetArmCells: Array<[number, number]> = [];
+  const oldArmCells: Array<[number, number]> = [];
+  for (let d = -wm.armLength; d <= wm.armLength; d++) {
+    if (d === 0) continue;
+    if (nextOri === 'vertical') {
+      targetArmCells.push([wm.cy + d, wm.cx]);
+      oldArmCells.push([wm.cy, wm.cx + d]);
+    } else {
+      targetArmCells.push([wm.cy, wm.cx + d]);
+      oldArmCells.push([wm.cy + d, wm.cx]);
+    }
+  }
+
+  for (const [r, c] of targetArmCells) {
+    if (r < 0 || r >= rows || c < 0 || c >= cols) return false;
+    if (state.grid[r][c] !== null) return false;
+    if (state.activePiece) {
+      const p = state.activePiece;
+      const py = r - p.y;
+      const px = c - p.x;
+      if (
+        py >= 0 &&
+        py < p.cells.length &&
+        px >= 0 &&
+        px < (p.cells[py]?.length ?? 0) &&
+        p.cells[py][px] !== null
+      ) {
+        return false;
+      }
+    }
+  }
+
+  for (const [r, c] of oldArmCells) {
+    if (r >= 0 && r < rows && c >= 0 && c < cols) {
+      const cell = state.grid[r][c];
+      if (cell?.isObstacle && cell.obstacleStyle === 'windmill') {
+        state.grid[r][c] = null;
+      }
+    }
+  }
+  for (const [r, c] of targetArmCells) {
+    const blade = makeObstacleCell('windmill', true);
+    blade.landFlash = 0.45;
+    state.grid[r][c] = blade;
+  }
+  wm.orientation = nextOri;
+  settleBoardForState(state, true);
+  state.squares = detectBoardMarksForState(state);
+  return true;
+}
+
+function applyArchipelago(state: BoardState, animateBricks: boolean): void {
+  const rows = state.rows;
+  const cols = state.cols;
+  const islands: Array<{ r: number; cStart: number; cEnd: number }> =
+    cols >= 14
+      ? [
+          { r: Math.max(3, Math.floor(rows * 0.4)), cStart: 1, cEnd: 2 },
+          { r: Math.min(rows - 3, Math.floor(rows * 0.62)), cStart: 4, cEnd: 5 },
+          { r: Math.min(rows - 3, Math.floor(rows * 0.56)), cStart: cols - 6, cEnd: cols - 5 },
+          { r: Math.max(3, Math.floor(rows * 0.36)), cStart: cols - 3, cEnd: cols - 2 },
+        ]
+      : [
+          { r: Math.max(4, Math.floor(rows * 0.38)), cStart: 1, cEnd: 2 },
+          { r: Math.min(rows - 4, Math.floor(rows * 0.58)), cStart: cols - 3, cEnd: cols - 2 },
+        ];
+
+  const displaced: Cell[] = [];
+  for (const isl of islands) {
+    for (let c = isl.cStart; c <= isl.cEnd; c++) {
+      if (isl.r < 0 || isl.r >= rows || c < 0 || c >= cols) continue;
+      const existing = state.grid[isl.r][c];
+      if (existing && !existing.isObstacle) {
+        if (isl.r - 1 >= 1 && state.grid[isl.r - 1][c] === null) {
+          state.grid[isl.r - 1][c] = {
+            ...existing,
+            animOffsetY: animateBricks ? 0.5 : 0,
+          };
+        } else {
+          displaced.push(existing);
+        }
+      }
+      const girder = makeObstacleCell('girder', true);
+      girder.landFlash = animateBricks ? 0.65 : 0;
+      state.grid[isl.r][c] = girder;
+    }
+  }
+  rescueDisplacedCells(state.grid, displaced);
+  settleBoard(state.grid);
+}
+
+function applyPistonWalls(state: BoardState, animateBricks: boolean): void {
+  const rows = state.rows;
+  const cols = state.cols;
+  const startRow = Math.max(3, Math.floor(rows * 0.42));
+  const endRow = Math.min(rows - 2, startRow + Math.max(2, Math.floor(rows * 0.4)) - 1);
+  const maxDepth = cols >= 12 ? 2 : 1;
+  const initLeft = 1;
+  const initRight = maxDepth - initLeft;
+  const displaced: Cell[] = [];
+
+  for (let r = startRow; r <= endRow; r++) {
+    const existingL = state.grid[r][0];
+    if (existingL && !existingL.isObstacle) displaced.push(existingL);
+    const cellL = makeObstacleCell('piston', true);
+    cellL.landFlash = animateBricks ? 0.65 : 0;
+    state.grid[r][0] = cellL;
+
+    if (initRight > 0) {
+      const existingR = state.grid[r][cols - 1];
+      if (existingR && !existingR.isObstacle) displaced.push(existingR);
+      const cellR = makeObstacleCell('piston', true);
+      cellR.landFlash = animateBricks ? 0.65 : 0;
+      state.grid[r][cols - 1] = cellR;
+    }
+  }
+
+  state.pistonState = {
+    leftDepth: initLeft,
+    rightDepth: initRight,
+    maxDepth,
+    startRow,
+    endRow,
+    dir: 1,
+  };
+  rescueDisplacedCells(state.grid, displaced, new Set([0, cols - 1]));
+  settleBoard(state.grid);
+}
+
+export function stepPistonWalls(state: BoardState): boolean {
+  const ps = state.pistonState;
+  if (!ps || state.activeShift !== 'piston_walls' || state.isGameOver) {
+    return false;
+  }
+  const rows = state.grid.length;
+  const cols = state.grid[0]?.length ?? state.cols;
+  const startR = Math.max(0, ps.startRow);
+  const endR = Math.min(rows - 1, ps.endRow);
+
+  const pieceOccupies = (r: number, c: number): boolean => {
+    const p = state.activePiece;
+    if (!p) return false;
+    const py = r - p.y;
+    const px = c - p.x;
+    return (
+      py >= 0 &&
+      py < p.cells.length &&
+      px >= 0 &&
+      px < (p.cells[py]?.length ?? 0) &&
+      p.cells[py][px] !== null
+    );
+  };
+
+  let nextLeft = ps.leftDepth + ps.dir;
+  let nextRight = ps.rightDepth - ps.dir;
+  if (nextLeft > ps.maxDepth || nextLeft < 0 || nextRight > ps.maxDepth || nextRight < 0) {
+    ps.dir = ps.dir === 1 ? -1 : 1;
+    nextLeft = ps.leftDepth + ps.dir;
+    nextRight = ps.rightDepth - ps.dir;
+  }
+  nextLeft = Math.max(0, Math.min(ps.maxDepth, nextLeft));
+  nextRight = Math.max(0, Math.min(ps.maxDepth, nextRight));
+
+  const tryAdjustSide = (isLeft: boolean, currDepth: number, targetDepth: number): number => {
+    if (targetDepth > currDepth) {
+      const col = isLeft ? currDepth : cols - 1 - currDepth;
+      if (col < 0 || col >= cols) return currDepth;
+      for (let r = startR; r <= endR; r++) {
+        if (state.grid[r][col] !== null || pieceOccupies(r, col)) {
+          return currDepth;
+        }
+      }
+      for (let r = startR; r <= endR; r++) {
+        const pCell = makeObstacleCell('piston', true);
+        pCell.landFlash = 0.4;
+        state.grid[r][col] = pCell;
+      }
+      return currDepth + 1;
+    } else if (targetDepth < currDepth) {
+      const col = isLeft ? currDepth - 1 : cols - currDepth;
+      if (col >= 0 && col < cols) {
+        for (let r = startR; r <= endR; r++) {
+          const cell = state.grid[r][col];
+          if (cell?.isObstacle && cell.obstacleStyle === 'piston') {
+            state.grid[r][col] = null;
+          }
+        }
+      }
+      return currDepth - 1;
+    }
+    return currDepth;
+  };
+
+  const actualLeft = tryAdjustSide(true, ps.leftDepth, nextLeft);
+  const actualRight = tryAdjustSide(false, ps.rightDepth, nextRight);
+  const changed = actualLeft !== ps.leftDepth || actualRight !== ps.rightDepth;
+  ps.leftDepth = actualLeft;
+  ps.rightDepth = actualRight;
+
+  if (changed) {
+    settleBoardForState(state, true);
+    state.squares = detectBoardMarksForState(state);
+  }
+  return changed;
+}
+
+function applyStalactites(state: BoardState, animateBricks: boolean): void {
+  const rows = state.rows;
+  const cols = state.cols;
+  const spawnX = getSpawnColForWidth(cols, 2);
+  const teethCols: Array<{ col: number; depth: number }> =
+    cols >= 14
+      ? [
+          { col: 1, depth: 2 },
+          { col: 4, depth: 3 },
+          { col: cols - 5, depth: 2 },
+          { col: cols - 2, depth: 3 },
+        ]
+      : [
+          { col: 1, depth: 2 },
+          { col: cols - 2, depth: 3 },
+        ];
+
+  const displaced: Cell[] = [];
+  for (const tooth of teethCols) {
+    if (tooth.col >= spawnX - 1 && tooth.col <= spawnX + 2) continue;
+    if (tooth.col < 0 || tooth.col >= cols) continue;
+    const maxD = Math.min(tooth.depth, Math.max(1, rows - 6));
+    for (let r = 0; r < maxD; r++) {
+      const existing = state.grid[r][tooth.col];
+      if (existing && !existing.isObstacle) {
+        displaced.push(existing);
+      }
+      const st = makeObstacleCell('stalactite', true);
+      st.landFlash = animateBricks ? 0.7 : 0;
+      state.grid[r][tooth.col] = st;
+    }
+  }
+  rescueDisplacedCells(state.grid, displaced);
+  settleBoard(state.grid);
+}
+
+function ensureShiftSpawnSafety(
+  state: BoardState,
+  animateBricks: boolean
+): void {
+  const rows = state.grid.length;
+  const cols = state.grid[0]?.length ?? state.cols;
+  if (rows === 0 || cols === 0) return;
+
+  const pieceCandidates: Piece[] = [];
+  if (state.activePiece) pieceCandidates.push(state.activePiece);
+  if (state.nextQueue[0]) pieceCandidates.push(state.nextQueue[0]);
+
+  let maxPW = state.pieceShapeMode === 'colossus' ? 4 : state.pieceShapeMode === 'pentomino' ? 4 : 2;
+  let maxPH = state.pieceShapeMode === 'colossus' ? 4 : 2;
+  for (const p of pieceCandidates) {
+    const dim = getPieceDimensions(p);
+    maxPW = Math.max(maxPW, dim.cols);
+    maxPH = Math.max(maxPH, dim.rows);
+  }
+
+  let relocatedAny = false;
+
+  if (state.wellRegions && state.wellRegions.length > 0) {
+    for (const region of state.wellRegions) {
+      const regCols = Math.max(1, region.maxCol - region.minCol + 1);
+      const regRows = Math.max(1, region.maxRow - region.minRow + 1);
+      const laneW = Math.min(regCols, Math.max(2, maxPW));
+      const spawnLeft = Math.max(
+        region.minCol,
+        Math.min(region.maxCol - laneW + 1, region.minCol + getSpawnColForWidth(regCols, laneW))
+      );
+      const spawnRight = Math.min(region.maxCol, spawnLeft + laneW - 1);
+      const clearDepth = Math.min(Math.max(2, maxPH), Math.max(2, Math.floor(regRows / 3)));
+
+      const evicted: Cell[] = [];
+      for (let c = spawnLeft; c <= spawnRight; c++) {
+        if (region.gravity === 'up') {
+          const minClearR = Math.max(region.minRow, region.maxRow - clearDepth + 1);
+          for (let r = region.maxRow; r >= minClearR; r--) {
+            const cell = state.grid[r][c];
+            if (cell && !cell.isObstacle) {
+              evicted.push(cell);
+              state.grid[r][c] = null;
+              relocatedAny = true;
+            }
+          }
+        } else {
+          const maxClearR = Math.min(region.maxRow, region.minRow + clearDepth - 1);
+          for (let r = region.minRow; r <= maxClearR; r++) {
+            const cell = state.grid[r][c];
+            if (cell && !cell.isObstacle) {
+              evicted.push(cell);
+              state.grid[r][c] = null;
+              relocatedAny = true;
+            }
+          }
+        }
+      }
+
+      for (const cell of evicted) {
+        let placed = false;
+        if (region.gravity === 'up') {
+          for (let r = region.minRow; r <= region.maxRow - 2 && !placed; r++) {
+            for (let c = region.minCol; c <= region.maxCol; c++) {
+              if (c >= spawnLeft && c <= spawnRight && r > region.maxRow - clearDepth) continue;
+              if (state.grid[r][c] === null) {
+                state.grid[r][c] = {
+                  ...cell,
+                  pendingClear: false,
+                  sweptCol: false,
+                  landFlash: animateBricks ? 0.45 : 0,
+                };
+                placed = true;
+                break;
+              }
+            }
+          }
+        } else {
+          for (let r = region.maxRow; r >= region.minRow + 2 && !placed; r--) {
+            for (let c = region.minCol; c <= region.maxCol; c++) {
+              if (c >= spawnLeft && c <= spawnRight && r < region.minRow + clearDepth) continue;
+              if (state.grid[r][c] === null) {
+                state.grid[r][c] = {
+                  ...cell,
+                  pendingClear: false,
+                  sweptCol: false,
+                  landFlash: animateBricks ? 0.45 : 0,
+                };
+                placed = true;
+                break;
+              }
+            }
+          }
+        }
+        if (!placed) {
+          state.score += 25;
+        }
+      }
+    }
+
+    if (relocatedAny) {
+      settleBoardForState(state, false);
+    }
+    state.isGameOver = false;
+    return;
+  }
+
+  const dir: GravityDirection = state.gravityDirection ?? 'down';
+  const minPlayCol = state.lockedColumnsLeft;
+  const maxPlayCol = Math.max(minPlayCol, cols - 1 - state.lockedColumnsRight);
+  const availCols = Math.max(1, maxPlayCol - minPlayCol + 1);
+  const laneW = Math.min(availCols, Math.max(2, maxPW));
+  const laneH = Math.min(rows, Math.max(2, maxPH));
+  const evicted: Cell[] = [];
+
+  if (dir === 'down' || dir === 'up') {
+    const spawnLeft = Math.max(
+      minPlayCol,
+      Math.min(maxPlayCol - laneW + 1, getSpawnColForWidth(cols, laneW))
+    );
+    const spawnRight = Math.min(maxPlayCol, spawnLeft + laneW - 1);
+    const clearDepth = Math.min(Math.max(2, maxPH), Math.max(2, rows - 4));
+
+    for (let c = spawnLeft; c <= spawnRight; c++) {
+      if (dir === 'down') {
+        for (let r = 0; r < clearDepth; r++) {
+          const cell = state.grid[r][c];
+          if (cell && !cell.isObstacle) {
+            evicted.push(cell);
+            state.grid[r][c] = null;
+            relocatedAny = true;
+          }
+        }
+      } else {
+        for (let r = rows - clearDepth; r < rows; r++) {
+          const cell = state.grid[r][c];
+          if (cell && !cell.isObstacle) {
+            evicted.push(cell);
+            state.grid[r][c] = null;
+            relocatedAny = true;
+          }
+        }
+      }
+    }
+
+    for (const cell of evicted) {
+      let placed = false;
+      if (dir === 'down') {
+        for (let r = rows - 1; r >= 2 && !placed; r--) {
+          for (let c = minPlayCol; c <= maxPlayCol; c++) {
+            if (c >= spawnLeft && c <= spawnRight && r < clearDepth) continue;
+            if (state.grid[r][c] === null) {
+              state.grid[r][c] = {
+                ...cell,
+                pendingClear: false,
+                sweptCol: false,
+                landFlash: animateBricks ? 0.45 : 0,
+              };
+              placed = true;
+              break;
+            }
+          }
+        }
+      } else {
+        for (let r = 0; r <= rows - 3 && !placed; r++) {
+          for (let c = minPlayCol; c <= maxPlayCol; c++) {
+            if (c >= spawnLeft && c <= spawnRight && r >= rows - clearDepth) continue;
+            if (state.grid[r][c] === null) {
+              state.grid[r][c] = {
+                ...cell,
+                pendingClear: false,
+                sweptCol: false,
+                landFlash: animateBricks ? 0.45 : 0,
+              };
+              placed = true;
+              break;
+            }
+          }
+        }
+      }
+      if (!placed) {
+        state.score += 25;
+      }
+    }
+  } else {
+    const spawnTop = Math.max(0, Math.floor((rows - laneH) / 2));
+    const spawnBot = Math.min(rows - 1, spawnTop + laneH - 1);
+    const clearDepth = Math.min(Math.max(2, maxPW), Math.max(2, cols - 4));
+
+    for (let r = spawnTop; r <= spawnBot; r++) {
+      if (dir === 'right') {
+        for (let c = 0; c < clearDepth; c++) {
+          const cell = state.grid[r][c];
+          if (cell && !cell.isObstacle) {
+            evicted.push(cell);
+            state.grid[r][c] = null;
+            relocatedAny = true;
+          }
+        }
+      } else {
+        for (let c = cols - clearDepth; c < cols; c++) {
+          const cell = state.grid[r][c];
+          if (cell && !cell.isObstacle) {
+            evicted.push(cell);
+            state.grid[r][c] = null;
+            relocatedAny = true;
+          }
+        }
+      }
+    }
+
+    for (const cell of evicted) {
+      let placed = false;
+      if (dir === 'right') {
+        for (let c = maxPlayCol; c >= 2 && !placed; c--) {
+          for (let r = 0; r < rows; r++) {
+            if (r >= spawnTop && r <= spawnBot && c < clearDepth) continue;
+            if (state.grid[r][c] === null) {
+              state.grid[r][c] = {
+                ...cell,
+                pendingClear: false,
+                sweptCol: false,
+                landFlash: animateBricks ? 0.45 : 0,
+              };
+              placed = true;
+              break;
+            }
+          }
+        }
+      } else {
+        for (let c = minPlayCol; c <= cols - 3 && !placed; c++) {
+          for (let r = 0; r < rows; r++) {
+            if (r >= spawnTop && r <= spawnBot && c >= cols - clearDepth) continue;
+            if (state.grid[r][c] === null) {
+              state.grid[r][c] = {
+                ...cell,
+                pendingClear: false,
+                sweptCol: false,
+                landFlash: animateBricks ? 0.45 : 0,
+              };
+              placed = true;
+              break;
+            }
+          }
+        }
+      }
+      if (!placed) {
+        state.score += 25;
+      }
+    }
+  }
+
+  if (relocatedAny) {
+    settleBoardForState(state, false);
+  }
+  state.isGameOver = false;
 }
 
 function applyBoardResizeShift(
@@ -2488,7 +3697,11 @@ export function applyBoardShift(
     settleBoardForDirection(state.grid, 'down', animateBricks);
   }
 
-  if (shiftType !== 'three_color_mode' && state.colorCount === 3) {
+  if (
+    shiftType !== 'three_color_mode' &&
+    shiftType !== 'trichroma_beams' &&
+    state.colorCount === 3
+  ) {
     state.colorCount = 2;
     convertColor2CellsToBinary(state, animateBricks);
   }
@@ -2500,7 +3713,7 @@ export function applyBoardShift(
       ? 'trio_3x1'
       : shiftType === 'brick_3x2'
       ? 'rect_3x2'
-      : shiftType === 'brick_tetromino'
+      : shiftType === 'brick_tetromino' || shiftType === 'kaleidoscope_brick'
       ? 'tetromino'
       : shiftType === 'brick_blocked'
       ? 'blocked_2x2'
@@ -2508,6 +3721,10 @@ export function applyBoardShift(
       ? 'l_trio_2x2'
       : shiftType === 'prism_wild_bricks'
       ? 'prism_wild_2x2'
+      : shiftType === 'brick_pentomino'
+      ? 'pentomino'
+      : shiftType === 'brick_colossus'
+      ? 'colossus'
       : 'standard_2x2';
   state.pieceShapeMode = nextShapeMode;
 
@@ -2517,19 +3734,23 @@ export function applyBoardShift(
       state.colorCount !== prevColorCount ||
       (state.gravityDirection ?? 'down') !== prevGravityDir ||
       shiftType === 'three_color_mode' ||
+      shiftType === 'trichroma_beams' ||
       TILE_TYPE_SHIFT_SET.has(shiftType)
     ) {
       refreshQueueForBoardRules(state, chainFrequency, rng);
     }
   };
 
-  if (shiftType === 'rotate_90') {
+    if (shiftType === 'rotate_90') {
     const nominal = getNominalBoardDims(state);
     if (state.cols !== nominal.cols || state.rows !== nominal.rows) {
       resizeBoardSafely(state, nominal.cols, nominal.rows, false);
     }
     rotateBoard90(state, rotDir, animateBricks);
     syncQueueIfRulesChanged();
+    ensureShiftSpawnSafety(state, animateBricks);
+    stabilizeActivePieceAfterShift(state, animateBricks);
+    state.squares = detectBoardMarksForState(state);
     recordShiftTurn(state, shiftType);
     return {
       applied: true,
@@ -2550,9 +3771,11 @@ export function applyBoardShift(
     }
     applyBoardResizeShift(state, animateBricks, rng);
     state.activeShift = 'board_resize';
-    state.squares = detectBoardMarks(state.grid);
-    state.sweepState = createSweepState();
     syncQueueIfRulesChanged();
+    ensureShiftSpawnSafety(state, animateBricks);
+    stabilizeActivePieceAfterShift(state, animateBricks);
+    state.squares = detectBoardMarksForState(state);
+    state.sweepState = createSweepState();
     recordShiftTurn(state, shiftType);
     return {
       applied: true,
@@ -2566,6 +3789,8 @@ export function applyBoardShift(
   const nominal = getNominalBoardDims(state);
   if (
     shiftType !== 'twin_elevators' &&
+    shiftType !== 'dual_screen' &&
+    shiftType !== 'clamshell' &&
     (state.cols !== nominal.cols || state.rows !== nominal.rows)
   ) {
     resizeBoardSafely(state, nominal.cols, nominal.rows, false);
@@ -2739,11 +3964,71 @@ export function applyBoardShift(
     case 'brick_l_trio':
     case 'chameleon_rotate':
     case 'prism_wild_bricks':
+    case 'dueling_beams':
+    case 'sun_moon':
+    case 'brick_pentomino':
+    case 'brick_colossus':
+    case 'kaleidoscope_brick':
       state.shiftEffect = {
         type: shiftType,
         life: 1.2,
         maxLife: 1.2,
       };
+      break;
+    case 'trichroma_beams':
+      applyThreeColorMode(state, animateBricks, rng);
+      state.pieceShapeMode = 'standard_2x2';
+      state.shiftEffect = { type: shiftType, life: 1.2, maxLife: 1.2 };
+      break;
+    case 'lighthouse':
+      state.lighthouseAngle = Math.PI + 0.06;
+      state.shiftEffect = { type: shiftType, life: 1.2, maxLife: 1.2 };
+      break;
+    case 'twin_wells':
+    case 'chromatic_wells':
+    case 'shell_game':
+      applyTwinWells(state, animateBricks);
+      state.shiftEffect = { type: shiftType, life: 1.2, maxLife: 1.2 };
+      break;
+    case 'dual_screen':
+      applyDualScreen(state, animateBricks);
+      state.shiftEffect = { type: shiftType, life: 1.2, maxLife: 1.2 };
+      break;
+    case 'clamshell':
+      applyClamshell(state, animateBricks);
+      state.shiftEffect = { type: shiftType, life: 1.2, maxLife: 1.2 };
+      break;
+    case 'triptych':
+      applyTriptych(state, animateBricks);
+      state.shiftEffect = { type: shiftType, life: 1.2, maxLife: 1.2 };
+      break;
+    case 'diamond_arena':
+      applyDiamondArena(state, animateBricks);
+      state.shiftEffect = { type: shiftType, life: 1.2, maxLife: 1.2 };
+      break;
+    case 'cross_arena':
+      applyCrossArena(state, animateBricks);
+      state.shiftEffect = { type: shiftType, life: 1.2, maxLife: 1.2 };
+      break;
+    case 'hillside_ramp':
+      applyHillsideRamp(state, animateBricks);
+      state.shiftEffect = { type: shiftType, life: 1.2, maxLife: 1.2 };
+      break;
+    case 'windmill':
+      applyWindmill(state, animateBricks);
+      state.shiftEffect = { type: shiftType, life: 1.2, maxLife: 1.2 };
+      break;
+    case 'archipelago':
+      applyArchipelago(state, animateBricks);
+      state.shiftEffect = { type: shiftType, life: 1.2, maxLife: 1.2 };
+      break;
+    case 'piston_walls':
+      applyPistonWalls(state, animateBricks);
+      state.shiftEffect = { type: shiftType, life: 1.2, maxLife: 1.2 };
+      break;
+    case 'stalactites':
+      applyStalactites(state, animateBricks);
+      state.shiftEffect = { type: shiftType, life: 1.2, maxLife: 1.2 };
       break;
   }
 
@@ -2761,7 +4046,8 @@ export function applyBoardShift(
       y: newInit.y,
     };
   }
-  state.squares = detectBoardMarks(state.grid);
+  ensureShiftSpawnSafety(state, animateBricks);
+  state.squares = detectBoardMarksForState(state);
   state.sweepState = createSweepState();
   state.isGameOver = false;
   stabilizeActivePieceAfterShift(state, animateBricks);
@@ -2851,7 +4137,7 @@ export function stepPatrollingBumper(state: BoardState): boolean {
   b.dir = nextDir;
 
   settleBoard(state.grid);
-  state.squares = detectBoardMarks(state.grid);
+  state.squares = detectBoardMarksForState(state);
   return true;
 }
 

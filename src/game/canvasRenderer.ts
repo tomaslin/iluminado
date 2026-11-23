@@ -5,6 +5,8 @@ import {
   canPlacePiece,
   computeBeamProximity,
   countMarkedAheadOfBeam,
+  getActiveGravityDirection,
+  getActiveWellRegion,
   getDiagonalSlantSpan,
   getGravityVector,
   getPieceLandingColumns,
@@ -170,6 +172,16 @@ const MAX_LAND_RIPPLES = 16;
 const MAX_DROP_BEAMS = 12;
 const PARALLAX_OVERSCAN_X = 56;
 const PARALLAX_OVERSCAN_Y = 24;
+
+function hexToRgba(hex: string, alpha: number): string {
+  const clean = hex.startsWith('#') ? hex.slice(1) : hex;
+  if (clean.length !== 6) return hex;
+  const r = parseInt(clean.slice(0, 2), 16);
+  const g = parseInt(clean.slice(2, 4), 16);
+  const b = parseInt(clean.slice(4, 6), 16);
+  if (Number.isNaN(r) || Number.isNaN(g) || Number.isNaN(b)) return hex;
+  return `rgba(${r}, ${g}, ${b}, ${Math.max(0, Math.min(1, alpha))})`;
+}
 
 export class IluminadoCanvasRenderer {
   private particles: Particle[] = Array.from({ length: MAX_PARTICLES }, () => ({
@@ -340,6 +352,7 @@ export class IluminadoCanvasRenderer {
   };
   private tmpBeamCols1 = [0];
   private tmpBeamCols2 = [0, 0];
+  private tmpBeamCols3 = [0, 0, 0];
 
   public setPointerOffset(nx: number, ny: number): void {
     this.pointerNormX = Math.max(-1, Math.min(1, nx));
@@ -4004,6 +4017,116 @@ export class IluminadoCanvasRenderer {
       );
     }
 
+    if (board.activeShift === 'sun_moon') {
+      const isMoonPass = ((board.sweepPassCount ?? 0) % 2) === 1;
+      const tintStyle = getBlockStyle(palette, isMoonPass ? 1 : 0);
+      const wash = ctx.createLinearGradient(x, y, x, y + height);
+      wash.addColorStop(0, hexToRgba(tintStyle.fill, 0.12));
+      wash.addColorStop(1, hexToRgba(tintStyle.shade, 0.04));
+      ctx.save();
+      ctx.fillStyle = wash;
+      ctx.fillRect(x, y, width, height);
+      ctx.restore();
+    }
+
+    if (board.wellRegions && board.wellRegions.length >= 2) {
+      const activeReg = getActiveWellRegion(board);
+      ctx.save();
+
+      if (board.activeShift === 'chromatic_wells') {
+        const flip = Math.floor((board.sweepPassCount ?? 0) / 2) % 2;
+        const leftReg = board.wellRegions[0];
+        const rightReg = board.wellRegions[1];
+        const leftColor = getBlockStyle(palette, flip as CellColor);
+        const rightColor = getBlockStyle(palette, (1 - flip) as CellColor);
+        ctx.fillStyle = hexToRgba(leftColor.fill, 0.085);
+        ctx.fillRect(
+          x + leftReg.minCol * cellSize,
+          y + leftReg.minRow * cellSize,
+          (leftReg.maxCol - leftReg.minCol + 1) * cellSize,
+          (leftReg.maxRow - leftReg.minRow + 1) * cellSize
+        );
+        ctx.fillStyle = hexToRgba(rightColor.fill, 0.085);
+        ctx.fillRect(
+          x + rightReg.minCol * cellSize,
+          y + rightReg.minRow * cellSize,
+          (rightReg.maxCol - rightReg.minCol + 1) * cellSize,
+          (rightReg.maxRow - rightReg.minRow + 1) * cellSize
+        );
+      }
+
+      if (board.activeShift === 'clamshell' && board.wellRegions.length >= 2) {
+        const seamY = y + (board.wellRegions[0].maxRow + 1) * cellSize;
+        const seamGlow = ctx.createLinearGradient(0, seamY - 7, 0, seamY + 7);
+        seamGlow.addColorStop(0, 'rgba(250, 246, 238, 0)');
+        seamGlow.addColorStop(0.5, hexToRgba(palette.hudAccent, 0.42));
+        seamGlow.addColorStop(1, 'rgba(250, 246, 238, 0)');
+        ctx.fillStyle = seamGlow;
+        ctx.fillRect(x, seamY - 7, width, 14);
+        ctx.strokeStyle = palette.hudAccent;
+        ctx.lineWidth = 1.6;
+        ctx.globalAlpha = 0.72 + 0.16 * Math.sin(timeSec * 3.8);
+        ctx.beginPath();
+        ctx.moveTo(x, seamY);
+        ctx.lineTo(x + width, seamY);
+        ctx.stroke();
+
+        // Subtle outward gravity chevrons from center seam
+        ctx.globalAlpha = 0.45;
+        ctx.lineWidth = 1.5;
+        for (const cx of [x + 10, x + width - 10]) {
+          ctx.beginPath();
+          ctx.moveTo(cx - 4, seamY - 5);
+          ctx.lineTo(cx, seamY - 9);
+          ctx.lineTo(cx + 4, seamY - 5);
+          ctx.moveTo(cx - 4, seamY + 5);
+          ctx.lineTo(cx, seamY + 9);
+          ctx.lineTo(cx + 4, seamY + 5);
+          ctx.stroke();
+        }
+      }
+
+      if (board.activeShift === 'dual_screen' && board.wellRegions.length >= 2) {
+        const lower = board.wellRegions[1];
+        const hStart = lower.stagingMinRow ?? board.wellRegions[0].maxRow + 1;
+        const hEnd = lower.stagingMaxRow ?? hStart + 1;
+        const hy = y + hStart * cellSize;
+        const hh = (hEnd - hStart + 1) * cellSize;
+        ctx.fillStyle = 'rgba(22, 20, 32, 0.35)';
+        ctx.fillRect(x, hy, width, hh);
+        ctx.strokeStyle = palette.hudAccent;
+        ctx.globalAlpha = 0.42;
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(x, hy + 0.5);
+        ctx.lineTo(x + width, hy + 0.5);
+        ctx.moveTo(x, hy + hh - 0.5);
+        ctx.lineTo(x + width, hy + hh - 0.5);
+        ctx.stroke();
+      }
+
+      if (activeReg) {
+        const rx = x + activeReg.minCol * cellSize;
+        const ry = y + activeReg.minRow * cellSize;
+        const rw = (activeReg.maxCol - activeReg.minCol + 1) * cellSize;
+        const rh = (activeReg.maxRow - activeReg.minRow + 1) * cellSize;
+        ctx.strokeStyle = palette.hudAccent;
+        ctx.lineWidth = 1.8;
+        ctx.globalAlpha = 0.38 + 0.16 * Math.pow(1 - beatPhase, 2);
+        ctx.strokeRect(rx + 1, ry + 1, Math.max(2, rw - 2), Math.max(2, rh - 2));
+
+        // Active well entrance stripe along spawn edge
+        ctx.fillStyle = palette.hudAccent;
+        ctx.globalAlpha = 0.65;
+        if (activeReg.gravity === 'up') {
+          ctx.fillRect(rx + 4, ry + rh - 3, Math.max(4, rw - 8), 3);
+        } else {
+          ctx.fillRect(rx + 4, ry, Math.max(4, rw - 8), 3);
+        }
+      }
+      ctx.restore();
+    }
+
     for (let i = 0; i < MAX_DROP_BEAMS; i++) {
       const beam = this.dropBeams[i];
       if (!beam.active || beam.boardIdx !== boardIdx) continue;
@@ -4192,9 +4315,23 @@ export class IluminadoCanvasRenderer {
     const isTwinSweep = board.activeShift === 'twin_sweep';
     const isSplitHalfSweep = board.activeShift === 'split_half_sweep';
     const isDiagonalSlantSweep = board.activeShift === 'diagonal_slant_sweep';
+    const isDuelingBeams = board.activeShift === 'dueling_beams';
+    const isSunMoon = board.activeShift === 'sun_moon';
+    const isChromaticWells = board.activeShift === 'chromatic_wells';
+    const isTrichromaSweep = board.activeShift === 'trichroma_beams';
+    const isLighthouse = board.activeShift === 'lighthouse';
+
     const tlX = isRtlSweep ? x + (1 - timelineNorm) * width : x + timelineNorm * width;
     const twinNorm = (timelineNorm + 0.5) % 1;
     const tl2X = x + twinNorm * width;
+    const duelingRtlX = x + (1 - timelineNorm) * width;
+    const third1Cols = Math.max(1, Math.floor(boardCols / 3));
+    const third2Cols = Math.max(2, Math.floor((boardCols * 2) / 3));
+    const triNorm1 = (timelineNorm + third1Cols / Math.max(1, boardCols)) % 1;
+    const triNorm2 = (timelineNorm + third2Cols / Math.max(1, boardCols)) % 1;
+    const tlTri1X = x + triNorm1 * width;
+    const tlTri2X = x + triNorm2 * width;
+
     const midSplitRow = Math.floor(boardRows / 2);
     const splitY = y + midSplitRow * cellSize;
     const slantCols = getDiagonalSlantSpan(boardCols);
@@ -4205,9 +4342,16 @@ export class IluminadoCanvasRenderer {
     const activeBeamColA = isRtlSweep
       ? Math.max(0, boardCols - 1 - (Math.floor(timelineNorm * boardCols) % boardCols))
       : Math.floor(timelineNorm * boardCols) % boardCols;
-    const activeBeamColB = Math.floor(twinNorm * boardCols) % boardCols;
+    const activeBeamColB = isDuelingBeams
+      ? Math.max(0, boardCols - 1 - activeBeamColA)
+      : Math.floor(twinNorm * boardCols) % boardCols;
     let beamColsForProx: number[];
-    if (isTwinSweep || isSplitHalfSweep) {
+    if (isTrichromaSweep) {
+      this.tmpBeamCols3[0] = activeBeamColA;
+      this.tmpBeamCols3[1] = (activeBeamColA + third1Cols) % boardCols;
+      this.tmpBeamCols3[2] = (activeBeamColA + third2Cols) % boardCols;
+      beamColsForProx = this.tmpBeamCols3;
+    } else if (isTwinSweep || isSplitHalfSweep || isDuelingBeams) {
       this.tmpBeamCols2[0] = activeBeamColA;
       this.tmpBeamCols2[1] = activeBeamColB;
       beamColsForProx = this.tmpBeamCols2;
@@ -4216,22 +4360,44 @@ export class IluminadoCanvasRenderer {
       beamColsForProx = this.tmpBeamCols1;
     }
 
+    const sunMoonActiveColor = ((board.sweepPassCount ?? 0) % 2) as CellColor;
+    const chromaticFlip = Math.floor((board.sweepPassCount ?? 0) / 2) % 2;
+    const chromaticLeftMax =
+      board.wellRegions?.[0]?.maxCol ?? Math.floor(boardCols / 2) - 2;
+    const chromaticRightMin =
+      board.wellRegions?.[1]?.minCol ?? Math.floor(boardCols / 2) + 1;
+    const chromaticActiveColor: CellColor | null = !isChromaticWells
+      ? null
+      : activeBeamColA <= chromaticLeftMax
+      ? (chromaticFlip as CellColor)
+      : activeBeamColA >= chromaticRightMin
+      ? ((1 - chromaticFlip) as CellColor)
+      : null;
+
+    const lighthouseColorIdx = ((board.sweepPassCount ?? 0) % (board.colorCount || 2)) as CellColor;
+    const lighthouseStyle = getBlockStyle(palette, lighthouseColorIdx);
+    const lighthouseAngle =
+      board.lighthouseAngle ??
+      (Math.PI + 0.06) * (1 - timelineNorm) - 0.06 * timelineNorm;
+
     const drawSweepWakeBand = (
       beamX: number,
       rtl: boolean,
       topY: number,
-      bandH: number
+      bandH: number,
+      tintHex?: string
     ) => {
       const wakeStart = rtl ? beamX + glowW : beamX - glowW;
       const glowGrad = ctx.createLinearGradient(wakeStart, 0, beamX, 0);
+      const glowTone = tintHex ? hexToRgba(tintHex, 0.34) : palette.timelineGlow;
       glowGrad.addColorStop(0, 'rgba(250, 246, 238, 0)');
-      glowGrad.addColorStop(0.55, palette.timelineGlow);
-      glowGrad.addColorStop(1, palette.timelineGlow);
+      glowGrad.addColorStop(0.55, glowTone);
+      glowGrad.addColorStop(1, glowTone);
       ctx.fillStyle = glowGrad;
       ctx.fillRect(rtl ? beamX : beamX - glowW, topY, glowW, bandH);
 
       ctx.save();
-      ctx.strokeStyle = palette.squareHighlight;
+      ctx.strokeStyle = tintHex ?? palette.squareHighlight;
       ctx.lineWidth = 1;
       ctx.globalAlpha = 0.26 + Math.pow(1 - beatPhase, 2.2) * 0.12;
       ctx.beginPath();
@@ -4269,7 +4435,27 @@ export class IluminadoCanvasRenderer {
       ctx.fill();
     };
 
-    if (isSplitHalfSweep) {
+    if (isLighthouse) {
+      const originX = x + width * 0.5;
+      const originY = y + height;
+      const reach = Math.hypot(width, height) * 1.15;
+      const halfCone = 0.16;
+      const a0 = lighthouseAngle - halfCone;
+      const a1 = lighthouseAngle + halfCone;
+      const coneGrad = ctx.createRadialGradient(originX, originY, 6, originX, originY, reach);
+      coneGrad.addColorStop(0, hexToRgba(lighthouseStyle.highlight, 0.34));
+      coneGrad.addColorStop(0.55, hexToRgba(lighthouseStyle.fill, 0.16));
+      coneGrad.addColorStop(1, hexToRgba(lighthouseStyle.fill, 0.02));
+      ctx.save();
+      ctx.fillStyle = coneGrad;
+      ctx.beginPath();
+      ctx.moveTo(originX, originY);
+      ctx.lineTo(originX + Math.cos(a0) * reach, originY - Math.sin(a0) * reach);
+      ctx.lineTo(originX + Math.cos(a1) * reach, originY - Math.sin(a1) * reach);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    } else if (isSplitHalfSweep) {
       drawSweepWakeBand(tlX, false, y, splitY - y);
       drawSweepWakeBand(tl2X, false, splitY, y + height - splitY);
       ctx.save();
@@ -4294,6 +4480,23 @@ export class IluminadoCanvasRenderer {
         drawSlantWakeSegment(uTop, 0, y, wrapY);
         drawSlantWakeSegment(1, 1 + uBot, wrapY, y + height);
       }
+    } else if (isDuelingBeams) {
+      drawSweepWakeBand(tlX, false, y, height, palette.blockA.fill);
+      drawSweepWakeBand(duelingRtlX, true, y, height, palette.blockB.fill);
+    } else if (isTrichromaSweep) {
+      drawSweepWakeBand(tlX, false, y, height, palette.blockA.fill);
+      drawSweepWakeBand(tlTri1X, false, y, height, palette.blockB.fill);
+      drawSweepWakeBand(tlTri2X, false, y, height, palette.blockC.fill);
+    } else if (isSunMoon) {
+      drawSweepWakeBand(tlX, false, y, height, getBlockStyle(palette, sunMoonActiveColor).fill);
+    } else if (isChromaticWells && chromaticActiveColor !== null) {
+      drawSweepWakeBand(
+        tlX,
+        false,
+        y,
+        height,
+        getBlockStyle(palette, chromaticActiveColor).fill
+      );
     } else {
       drawSweepWakeBand(tlX, isRtlSweep, y, height);
       if (isTwinSweep) {
@@ -4365,7 +4568,8 @@ export class IluminadoCanvasRenderer {
     }
 
     const activePiece = board.activePiece && !board.isGameOver ? board.activePiece : null;
-    const { gx: gVecX, gy: gVecY } = getGravityVector(gravDir);
+    const activePieceGravDir: GravityDirection = getActiveGravityDirection(board);
+    const { gx: gVecX, gy: gVecY } = getGravityVector(activePieceGravDir);
     const subStepOffset =
       activePiece &&
       board.orientationGraceTimer <= 0 &&
@@ -4383,7 +4587,9 @@ export class IluminadoCanvasRenderer {
         prevCells !== undefined &&
         prevCells !== activePiece.cells &&
         Math.abs(ps.rotAngle) < 0.01 &&
-        (logicalVisualY < ps.smoothY - 1 || Math.abs(logicalVisualX - ps.smoothX) > 2.2);
+        (activePieceGravDir === 'up'
+          ? logicalVisualY > ps.smoothY + 1
+          : logicalVisualY < ps.smoothY - 1 || Math.abs(logicalVisualX - ps.smoothX) > 2.2);
       const wrapJump =
         Math.abs(logicalVisualX - ps.smoothX) > 2.2 ||
         Math.abs(logicalVisualY - ps.smoothY) > 2.2;
@@ -4396,7 +4602,7 @@ export class IluminadoCanvasRenderer {
         ps.pieceRef = activePiece;
         const damp = 1 - Math.exp(-Math.max(0.001, this.lastFrameDt) / 0.045);
         ps.smoothX += (logicalVisualX - ps.smoothX) * damp;
-        if (gravDir === 'left' || gravDir === 'right') {
+        if (activePieceGravDir === 'left' || activePieceGravDir === 'right') {
           ps.smoothY += (logicalVisualY - ps.smoothY) * damp;
         } else {
           ps.smoothY = logicalVisualY;
@@ -4445,7 +4651,9 @@ export class IluminadoCanvasRenderer {
             board,
             skin,
             timeSec,
-            beatPhase
+            beatPhase,
+            r,
+            c
           );
           continue;
         }
@@ -4725,6 +4933,27 @@ export class IluminadoCanvasRenderer {
         ctx.moveTo(mx, y);
         ctx.lineTo(mx, y + height);
         ctx.stroke();
+      } else if (fx.type === 'shell_game') {
+        const mx = x + (fx.mirrorCol ?? boardCols * 0.5) * cellSize;
+        const spanX = Math.max(cellSize * 2, width * 0.28);
+        const midY = y + height * 0.5;
+        ctx.strokeStyle = palette.hudAccent;
+        ctx.lineWidth = 2.2;
+        ctx.globalAlpha = frac * 0.78;
+        ctx.beginPath();
+        ctx.moveTo(mx - spanX, midY - height * 0.22);
+        ctx.quadraticCurveTo(mx, y + height * 0.08, mx + spanX, midY - height * 0.22);
+        ctx.moveTo(mx + spanX, midY + height * 0.22);
+        ctx.quadraticCurveTo(mx, y + height * 0.92, mx - spanX, midY + height * 0.22);
+        ctx.stroke();
+
+        ctx.strokeStyle = palette.squareHighlight;
+        ctx.lineWidth = 1.6;
+        ctx.globalAlpha = frac * 0.85;
+        ctx.beginPath();
+        ctx.moveTo(mx, y);
+        ctx.lineTo(mx, y + height);
+        ctx.stroke();
       } else if (fx.type === 'vortex_swirl' || fx.type === 'cyclotron_flow') {
         // Outer perimeter orbital pulse outside the playfield so blocks stay 100% unobstructed
         ctx.restore();
@@ -4765,6 +4994,8 @@ export class IluminadoCanvasRenderer {
       : Math.floor(timelineNorm * boardCols) % boardCols;
     const activeBeatCol2 = isTwinSweep
       ? Math.floor(twinNorm * boardCols) % boardCols
+      : isDuelingBeams
+      ? Math.max(0, boardCols - 1 - activeBeatCol)
       : -1;
     const activeBeatColBot = isSplitHalfSweep
       ? Math.floor(twinNorm * boardCols) % boardCols
@@ -4775,118 +5006,120 @@ export class IluminadoCanvasRenderer {
     const barStride = boardCols >= 16 ? 4 : 2;
     const isRisingTide = board.activeShift === 'rising_tide';
 
-    ctx.save();
-    const activeRulerTick = Math.floor(timelineNorm * sweepBeats) % sweepBeats;
-    for (let bt = 0; bt < sweepBeats; bt++) {
-      const normX = (bt + 0.5) / sweepBeats;
-      const rx = isRtlSweep ? x + (1 - normX) * width : x + normX * width;
-      const isCurTick = bt === activeRulerTick;
-      ctx.strokeStyle = isCurTick ? palette.hudAccent : palette.timelineBeam;
-      ctx.globalAlpha = isCurTick ? 0.92 : bt % 4 === 0 ? 0.5 : 0.24;
-      ctx.lineWidth = isCurTick ? 2 : 1.1;
-      ctx.beginPath();
-      ctx.moveTo(rx, y - 5);
-      ctx.lineTo(rx, y - (bt % 4 === 0 ? 9 : 7));
-      ctx.stroke();
-    }
-    if (sweepBeats !== 8 && !label) {
-      const rateBadge = sweepBeats === 4 ? '4×' : '16×';
-      ctx.fillStyle = palette.timelineBeam;
-      this.roundRect(ctx, x + 2, y - 28, 28, 15, 4);
-      ctx.fill();
-      ctx.fillStyle = '#faf6ee';
-      ctx.font = '700 9.5px "JetBrains Mono", monospace';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(rateBadge, x + 16, y - 20.5);
-    }
-
-    for (let c = 0; c < boardCols; c++) {
-      const dx = x + (c + 0.5) * cellSize;
-      const dy = y - 13;
-      const isActiveColTop = c === activeBeatCol || c === activeBeatCol2;
-      const isActiveColBot =
-        c === activeBeatColBot || (isTwinSweep && c === activeBeatCol2);
-      const isDownbeat = c % barStride === 0;
-      ctx.fillStyle = isActiveColTop ? palette.hudAccent : palette.timelineBeam;
-      ctx.globalAlpha = isActiveColTop ? 0.94 : isDownbeat ? 0.38 : 0.18;
-      this.drawDiamond(
-        ctx,
-        dx,
-        dy,
-        isActiveColTop ? 3.8 + beatPulse * 1.1 : isDownbeat ? 2.6 : 1.9
-      );
-
-      if (c % Math.max(2, Math.floor(boardCols / 4)) === 0 && !label) {
-        const measureNum = Math.floor(c / Math.max(2, Math.floor(boardCols / 4))) + 1;
-        const activeMeasure = Math.floor(activeBeatCol / Math.max(2, Math.floor(boardCols / 4))) + 1;
-        const isCurrMeasure = measureNum === activeMeasure;
-        if (!(sweepBeats !== 8 && c === 0)) {
-          const fallbackMeasureInk =
-            getWcagContrast('#faf7f2', palette.skyMid) >=
-            getWcagContrast(palette.hudInk, palette.skyMid)
-              ? '#faf7f2'
-              : palette.hudInk;
-          ctx.fillStyle = isCurrMeasure
-            ? palette.hudAccent
-            : isSkyDark
-            ? '#faf7f2'
-            : fallbackMeasureInk;
-          ctx.globalAlpha = isCurrMeasure ? 0.92 : 0.56;
-          ctx.font = '600 9.5px "JetBrains Mono", monospace';
-          ctx.textAlign = 'center';
-          ctx.fillText(`${measureNum}`, dx, y - 22);
-        }
+    if (!isLighthouse) {
+      ctx.save();
+      const activeRulerTick = Math.floor(timelineNorm * sweepBeats) % sweepBeats;
+      for (let bt = 0; bt < sweepBeats; bt++) {
+        const normX = (bt + 0.5) / sweepBeats;
+        const rx = isRtlSweep ? x + (1 - normX) * width : x + normX * width;
+        const isCurTick = bt === activeRulerTick;
+        ctx.strokeStyle = isCurTick ? palette.hudAccent : palette.timelineBeam;
+        ctx.globalAlpha = isCurTick ? 0.92 : bt % 4 === 0 ? 0.5 : 0.24;
+        ctx.lineWidth = isCurTick ? 2 : 1.1;
+        ctx.beginPath();
+        ctx.moveTo(rx, y - 5);
+        ctx.lineTo(rx, y - (bt % 4 === 0 ? 9 : 7));
+        ctx.stroke();
       }
-
-      if (isRisingTide) {
-        const tideCount = board.colorCount ?? 2;
-        const previewColor = ((c + (board.risingTideRows ?? 0)) % tideCount) as CellColor;
-        const previewStyle = getBlockStyle(palette, previewColor);
-        const pw = Math.max(3, cellSize - 3);
-        const ph = Math.max(5, Math.min(8, cellSize * 0.22));
-        ctx.fillStyle = previewStyle.fill;
-        ctx.globalAlpha = 0.65 + 0.2 * Math.sin(timeSec * 4 + c * 0.4);
-        this.roundRect(ctx, x + c * cellSize + 1.5, y + height + 2.5, pw, ph, 1.5);
+      if (sweepBeats !== 8 && !label) {
+        const rateBadge = sweepBeats === 4 ? '4×' : '16×';
+        ctx.fillStyle = palette.timelineBeam;
+        this.roundRect(ctx, x + 2, y - 28, 28, 15, 4);
         ctx.fill();
+        ctx.fillStyle = '#faf6ee';
+        ctx.font = '700 9.5px "JetBrains Mono", monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(rateBadge, x + 16, y - 20.5);
       }
 
-      let colHasMarks = false;
-      for (let r = 0; r < boardRows; r++) {
-        const cell = board.grid[r][c];
-        if (cell && (cell.inSquare || cell.chainMarked)) {
-          colHasMarks = true;
-          break;
+      for (let c = 0; c < boardCols; c++) {
+        const dx = x + (c + 0.5) * cellSize;
+        const dy = y - 13;
+        const isActiveColTop = c === activeBeatCol || c === activeBeatCol2;
+        const isActiveColBot =
+          c === activeBeatColBot || (isTwinSweep && c === activeBeatCol2) || (isDuelingBeams && c === activeBeatCol2);
+        const isDownbeat = c % barStride === 0;
+        ctx.fillStyle = isActiveColTop ? palette.hudAccent : palette.timelineBeam;
+        ctx.globalAlpha = isActiveColTop ? 0.94 : isDownbeat ? 0.38 : 0.18;
+        this.drawDiamond(
+          ctx,
+          dx,
+          dy,
+          isActiveColTop ? 3.8 + beatPulse * 1.1 : isDownbeat ? 2.6 : 1.9
+        );
+
+        if (c % Math.max(2, Math.floor(boardCols / 4)) === 0 && !label) {
+          const measureNum = Math.floor(c / Math.max(2, Math.floor(boardCols / 4))) + 1;
+          const activeMeasure = Math.floor(activeBeatCol / Math.max(2, Math.floor(boardCols / 4))) + 1;
+          const isCurrMeasure = measureNum === activeMeasure;
+          if (!(sweepBeats !== 8 && c === 0)) {
+            const fallbackMeasureInk =
+              getWcagContrast('#faf7f2', palette.skyMid) >=
+              getWcagContrast(palette.hudInk, palette.skyMid)
+                ? '#faf7f2'
+                : palette.hudInk;
+            ctx.fillStyle = isCurrMeasure
+              ? palette.hudAccent
+              : isSkyDark
+              ? '#faf7f2'
+              : fallbackMeasureInk;
+            ctx.globalAlpha = isCurrMeasure ? 0.92 : 0.56;
+            ctx.font = '600 9.5px "JetBrains Mono", monospace';
+            ctx.textAlign = 'center';
+            ctx.fillText(`${measureNum}`, dx, y - 22);
+          }
         }
+
+        if (isRisingTide) {
+          const tideCount = board.colorCount ?? 2;
+          const previewColor = ((c + (board.risingTideRows ?? 0)) % tideCount) as CellColor;
+          const previewStyle = getBlockStyle(palette, previewColor);
+          const pw = Math.max(3, cellSize - 3);
+          const ph = Math.max(5, Math.min(8, cellSize * 0.22));
+          ctx.fillStyle = previewStyle.fill;
+          ctx.globalAlpha = 0.65 + 0.2 * Math.sin(timeSec * 4 + c * 0.4);
+          this.roundRect(ctx, x + c * cellSize + 1.5, y + height + 2.5, pw, ph, 1.5);
+          ctx.fill();
+        }
+
+        let colHasMarks = false;
+        for (let r = 0; r < boardRows; r++) {
+          const cell = board.grid[r][c];
+          if (cell && (cell.inSquare || cell.chainMarked)) {
+            colHasMarks = true;
+            break;
+          }
+        }
+        const distCols = Math.min(
+          Math.abs(c - activeBeatColBot),
+          boardCols - Math.abs(c - activeBeatColBot)
+        );
+        const waveBar = Math.max(0, 1 - distCols / 3) * (0.45 + beatPulse * 0.55);
+        const bandIdx = bands && bands.length > 0
+          ? Math.min(bands.length - 1, Math.floor((c / Math.max(1, boardCols)) * bands.length))
+          : -1;
+        const colSpectrum =
+          bandIdx >= 0 && bands
+            ? bands[bandIdx]
+            : c < boardCols * 0.33
+            ? subBass
+            : c < boardCols * 0.67
+            ? mid
+            : high;
+        const tickH =
+          2.5 + (colHasMarks ? 3.8 : 0) + waveBar * 3.8 + colSpectrum * 7.2;
+        const tickTopY = isRisingTide ? y + height + 12 : y + height + 9;
+        ctx.fillStyle = colHasMarks || isActiveColBot ? palette.hudAccent : palette.timelineBeam;
+        ctx.globalAlpha = colHasMarks
+          ? 0.72 + colSpectrum * 0.24
+          : isActiveColBot
+          ? 0.85
+          : 0.22 + colSpectrum * 0.44;
+        ctx.fillRect(dx - cellSize * 0.22, tickTopY, cellSize * 0.44, tickH);
       }
-      const distCols = Math.min(
-        Math.abs(c - activeBeatColBot),
-        boardCols - Math.abs(c - activeBeatColBot)
-      );
-      const waveBar = Math.max(0, 1 - distCols / 3) * (0.45 + beatPulse * 0.55);
-      const bandIdx = bands && bands.length > 0
-        ? Math.min(bands.length - 1, Math.floor((c / Math.max(1, boardCols)) * bands.length))
-        : -1;
-      const colSpectrum =
-        bandIdx >= 0 && bands
-          ? bands[bandIdx]
-          : c < boardCols * 0.33
-          ? subBass
-          : c < boardCols * 0.67
-          ? mid
-          : high;
-      const tickH =
-        2.5 + (colHasMarks ? 3.8 : 0) + waveBar * 3.8 + colSpectrum * 7.2;
-      const tickTopY = isRisingTide ? y + height + 12 : y + height + 9;
-      ctx.fillStyle = colHasMarks || isActiveColBot ? palette.hudAccent : palette.timelineBeam;
-      ctx.globalAlpha = colHasMarks
-        ? 0.72 + colSpectrum * 0.24
-        : isActiveColBot
-        ? 0.85
-        : 0.22 + colSpectrum * 0.44;
-      ctx.fillRect(dx - cellSize * 0.22, tickTopY, cellSize * 0.44, tickH);
+      ctx.restore();
     }
-    ctx.restore();
 
     if (activePiece) {
       const pieceRows = activePiece.cells.length;
@@ -4894,7 +5127,9 @@ export class IluminadoCanvasRenderer {
       const lockProgress =
         board.lockTimer > 0 ? Math.min(1, board.lockTimer / LOCK_DELAY_SEC) : 0;
 
-      if (gravDir === 'down' && smoothPieceY < 0) {
+      const suppressTopRails =
+        board.activeShift === 'dual_screen' || board.activeShift === 'clamshell';
+      if (!suppressTopRails && activePieceGravDir === 'down' && smoothPieceY < 0) {
         ctx.save();
         ctx.strokeStyle = palette.boardFrame;
         ctx.globalAlpha = 0.24;
@@ -4919,7 +5154,7 @@ export class IluminadoCanvasRenderer {
         ctx.lineTo(rightRailX, y);
         ctx.stroke();
         ctx.restore();
-      } else if (gravDir === 'up' && smoothPieceY + pieceRows > boardRows) {
+      } else if (!suppressTopRails && activePieceGravDir === 'up' && smoothPieceY + pieceRows > boardRows) {
         ctx.save();
         ctx.strokeStyle = palette.timelineBeam;
         ctx.globalAlpha = 0.34;
@@ -4934,7 +5169,7 @@ export class IluminadoCanvasRenderer {
         ctx.lineTo(rightRailX, botRailY);
         ctx.stroke();
         ctx.restore();
-      } else if (gravDir === 'right' && smoothPieceX < 0) {
+      } else if (activePieceGravDir === 'right' && smoothPieceX < 0) {
         ctx.save();
         ctx.strokeStyle = palette.timelineBeam;
         ctx.globalAlpha = 0.34;
@@ -4949,7 +5184,7 @@ export class IluminadoCanvasRenderer {
         ctx.lineTo(x, botRailY);
         ctx.stroke();
         ctx.restore();
-      } else if (gravDir === 'left' && smoothPieceX + pieceCols > boardCols) {
+      } else if (activePieceGravDir === 'left' && smoothPieceX + pieceCols > boardCols) {
         ctx.save();
         ctx.strokeStyle = palette.timelineBeam;
         ctx.globalAlpha = 0.34;
@@ -5047,17 +5282,17 @@ export class IluminadoCanvasRenderer {
         ctx.save();
         ctx.fillStyle = palette.hudAccent;
         ctx.globalAlpha = 0.82;
-        if (gravDir === 'down') {
+        if (activePieceGravDir === 'down') {
           const barW = cellSize * pieceCols * (1 - lockProgress);
           const barX = x + smoothPieceX * cellSize + (cellSize * pieceCols - barW) * 0.5;
           const barY = y + (smoothPieceY + pieceRows) * cellSize + 2;
           ctx.fillRect(barX, barY, barW, 2.5);
-        } else if (gravDir === 'up') {
+        } else if (activePieceGravDir === 'up') {
           const barW = cellSize * pieceCols * (1 - lockProgress);
           const barX = x + smoothPieceX * cellSize + (cellSize * pieceCols - barW) * 0.5;
           const barY = y + smoothPieceY * cellSize - 4.5;
           ctx.fillRect(barX, barY, barW, 2.5);
-        } else if (gravDir === 'right') {
+        } else if (activePieceGravDir === 'right') {
           const barH = cellSize * pieceRows * (1 - lockProgress);
           const barY = y + smoothPieceY * cellSize + (cellSize * pieceRows - barH) * 0.5;
           const barX = x + (smoothPieceX + pieceCols) * cellSize + 2;
@@ -5152,9 +5387,68 @@ export class IluminadoCanvasRenderer {
         this.drawDiamond(ctx, x + width - 42 + pip * 14, badgeY + 8, 4.2);
       }
       ctx.restore();
+    } else if (isSunMoon) {
+      const sunMoonStyle = getBlockStyle(palette, sunMoonActiveColor);
+      const badgeY = label ? y - 38 : y - 48;
+      ctx.save();
+      ctx.fillStyle = 'rgba(24, 20, 34, 0.84)';
+      this.roundRect(ctx, x + 2, badgeY, 68, 16, 4);
+      ctx.fill();
+      ctx.strokeStyle = sunMoonStyle.fill;
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+      ctx.fillStyle = sunMoonStyle.fill;
+      this.fillCircle(ctx, x + 13, badgeY + 8, 4);
+      ctx.fillStyle = '#faf6ee';
+      ctx.font = '700 9px "JetBrains Mono", monospace';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(sunMoonActiveColor === 0 ? 'SUN' : 'MOON', x + 22, badgeY + 8.5);
+      ctx.restore();
+    } else if (isChromaticWells && board.wellRegions && board.wellRegions.length >= 2) {
+      const leftColor = getBlockStyle(palette, chromaticFlip as CellColor);
+      const rightColor = getBlockStyle(palette, (1 - chromaticFlip) as CellColor);
+      const badgeY = label ? y - 38 : y - 48;
+      const drawWellChip = (reg: { minCol: number; maxCol: number }, swatch: string, txt: string) => {
+        const cx = x + ((reg.minCol + reg.maxCol + 1) * 0.5) * cellSize;
+        ctx.save();
+        ctx.fillStyle = 'rgba(24, 20, 34, 0.84)';
+        this.roundRect(ctx, cx - 22, badgeY, 44, 15, 4);
+        ctx.fill();
+        ctx.strokeStyle = swatch;
+        ctx.lineWidth = 1.1;
+        ctx.stroke();
+        ctx.fillStyle = swatch;
+        this.fillCircle(ctx, cx - 11, badgeY + 7.5, 3.6);
+        ctx.fillStyle = '#faf6ee';
+        ctx.font = '700 8.5px "JetBrains Mono", monospace';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(txt, cx - 3, badgeY + 8);
+        ctx.restore();
+      };
+      drawWellChip(board.wellRegions[0], leftColor.fill, 'CLR');
+      drawWellChip(board.wellRegions[1], rightColor.fill, 'CLR');
+    } else if (isLighthouse) {
+      const badgeY = label ? y - 38 : y - 48;
+      ctx.save();
+      ctx.fillStyle = 'rgba(24, 20, 34, 0.84)';
+      this.roundRect(ctx, x + 2, badgeY, 82, 16, 4);
+      ctx.fill();
+      ctx.strokeStyle = lighthouseStyle.fill;
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+      ctx.fillStyle = lighthouseStyle.fill;
+      this.fillCircle(ctx, x + 13, badgeY + 8, 4);
+      ctx.fillStyle = '#faf6ee';
+      ctx.font = '700 9px "JetBrains Mono", monospace';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('BEAM CLR', x + 22, badgeY + 8.5);
+      ctx.restore();
     }
 
-    const drawSweepCounterBadge = (beamX: number) => {
+    const drawSweepCounterBadge = (beamX: number, badgeBg?: string) => {
       if (board.sweepState.squaresThisSweep <= 0) return;
       const badgeText = `${board.sweepState.squaresThisSweep}`;
       const bx = Math.min(Math.max(beamX, x + 16), x + width - 16);
@@ -5166,7 +5460,7 @@ export class IluminadoCanvasRenderer {
       ctx.arc(bx, by, 16 + beatPulse * 3, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
-      ctx.fillStyle = palette.timelineBeam;
+      ctx.fillStyle = badgeBg ?? palette.timelineBeam;
       this.roundRect(ctx, bx - 13, by - 10, 26, 20, 6);
       ctx.fill();
       ctx.fillStyle = '#faf6ee';
@@ -5180,16 +5474,18 @@ export class IluminadoCanvasRenderer {
       x1: number,
       y1: number,
       x2: number,
-      y2: number
+      y2: number,
+      beamHex?: string,
+      coreHex?: string
     ) => {
-      ctx.strokeStyle = palette.timelineBeam;
+      ctx.strokeStyle = beamHex ?? palette.timelineBeam;
       ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.moveTo(x1, y1);
       ctx.lineTo(x2, y2);
       ctx.stroke();
 
-      ctx.strokeStyle = palette.squareHighlight;
+      ctx.strokeStyle = coreHex ?? palette.squareHighlight;
       ctx.globalAlpha = 0.45 + beatPulse * 0.25;
       ctx.lineWidth = 1;
       ctx.beginPath();
@@ -5199,7 +5495,12 @@ export class IluminadoCanvasRenderer {
       ctx.globalAlpha = 1;
     };
 
-    const drawSweepBeam = (beamX: number, showCounterBadge: boolean) => {
+    const drawSweepBeam = (
+      beamX: number,
+      showCounterBadge: boolean,
+      beamHex?: string,
+      coreHex?: string
+    ) => {
       ctx.save();
       const beamCol = Math.min(
         boardCols - 1,
@@ -5220,7 +5521,7 @@ export class IluminadoCanvasRenderer {
         4
       );
       if (hasBeamHit || aheadMarked > 0) {
-        ctx.strokeStyle = palette.squareHighlight;
+        ctx.strokeStyle = coreHex ?? palette.squareHighlight;
         ctx.lineWidth = 5 + Math.min(10, aheadMarked * 0.9);
         ctx.globalAlpha = Math.min(
           0.68,
@@ -5232,15 +5533,52 @@ export class IluminadoCanvasRenderer {
         ctx.stroke();
         ctx.globalAlpha = 1;
       }
-      drawSweepSegment(beamX, y - 8, beamX, y + height + 8);
-      ctx.fillStyle = palette.timelineBeam;
+      drawSweepSegment(beamX, y - 8, beamX, y + height + 8, beamHex, coreHex);
+      ctx.fillStyle = beamHex ?? palette.timelineBeam;
       this.drawDiamond(ctx, beamX, y - 9, 6 + beatPulse * 1.1);
       this.drawDiamond(ctx, beamX, y + height + 9, 6 + beatPulse * 1.1);
-      if (showCounterBadge) drawSweepCounterBadge(beamX);
+      if (showCounterBadge) drawSweepCounterBadge(beamX, beamHex);
       ctx.restore();
     };
 
-    if (isSplitHalfSweep) {
+    if (isLighthouse) {
+      const originX = x + width * 0.5;
+      const originY = y + height;
+      const reach = Math.hypot(width, height) * 1.05;
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x - 4, y - 4, width + 8, height + 8);
+      ctx.clip();
+      const rayEndX = originX + Math.cos(lighthouseAngle) * reach;
+      const rayEndY = originY - Math.sin(lighthouseAngle) * reach;
+      drawSweepSegment(
+        originX,
+        originY,
+        rayEndX,
+        rayEndY,
+        lighthouseStyle.fill,
+        lighthouseStyle.highlight
+      );
+      ctx.restore();
+
+      // Floor lighthouse turret base
+      ctx.save();
+      ctx.fillStyle = '#241f31';
+      ctx.strokeStyle = lighthouseStyle.fill;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(originX, originY + 2, 11 + beatPulse * 1.2, Math.PI, 0);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = lighthouseStyle.highlight;
+      this.fillCircle(ctx, originX, originY - 2, 3.8 + beatPulse * 0.6);
+      drawSweepCounterBadge(
+        Math.min(x + width - 18, Math.max(x + 18, originX + Math.cos(lighthouseAngle) * (height * 0.5))),
+        lighthouseStyle.fill
+      );
+      ctx.restore();
+    } else if (isSplitHalfSweep) {
       ctx.save();
       drawSweepSegment(tlX, y - 8, tlX, splitY);
       ctx.fillStyle = palette.timelineBeam;
@@ -5272,6 +5610,19 @@ export class IluminadoCanvasRenderer {
       this.drawDiamond(ctx, botX, y + height + 9, 6 + beatPulse * 1.1);
       drawSweepCounterBadge(topX);
       ctx.restore();
+    } else if (isDuelingBeams) {
+      drawSweepBeam(tlX, true, palette.blockA.fill, palette.blockA.highlight);
+      drawSweepBeam(duelingRtlX, false, palette.blockB.fill, palette.blockB.highlight);
+    } else if (isTrichromaSweep) {
+      drawSweepBeam(tlX, true, palette.blockA.fill, palette.blockA.highlight);
+      drawSweepBeam(tlTri1X, false, palette.blockB.fill, palette.blockB.highlight);
+      drawSweepBeam(tlTri2X, false, palette.blockC.fill, palette.blockC.highlight);
+    } else if (isSunMoon) {
+      const st = getBlockStyle(palette, sunMoonActiveColor);
+      drawSweepBeam(tlX, true, st.fill, st.highlight);
+    } else if (isChromaticWells && chromaticActiveColor !== null) {
+      const st = getBlockStyle(palette, chromaticActiveColor);
+      drawSweepBeam(tlX, true, st.fill, st.highlight);
     } else {
       drawSweepBeam(tlX, true);
       if (isTwinSweep) {
@@ -5877,7 +6228,9 @@ export class IluminadoCanvasRenderer {
     board: BoardState,
     skin: SkinConfig,
     timeSec: number,
-    beatPhase: number
+    beatPhase: number,
+    row: number = -1,
+    col: number = -1
   ): void {
     const styleType = cell.obstacleStyle ?? 'stone';
     const { palette } = skin;
@@ -5887,6 +6240,8 @@ export class IluminadoCanvasRenderer {
     const by = y + pad;
     const bw = Math.max(2, size - pad * 2);
     const bh = Math.max(2, size - pad * 2);
+    const boardRows = board.grid.length;
+    const boardCols = board.grid[0]?.length ?? board.cols ?? BOARD_COLS;
 
     const boardOpaqueHex = compositeColorOnHex(palette.boardSurface, palette.skyMid);
     const darkBoard = getWcagLuminance(boardOpaqueHex) < 0.25;
@@ -5929,6 +6284,113 @@ export class IluminadoCanvasRenderer {
       const r = Math.max(1.2, size * 0.065);
       ctx.fillRect(bx + 3, by + 3, r, r);
       ctx.fillRect(bx + bw - 3 - r, by + 3, r, r);
+    } else if (styleType === 'windmill') {
+      const wm = board.windmillState;
+      const isHub = wm !== null && wm !== undefined && col === wm.cx && row === wm.cy;
+      const grad = ctx.createLinearGradient(bx, by, bx + bw, by + bh);
+      grad.addColorStop(0, isHub ? '#d4b475' : '#6f6782');
+      grad.addColorStop(1, isHub ? '#755b32' : '#322c42');
+      ctx.fillStyle = grad;
+      this.roundRect(ctx, bx + 0.5, by + 0.5, bw - 1, bh - 1, Math.max(2, size * 0.16));
+      ctx.fill();
+      if (isHub) {
+        const cx = bx + bw * 0.5;
+        const cy = by + bh * 0.5;
+        ctx.fillStyle = '#261e30';
+        this.fillCircle(ctx, cx, cy, size * 0.27);
+        ctx.strokeStyle = palette.hudAccent;
+        ctx.lineWidth = 1.6;
+        ctx.beginPath();
+        ctx.arc(cx, cy, size * 0.28, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = '#faf6ee';
+        this.fillCircle(ctx, cx, cy, size * 0.11 + beatGlow * 1.2);
+      } else {
+        ctx.strokeStyle = '#e5cf99';
+        ctx.globalAlpha = 0.65;
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        if (wm?.orientation === 'vertical') {
+          ctx.moveTo(bx + bw * 0.5, by + 2);
+          ctx.lineTo(bx + bw * 0.5, by + bh - 2);
+        } else {
+          ctx.moveTo(bx + 2, by + bh * 0.5);
+          ctx.lineTo(bx + bw - 2, by + bh * 0.5);
+        }
+        ctx.stroke();
+      }
+      ctx.strokeStyle = darkBoard ? '#b8adcf' : '#211c2b';
+      ctx.globalAlpha = 0.85;
+      ctx.lineWidth = 1.1;
+      this.roundRect(ctx, bx + 0.5, by + 0.5, bw - 1, bh - 1, Math.max(2, size * 0.16));
+      ctx.stroke();
+    } else if (styleType === 'piston') {
+      const isLeft = col >= 0 ? col < boardCols * 0.5 : true;
+      const ps = board.pistonState;
+      const isHead =
+        ps && col >= 0
+          ? isLeft
+            ? col === ps.leftDepth - 1
+            : col === boardCols - ps.rightDepth
+          : true;
+      ctx.fillStyle = '#2d283b';
+      ctx.fillRect(bx, by + bh * 0.22, bw, bh * 0.56);
+      ctx.fillStyle = '#756e8a';
+      ctx.fillRect(bx, by + bh * 0.34, bw, bh * 0.16);
+      if (isHead) {
+        const plateW = Math.max(4, bw * 0.36);
+        const plateX = isLeft ? bx + bw - plateW : bx;
+        const pGrad = ctx.createLinearGradient(plateX, by, plateX + plateW, by);
+        pGrad.addColorStop(0, isLeft ? '#8f87a6' : '#d49a6a');
+        pGrad.addColorStop(1, isLeft ? '#d49a6a' : '#8f87a6');
+        ctx.fillStyle = pGrad;
+        ctx.fillRect(plateX, by, plateW, bh);
+        ctx.fillStyle = palette.hudAccent;
+        ctx.fillRect(isLeft ? plateX + plateW - 2 : plateX, by + 1, 2, bh - 2);
+      }
+      ctx.strokeStyle = darkBoard ? '#9e93ba' : '#1f1a29';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(bx + 0.5, by + 0.5, bw - 1, bh - 1);
+    } else if (styleType === 'stalactite') {
+      const belowSame =
+        row >= 0 &&
+        col >= 0 &&
+        row + 1 < boardRows &&
+        board.grid[row + 1]?.[col]?.obstacleStyle === 'stalactite';
+      if (!belowSame) {
+        const sGrad = ctx.createLinearGradient(bx, by, bx + bw, by + bh);
+        sGrad.addColorStop(0, '#6a617d');
+        sGrad.addColorStop(1, '#312b3f');
+        ctx.fillStyle = sGrad;
+        ctx.beginPath();
+        ctx.moveTo(bx, by);
+        ctx.lineTo(bx + bw, by);
+        ctx.lineTo(bx + bw * 0.82, by + bh * 0.48);
+        ctx.lineTo(bx + bw * 0.5, by + bh);
+        ctx.lineTo(bx + bw * 0.18, by + bh * 0.48);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(250, 246, 238, 0.32)';
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(bx + 1, by + 1);
+        ctx.lineTo(bx + bw * 0.5, by + bh - 1);
+        ctx.stroke();
+      } else {
+        const grad = ctx.createLinearGradient(bx, by, bx + bw, by + bh);
+        grad.addColorStop(0, '#5a516c');
+        grad.addColorStop(1, '#2f293b');
+        ctx.fillStyle = grad;
+        ctx.fillRect(bx, by, bw, bh);
+        ctx.strokeStyle = 'rgba(250, 246, 238, 0.2)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(bx + bw * 0.35, by);
+        ctx.lineTo(bx + bw * 0.45, by + bh);
+        ctx.stroke();
+        ctx.strokeStyle = darkBoard ? '#9287ad' : '#1f1b29';
+        ctx.strokeRect(bx + 0.5, by + 0.5, bw - 1, bh - 1);
+      }
     } else if (styleType === 'bumper') {
       const shimmer = 0.12 + beatGlow * 0.24;
       const grad = ctx.createLinearGradient(bx, by, bx + bw, by + bh);

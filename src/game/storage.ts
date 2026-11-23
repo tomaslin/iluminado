@@ -105,6 +105,29 @@ export const NEW_V7_SHIFTS: ShiftType[] = [
   'metronome_charge',
 ];
 
+export const NEW_V8_SHIFTS: ShiftType[] = [
+  'twin_wells',
+  'dual_screen',
+  'clamshell',
+  'triptych',
+  'chromatic_wells',
+  'shell_game',
+  'dueling_beams',
+  'sun_moon',
+  'trichroma_beams',
+  'lighthouse',
+  'diamond_arena',
+  'cross_arena',
+  'hillside_ramp',
+  'windmill',
+  'archipelago',
+  'piston_walls',
+  'stalactites',
+  'brick_pentomino',
+  'brick_colossus',
+  'kaleidoscope_brick',
+];
+
 function migrateEnabledShifts(
   parsed: Partial<SavedProgress> & { shiftCatalogVersion?: number }
 ): ShiftType[] {
@@ -119,7 +142,7 @@ function migrateEnabledShifts(
     )
   );
   const ver = parsed.shiftCatalogVersion ?? 1;
-  if (ver >= 7 || filtered.length === 0) {
+  if (ver >= 8 || filtered.length === 0) {
     return filtered;
   }
   const merged = new Set<ShiftType>(filtered);
@@ -148,7 +171,12 @@ function migrateEnabledShifts(
       merged.add(s);
     }
   }
-  for (const s of NEW_V7_SHIFTS) {
+  if (ver < 7) {
+    for (const s of NEW_V7_SHIFTS) {
+      merged.add(s);
+    }
+  }
+  for (const s of NEW_V8_SHIFTS) {
     merged.add(s);
   }
   return Array.from(merged);
@@ -211,7 +239,7 @@ export function saveProgress(progress: SavedProgress): void {
   try {
     localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ ...progress, shiftCatalogVersion: 7 })
+      JSON.stringify({ ...progress, shiftCatalogVersion: 8 })
     );
   } catch {}
 }

@@ -10,10 +10,13 @@ export type PieceShapeMode =
   | 'l_trio_2x2'
   | 'rect_3x2'
   | 'tetromino'
+  | 'pentomino'
+  | 'colossus'
   | 'blocked_2x2'
   | 'prism_wild_2x2';
 
 export type TetrominoKind = 'I' | 'O' | 'T' | 'S' | 'Z' | 'J' | 'L';
+export type PentominoKind = 'F' | 'I' | 'L' | 'P' | 'N' | 'T' | 'U' | 'V' | 'W' | 'X' | 'Y' | 'Z';
 
 export type ShiftType =
   | 'rotate_90'
@@ -46,6 +49,9 @@ export type ShiftType =
   | 'brick_l_trio'
   | 'brick_3x2'
   | 'brick_tetromino'
+  | 'brick_pentomino'
+  | 'brick_colossus'
+  | 'kaleidoscope_brick'
   | 'brick_blocked'
   | 'chameleon_rotate'
   | 'prism_wild_bricks'
@@ -67,7 +73,24 @@ export type ShiftType =
   | 'ceiling_press'
   | 'frost_tiles'
   | 'stash_hold'
-  | 'metronome_charge';
+  | 'metronome_charge'
+  | 'twin_wells'
+  | 'dual_screen'
+  | 'clamshell'
+  | 'triptych'
+  | 'chromatic_wells'
+  | 'shell_game'
+  | 'dueling_beams'
+  | 'sun_moon'
+  | 'trichroma_beams'
+  | 'lighthouse'
+  | 'diamond_arena'
+  | 'cross_arena'
+  | 'hillside_ramp'
+  | 'windmill'
+  | 'archipelago'
+  | 'piston_walls'
+  | 'stalactites';
 
 export type ShiftPolarity = 'boon' | 'bane' | 'neutral';
 
@@ -87,7 +110,36 @@ export type ObstacleVisualStyle =
   | 'sawtooth'
   | 'blocked'
   | 'spring'
-  | 'crumble';
+  | 'crumble'
+  | 'windmill'
+  | 'piston'
+  | 'stalactite';
+
+export interface BoardWellRegion {
+  minCol: number;
+  maxCol: number;
+  minRow: number;
+  maxRow: number;
+  gravity: GravityDirection;
+  stagingMinRow?: number;
+  stagingMaxRow?: number;
+}
+
+export interface WindmillState {
+  cx: number;
+  cy: number;
+  armLength: number;
+  orientation: 'horizontal' | 'vertical';
+}
+
+export interface PistonWallsState {
+  leftDepth: number;
+  rightDepth: number;
+  maxDepth: number;
+  startRow: number;
+  endRow: number;
+  dir: -1 | 1;
+}
 
 export interface PatrollingBumperState {
   x: number;
@@ -126,6 +178,7 @@ export interface Cell {
   chainMarked: boolean;
   inSquare: boolean;
   pendingClear: boolean;
+  pendingClearColor?: CellColor;
   sweptCol: boolean;
   fallOffset: number;
   landFlash: number;
@@ -149,6 +202,7 @@ export interface Piece {
   cells: PieceCell[][];
   shapeMode?: PieceShapeMode;
   tetrominoKind?: TetrominoKind;
+  pentominoKind?: PentominoKind;
   springBounced?: boolean;
 }
 
@@ -483,6 +537,12 @@ export interface BoardState {
   ceilingLockRows?: number;
   risingTideRows?: number;
   beatChargeAccum?: number;
+  wellRegions?: BoardWellRegion[];
+  activeWellIndex?: number;
+  sweepPassCount?: number;
+  lighthouseAngle?: number;
+  windmillState?: WindmillState | null;
+  pistonState?: PistonWallsState | null;
   score: number;
   squaresClearedTotal: number;
   stageSquaresCleared: number;
@@ -555,6 +615,9 @@ export interface HudSnapshot {
   sweepBeats?: number;
   pieceShapeMode?: PieceShapeMode;
   colorCount?: 2 | 3;
+  activeWellIndex?: number;
+  wellCount?: number;
+  sweepPassCount?: number;
   enabledShiftCount: number;
   challengeVariant: ChallengeVariant;
   score: number;
